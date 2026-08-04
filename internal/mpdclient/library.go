@@ -44,3 +44,12 @@ func (c *Client) Search(query string) ([]Song, error) {
 	}
 	return parseSongs(list), nil
 }
+
+// AllSongs returns every track in the library.
+func (c *Client) AllSongs() ([]Song, error) {
+	list, err := call(c, func(conn *mpd.Client) ([]mpd.Attrs, error) { return conn.ListAllInfo("") })
+	if err != nil {
+		return nil, err
+	}
+	return parseSongs(list), nil
+}
