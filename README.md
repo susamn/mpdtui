@@ -23,9 +23,11 @@ single-line inline player for a shell or tmux pane.
 ## Demo
 
 <p align="center">
-  <video src="https://github.com/susamn/mpdtui/raw/main/assets/demo.webm" controls width="720">
-    Your browser doesn't support inline video -- <a href="assets/demo.webm">download the clip</a> instead.
-  </video>
+  <a href="https://github.com/susamn/mpdtui/raw/main/assets/demo.webm">
+    <img src="assets/demo-thumb.png" width="720" alt="mpdtui demo -- click to play the video">
+  </a>
+  <br>
+  <sub>Click the screenshot to play the demo (GitHub doesn't inline-render repo video files).</sub>
 </p>
 
 ## Features
