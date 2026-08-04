@@ -19,6 +19,11 @@ const (
 	modeOverlay
 )
 
+// flashDuration is how long a transient hint-bar message (an error, a
+// "added N tracks" confirmation, etc.) stays up before the hint bar
+// reverts to showing keybindings again.
+const flashDuration = 3 * time.Second
+
 // App is the full panel-based TUI application.
 type App struct {
 	tv      *tview.Application
@@ -40,6 +45,8 @@ type App struct {
 	mode               int
 	beforeOverlayFocus tview.Primitive
 	closeOverlay       func()
+
+	msgSeq int
 
 	done chan struct{}
 }
@@ -207,11 +214,27 @@ func (a *App) focusPanelPrimitive(p tview.Primitive) {
 }
 
 func (a *App) showError(err error) {
-	a.hintBar.SetText("[red]error: " + err.Error() + "[-]")
+	a.flash("[red]error: " + err.Error() + "[-]")
 }
 
 func (a *App) showMessage(msg string) {
-	a.hintBar.SetText("[yellow]" + msg + "[-]")
+	a.flash("[yellow]" + msg + "[-]")
+}
+
+// flash shows text in the hint bar, then reverts to the keybinding hints
+// after flashDuration -- unless a newer flash (or a focus change, which
+// calls updateHintBar directly) has already superseded it.
+func (a *App) flash(text string) {
+	a.msgSeq++
+	seq := a.msgSeq
+	a.hintBar.SetText(text)
+	time.AfterFunc(flashDuration, func() {
+		a.tv.QueueUpdateDraw(func() {
+			if a.msgSeq == seq {
+				a.updateHintBar()
+			}
+		})
+	})
 }
 
 func (a *App) updateHintBar() {
