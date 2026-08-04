@@ -28,6 +28,11 @@
         font-weight="700" text-anchor="middle" fill="url(#gold)"
         stroke="#6b5321" stroke-width="2">MPD</text>
 
+  <!-- "tui" overlay, completing "mpdtui" -->
+  <text x="410" y="290" font-family="Georgia, 'Times New Roman', serif" font-size="60"
+        font-style="italic" font-weight="600" text-anchor="end" fill="#ffffff"
+        stroke="#132928" stroke-width="1" paint-order="stroke">tui</text>
+
   <!-- hjkl dials -->
   <g font-family="Georgia, serif" font-size="24" font-weight="600" text-anchor="middle" fill="#3a2c11">
     <g stroke="#6b5321" stroke-width="2">
