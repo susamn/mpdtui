@@ -1,2 +1,3 @@
 /mpdtui
 *.md
+!README.md
