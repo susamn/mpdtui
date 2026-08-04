@@ -66,7 +66,7 @@ Press `?` inside the full UI for the in-app keybinding list.
 | `s` | Stop |
 | `n` / `p` | Next / previous track |
 | `,` / `.` | Seek -5s / +5s |
-| `-` / `+` | Volume down / up |
+| `-` / `=` | Volume down / up |
 | `z` | Toggle random (shuffle) |
 | `x` | Toggle repeat |
 | `c` | Toggle consume |
@@ -93,7 +93,7 @@ Press `?` inside the full UI for the in-app keybinding list.
 | Queue | `D` | Clear entire queue (confirm) |
 
 **Mini mode** (`-mini`): `Space` play/pause, `n`/`p` next/prev, `s` stop,
-`-`/`+` volume, `q`/`Ctrl-C` quit.
+`-`/`=` volume, `q`/`Ctrl-C` quit.
 
 ## Test
 

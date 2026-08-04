@@ -111,7 +111,9 @@ func handleKey(client *mpdclient.Client, b byte) bool {
 		client.Previous()
 	case '-':
 		client.ChangeVolume(-5)
-	case '+':
+	case '=':
+		// Same physical key as '+' on a US layout, without needing
+		// shift -- matches '-' also needing no modifier.
 		client.ChangeVolume(5)
 	case 'q', 3: // 3 = Ctrl-C
 		return true

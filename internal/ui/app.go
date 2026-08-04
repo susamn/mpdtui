@@ -247,7 +247,7 @@ func (a *App) updateHintBar() {
 	case a.queue.table:
 		panelHints = "Enter:play  d:remove  J/K:move  D:clear"
 	}
-	global := "Space:play/pause  s:stop  n/p:next/prev  ,/.:seek  -/+:vol  z:shuffle  x:repeat  /:search  ?:help  Tab/1-3:panels  q:quit"
+	global := "Space:play/pause  s:stop  n/p:next/prev  ,/.:seek  -/=:vol  z:shuffle  x:repeat  /:search  ?:help  Tab/1-3:panels  q:quit"
 	a.hintBar.SetText("[::b]" + panelHints + "[-:-:-]  |  " + global)
 }
 

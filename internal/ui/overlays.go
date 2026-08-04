@@ -109,7 +109,7 @@ const helpText = `[::b]Global[-:-:-]
   s              stop
   n / p          next / previous track
   , / .          seek -5s / +5s
-  - / +          volume down / up
+  - / =          volume down / up
   z              toggle shuffle (random)
   x              toggle repeat
   c              toggle consume

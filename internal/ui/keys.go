@@ -44,7 +44,9 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 		case '-':
 			a.changeVolume(-5)
 			return nil
-		case '+':
+		case '=':
+			// Same physical key as '+' on a US layout, without needing
+			// shift -- matches '-' also needing no modifier.
 			a.changeVolume(5)
 			return nil
 		case 'z':
