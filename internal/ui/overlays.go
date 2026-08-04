@@ -69,6 +69,7 @@ func (a *App) openSearch() {
 
 func (a *App) handleSavePlaylist() {
 	if a.tv.GetFocus() != a.playlists.list {
+		a.invalidKey("S")
 		return
 	}
 	a.openInput("Save queue as playlist: ", "", func(name string) {

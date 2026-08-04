@@ -99,6 +99,13 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			return nil
 		case 'j', 'k', 'g', 'G':
 			return translateVimMotion(event, a.tv.GetFocus())
+		case 'h', 'l':
+			// Table (Queue) handles these natively for horizontal
+			// scroll; harmless no-op on List (Library/Playlists).
+			return event
+		default:
+			a.invalidKey(string(event.Rune()))
+			return nil
 		}
 	}
 
@@ -138,6 +145,14 @@ func translateVimMotion(event *tcell.EventKey, focus tview.Primitive) *tcell.Eve
 		return tcell.NewEventKey(tcell.KeyEnd, 0, tcell.ModNone)
 	}
 	return event
+}
+
+// invalidKey flashes feedback for a keypress that has no meaning in the
+// current context (an unbound key, or a panel-local key pressed while
+// the wrong panel is focused), so it's visible rather than a silent
+// no-op.
+func (a *App) invalidKey(key string) {
+	a.flash("[red]'" + key + "' has no action here[-]")
 }
 
 func (a *App) togglePlayPause() {
@@ -240,6 +255,8 @@ func (a *App) handleAdd() {
 		}
 		a.queue.refresh()
 		a.showMessage("appended playlist " + name)
+	default:
+		a.invalidKey("a")
 	}
 }
 
@@ -268,11 +285,14 @@ func (a *App) handleDelete() {
 			return
 		}
 		a.queue.refresh()
+	default:
+		a.invalidKey("d")
 	}
 }
 
 func (a *App) handleClearQueue() {
 	if a.tv.GetFocus() != a.queue.table {
+		a.invalidKey("D")
 		return
 	}
 	a.confirm("Clear the entire queue?", func() {
@@ -286,6 +306,11 @@ func (a *App) handleClearQueue() {
 
 func (a *App) handleQueueMove(delta int) {
 	if a.tv.GetFocus() != a.queue.table {
+		if delta > 0 {
+			a.invalidKey("J")
+		} else {
+			a.invalidKey("K")
+		}
 		return
 	}
 	song, ok := a.queue.selectedSong()
