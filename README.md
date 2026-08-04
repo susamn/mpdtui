@@ -20,6 +20,14 @@ Bordered panels, single-key contextual actions, vim-style navigation — no
 mouse required. Two run modes: a full panel UI, and a lightweight
 single-line inline player for a shell or tmux pane.
 
+## Demo
+
+<p align="center">
+  <video src="https://github.com/susamn/mpdtui/raw/main/assets/demo.webm" controls width="720">
+    Your browser doesn't support inline video -- <a href="assets/demo.webm">download the clip</a> instead.
+  </video>
+</p>
+
 ## Features
 
 - **Library** — browse Artist → Album → Track, or free-text search
