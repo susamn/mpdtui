@@ -22,6 +22,9 @@ func newPlaylistsPanel(app *App) *playlistsPanel {
 	list := tview.NewList()
 	list.ShowSecondaryText(false)
 	list.SetHighlightFullLine(true)
+	list.SetSelectedFocusOnly(true)
+	list.SetSelectedTextColor(colorSelectedFg)
+	list.SetSelectedBackgroundColor(colorSelectedBg)
 	list.SetBorder(true)
 	list.SetTitle(" Playlists ")
 	return &playlistsPanel{app: app, list: list}

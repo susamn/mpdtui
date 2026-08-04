@@ -35,6 +35,9 @@ func newLibraryPanel(app *App) *libraryPanel {
 	list := tview.NewList()
 	list.ShowSecondaryText(false)
 	list.SetHighlightFullLine(true)
+	list.SetSelectedFocusOnly(true)
+	list.SetSelectedTextColor(colorSelectedFg)
+	list.SetSelectedBackgroundColor(colorSelectedBg)
 	list.SetBorder(true)
 	list.SetTitle(" Library ")
 	return &libraryPanel{app: app, list: list}

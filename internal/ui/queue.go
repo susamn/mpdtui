@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
@@ -22,6 +23,7 @@ func newQueuePanel(app *App) *queuePanel {
 	t := tview.NewTable()
 	t.SetBorder(true).SetTitle(" Queue ")
 	t.SetSelectable(true, false)
+	t.SetSelectedStyle(tcell.StyleDefault.Background(colorSelectedBg).Foreground(colorSelectedFg))
 	t.SetSelectedFunc(func(row, _ int) {
 		if row < 0 || row >= len(q.songs) {
 			return

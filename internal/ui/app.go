@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
@@ -81,12 +82,19 @@ func Run(client *mpdclient.Client) error {
 }
 
 func (a *App) build() {
+	applyTheme()
+
 	a.library = newLibraryPanel(a)
 	a.playlists = newPlaylistsPanel(a)
 	a.queue = newQueuePanel(a)
 
+	wireFocusColors(a.library.list)
+	wireFocusColors(a.playlists.list)
+	wireFocusColors(a.queue.table)
+
 	a.nowPlaying = tview.NewTextView().SetDynamicColors(true)
-	a.nowPlaying.SetBorder(true).SetTitle(" Now Playing ")
+	a.nowPlaying.SetBorder(true).SetTitle(" Now Playing ").SetTitleColor(tcell.ColorYellow)
+	a.nowPlaying.SetBorderColor(tcell.ColorYellow)
 
 	a.hintBar = tview.NewTextView().SetDynamicColors(true)
 
