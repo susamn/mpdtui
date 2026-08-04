@@ -13,6 +13,27 @@ import (
 	"mpdtui/internal/mpdclient"
 )
 
+// Colors mirror internal/ui/theme.go's scheme (kept independent per
+// DEPENDENCY.md rather than imported -- picker has no dependency on ui).
+const (
+	colorAccent     = tcell.ColorGreen
+	colorSelectedBg = tcell.ColorBlue
+	colorSelectedFg = tcell.ColorYellow
+)
+
+// applyTheme overrides tview's global defaults, which otherwise force a
+// pure black background and ANSI white text irrespective of the user's
+// actual terminal theme.
+func applyTheme() {
+	tview.Styles.PrimitiveBackgroundColor = tcell.ColorDefault
+	tview.Styles.ContrastBackgroundColor = tcell.ColorDefault
+	tview.Styles.MoreContrastBackgroundColor = tcell.ColorDefault
+	tview.Styles.BorderColor = tcell.ColorDefault
+	tview.Styles.TitleColor = tcell.ColorDefault
+	tview.Styles.GraphicsColor = tcell.ColorDefault
+	tview.Styles.PrimaryTextColor = tcell.ColorDefault
+}
+
 // RunPlaylistPicker fuzzy-searches stored playlists. Selecting one
 // (Enter) clears the queue and plays it. Cancelling (Esc/Ctrl-C) does
 // nothing.
@@ -77,14 +98,19 @@ func RunTrackPicker(client *mpdclient.Client) error {
 // pickString shows an fzf-style fuzzy finder over labels and returns the
 // index into labels the user picked, or -1 if they cancelled.
 func pickString(title string, labels []string) (int, error) {
+	applyTheme()
 	app := tview.NewApplication()
 
 	list := tview.NewList()
 	list.ShowSecondaryText(false)
 	list.SetHighlightFullLine(true)
+	list.SetSelectedTextColor(colorSelectedFg)
+	list.SetSelectedBackgroundColor(colorSelectedBg)
+	list.SetBorderColor(colorAccent)
 	list.SetBorder(true).SetTitle(fmt.Sprintf(" %s ", title))
 
 	input := tview.NewInputField().SetLabel("> ")
+	input.SetBorderColor(colorAccent)
 	input.SetBorder(true)
 
 	var order []int

@@ -6,16 +6,17 @@ import (
 )
 
 // Colors chosen to read like lazygit's default theme: a green accent on
-// the focused panel's border/title, a blue highlight on the selected
-// line, and everything else left at the terminal's own default
-// foreground/background rather than tview's hard-coded black-on-white --
-// that hard-coding is what was making text look flatly grey regardless
-// of the user's terminal color scheme.
+// the focused panel's border/title, a blue highlight with yellow text on
+// the selected line (high-contrast, easy to spot at a glance), and
+// everything else left at the terminal's own default foreground/
+// background rather than tview's hard-coded black-on-white -- that
+// hard-coding is what was making text look flatly grey regardless of the
+// user's terminal color scheme.
 const (
 	colorActiveBorder   = tcell.ColorGreen
 	colorInactiveBorder = tcell.ColorDefault
 	colorSelectedBg     = tcell.ColorBlue
-	colorSelectedFg     = tcell.ColorWhite
+	colorSelectedFg     = tcell.ColorYellow
 )
 
 // applyTheme overrides tview's global defaults, which otherwise force a
