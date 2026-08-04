@@ -37,6 +37,18 @@ single-line inline player for a shell or tmux pane.
 
 ## Install
 
+### Homebrew
+
+```bash
+brew tap susamn/mpdtui
+brew install mpdtui
+```
+
+(First install of a third-party tap: if Homebrew refuses to load the
+formula as untrusted, run `brew trust susamn/mpdtui` first.)
+
+### From source
+
 ```bash
 go build -o mpdtui ./cmd/mpdtui
 ```
