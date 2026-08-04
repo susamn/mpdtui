@@ -245,9 +245,9 @@ func (a *App) updateHintBar() {
 	case a.playlists.list:
 		panelHints = "Enter:load+play  a:append  d:delete  S:save queue"
 	case a.queue.table:
-		panelHints = "Enter:play  d:remove  J/K:move  D:clear"
+		panelHints = "Enter:play  d:remove  J/K:move"
 	}
-	global := "Space:play/pause  s:stop  n/p:next/prev  ,/.:seek  -/=:vol  z:shuffle  x:repeat  /:search  ?:help  Tab/1-3:panels  q:quit"
+	global := "Space:play/pause  s:stop  n/p:next/prev  ,/.:seek  -/=:vol  z:shuffle  x:repeat  D:clear queue  /:search  ?:help  Tab/1-3:panels  q:quit"
 	a.hintBar.SetText("[::b]" + panelHints + "[-:-:-]  |  " + global)
 }
 

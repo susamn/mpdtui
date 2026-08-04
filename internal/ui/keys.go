@@ -290,11 +290,11 @@ func (a *App) handleDelete() {
 	}
 }
 
+// handleClearQueue is global (like the other transport controls) rather
+// than gated to the Queue panel: it doesn't depend on a selection, and
+// gating it made the binding look like it didn't exist when pressed
+// from any other panel.
 func (a *App) handleClearQueue() {
-	if a.tv.GetFocus() != a.queue.table {
-		a.invalidKey("D")
-		return
-	}
 	a.confirm("Clear the entire queue?", func() {
 		if err := a.client.QueueClear(); err != nil {
 			a.showError(err)

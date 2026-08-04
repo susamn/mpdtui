@@ -115,6 +115,7 @@ const helpText = `[::b]Global[-:-:-]
   x              toggle repeat
   c              toggle consume
   Z              toggle single
+  D              clear entire queue (confirm)
   Tab, 1/2/3     cycle / jump focus between panels
   /              search (contextual: Library or Playlists)
   ?              this help
@@ -136,5 +137,4 @@ const helpText = `[::b]Global[-:-:-]
   Enter          play selected track
   d              remove selected track
   J / K          move selected track down / up
-  D              clear entire queue (confirm)
 `

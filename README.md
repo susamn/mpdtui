@@ -71,6 +71,7 @@ Press `?` inside the full UI for the in-app keybinding list.
 | `x` | Toggle repeat |
 | `c` | Toggle consume |
 | `Z` | Toggle single |
+| `D` | Clear entire queue (confirm) |
 | `Tab`, `1`/`2`/`3` | Cycle / jump focus between panels |
 | `/` | Search (contextual: Library or Playlists) |
 | `?` | Help overlay |
@@ -90,7 +91,6 @@ Press `?` inside the full UI for the in-app keybinding list.
 | Queue | `Enter` | Play selected track |
 | Queue | `d` | Remove selected track |
 | Queue | `J` / `K` | Move selected track down / up |
-| Queue | `D` | Clear entire queue (confirm) |
 
 **Mini mode** (`-mini`): `Space` play/pause, `n`/`p` next/prev, `s` stop,
 `-`/`=` volume, `q`/`Ctrl-C` quit.
