@@ -28,8 +28,11 @@ single-line inline player for a shell or tmux pane.
 - **Now Playing bar** — live progress, volume, repeat/random/single/consume
   flags, updated instantly via MPD's `idle` protocol (stays in sync even
   when playback changes from another client, e.g. `mpc`)
-- **Lightweight inline mode** (`-mini`) — a single status line, no
-  alt-screen takeover, for tmux status panes or a quick glance
+- **Lightweight inline mode** (`-mini`) — two live status lines (queue/
+  playlist counts, then track/progress), no alt-screen takeover, for
+  tmux status panes or a quick glance
+- **Fuzzy pickers** (`-p` / `-t`) — fzf-style playlist/track search from
+  the shell, no panels involved
 - Confirmation prompts on destructive actions (clear queue, delete playlist)
 
 ## Install
@@ -44,8 +47,12 @@ Requires Go 1.26+ and a reachable MPD server.
 
 ```bash
 ./mpdtui          # full panel UI
-./mpdtui -mini    # lightweight inline player (single status line)
+./mpdtui -mini    # lightweight inline player
+./mpdtui -p       # fuzzy-search playlists; Enter clears the queue and plays it
+./mpdtui -t       # fuzzy-search tracks; Enter adds it to the queue and plays it
 ```
+
+`-mini`, `-p`, and `-t` are mutually exclusive.
 
 Connects using the same environment variables as `mpc`:
 

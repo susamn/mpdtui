@@ -18,15 +18,16 @@ const (
 
 // Status is the subset of MPD's status response the UI needs.
 type Status struct {
-	State    State
-	Volume   int // 0-100, or -1 if unknown
-	Repeat   bool
-	Random   bool
-	Single   bool
-	Consume  bool
-	Elapsed  time.Duration
-	Duration time.Duration
-	SongID   int // currently playing/selected queue song id, -1 if none
+	State          State
+	Volume         int // 0-100, or -1 if unknown
+	Repeat         bool
+	Random         bool
+	Single         bool
+	Consume        bool
+	Elapsed        time.Duration
+	Duration       time.Duration
+	SongID         int // currently playing/selected queue song id, -1 if none
+	PlaylistLength int // number of tracks in the queue
 }
 
 // Song is a single track, either from the queue, the library, or a
@@ -67,17 +68,19 @@ func parseStatus(a mpd.Attrs) Status {
 	}
 	elapsed, _ := strconv.ParseFloat(a["elapsed"], 64)
 	dur, _ := strconv.ParseFloat(a["duration"], 64)
+	playlistLength, _ := strconv.Atoi(a["playlistlength"])
 
 	return Status{
-		State:    State(a["state"]),
-		Volume:   vol,
-		Repeat:   a["repeat"] == "1",
-		Random:   a["random"] == "1",
-		Single:   a["single"] == "1",
-		Consume:  a["consume"] == "1",
-		Elapsed:  time.Duration(elapsed * float64(time.Second)),
-		Duration: time.Duration(dur * float64(time.Second)),
-		SongID:   songID,
+		State:          State(a["state"]),
+		Volume:         vol,
+		Repeat:         a["repeat"] == "1",
+		Random:         a["random"] == "1",
+		Single:         a["single"] == "1",
+		Consume:        a["consume"] == "1",
+		Elapsed:        time.Duration(elapsed * float64(time.Second)),
+		Duration:       time.Duration(dur * float64(time.Second)),
+		SongID:         songID,
+		PlaylistLength: playlistLength,
 	}
 }
 
