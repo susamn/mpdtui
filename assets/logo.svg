@@ -1,0 +1,44 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#2f5453"/>
+      <stop offset="1" stop-color="#132928"/>
+    </linearGradient>
+    <linearGradient id="bezel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#eef1f3"/>
+      <stop offset="0.5" stop-color="#9aa4ac"/>
+      <stop offset="1" stop-color="#cfd3d7"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0.2" y2="1">
+      <stop offset="0" stop-color="#f6e3ab"/>
+      <stop offset="0.5" stop-color="#cfa957"/>
+      <stop offset="1" stop-color="#8a6a2c"/>
+    </linearGradient>
+    <linearGradient id="goldSoft" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f0d693"/>
+      <stop offset="1" stop-color="#ac8843"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="8" y="8" width="496" height="496" rx="112" fill="url(#bezel)"/>
+  <rect x="26" y="26" width="460" height="460" rx="96" fill="url(#bg)"/>
+
+  <!-- MPD wordmark -->
+  <text x="256" y="290" font-family="Georgia, 'Times New Roman', serif" font-size="150"
+        font-weight="700" text-anchor="middle" fill="url(#gold)"
+        stroke="#6b5321" stroke-width="2">MPD</text>
+
+  <!-- hjkl dials -->
+  <g font-family="Georgia, serif" font-size="24" font-weight="600" text-anchor="middle" fill="#3a2c11">
+    <g stroke="#6b5321" stroke-width="2">
+      <circle cx="164" cy="424" r="28" fill="url(#goldSoft)"/>
+      <circle cx="228" cy="424" r="28" fill="url(#goldSoft)"/>
+      <circle cx="292" cy="424" r="28" fill="url(#goldSoft)"/>
+      <circle cx="356" cy="424" r="28" fill="url(#goldSoft)"/>
+    </g>
+    <text x="164" y="433">h</text>
+    <text x="228" y="433">j</text>
+    <text x="292" y="433">k</text>
+    <text x="356" y="433">l</text>
+  </g>
+</svg>
