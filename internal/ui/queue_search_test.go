@@ -42,18 +42,15 @@ func TestQueueJumpToMatchNoMatchLeavesSelectionAlone(t *testing.T) {
 	}
 }
 
-// TestQueueSearchOpensNestedInQueuePanel asserts '/' on the Queue panel
+// TestQueueSearchFocusesPersistentField asserts '/' on the Queue panel
 // does NOT redirect into a Library search (the bug being fixed) and does
-// NOT use a centered popup (unlike Library/Playlists): the input takes
-// over the Queue's own slot in the main layout, stacked above the table,
-// which itself stays part of that same slot (nothing filtered out from
-// under it, and a.main's item count is unchanged -- the table moved
-// slots, it wasn't removed from the layout).
-func TestQueueSearchOpensNestedInQueuePanel(t *testing.T) {
+// NOT use a centered popup (unlike Library/Playlists): it focuses the
+// search field that's permanently pinned below the Queue table, built
+// once in newQueuePanel rather than created per search.
+func TestQueueSearchFocusesPersistentField(t *testing.T) {
 	a := newTestApp()
 	a.queue.songs = testSongs()
 	a.tv.SetFocus(a.queue.table)
-	itemCountBefore := a.main.GetItemCount()
 
 	a.openSearch()
 
@@ -63,27 +60,23 @@ func TestQueueSearchOpensNestedInQueuePanel(t *testing.T) {
 	if a.library.level == libSearch {
 		t.Error("'/' on Queue should not trigger a Library search")
 	}
-	if got := a.main.GetItemCount(); got != itemCountBefore {
-		t.Errorf("main layout item count = %d, want %d (table replaced in place, not removed)", got, itemCountBefore)
+	if a.tv.GetFocus() != a.queue.search {
+		t.Errorf("focus after openSearch = %T, want the persistent Queue search field", a.tv.GetFocus())
 	}
-	input, ok := a.tv.GetFocus().(*tview.InputField)
-	if !ok {
-		t.Fatalf("focus after openSearch = %T, want *tview.InputField", a.tv.GetFocus())
-	}
-	if input.GetLabel() != "Search track: " {
-		t.Errorf("input label = %q, want %q", input.GetLabel(), "Search track: ")
+	if got := a.queue.search.GetLabel(); got != "Search track: " {
+		t.Errorf("search field label = %q, want %q", got, "Search track: ")
 	}
 }
 
-func TestQueueSearchEscapeCancelsAndRestoresLayout(t *testing.T) {
+func TestQueueSearchEscapeCancelsAndClearsField(t *testing.T) {
 	a := newTestApp()
 	a.tv.SetFocus(a.queue.table)
-	itemCountBefore := a.main.GetItemCount()
 	a.openSearch()
+	a.queue.search.SetText("partial query")
 
 	esc := tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone)
 	if result := a.globalInputCapture(esc); result != nil {
-		t.Errorf("Escape while the queue search bar is open should be consumed, got %v", result)
+		t.Errorf("Escape while the queue search field is focused should be consumed, got %v", result)
 	}
 
 	if a.mode != modeNormal {
@@ -92,8 +85,8 @@ func TestQueueSearchEscapeCancelsAndRestoresLayout(t *testing.T) {
 	if a.tv.GetFocus() != a.queue.table {
 		t.Errorf("focus after Escape = %T, want the Queue table", a.tv.GetFocus())
 	}
-	if got := a.main.GetItemCount(); got != itemCountBefore {
-		t.Errorf("main layout item count after Escape = %d, want %d (restored)", got, itemCountBefore)
+	if got := a.queue.search.GetText(); got != "" {
+		t.Errorf("search field text after Escape = %q, want cleared", got)
 	}
 }
 
@@ -102,14 +95,9 @@ func TestQueueSearchEnterJumpsToMatch(t *testing.T) {
 	a.queue.songs = testSongs()
 	a.tv.SetFocus(a.queue.table)
 	a.openSearch()
+	a.queue.search.SetText("aphex")
 
-	input, ok := a.tv.GetFocus().(*tview.InputField)
-	if !ok {
-		t.Fatalf("focus after openSearch = %T, want *tview.InputField", a.tv.GetFocus())
-	}
-	input.SetText("aphex")
-
-	handler := input.InputHandler()
+	handler := a.queue.search.InputHandler()
 	handler(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {})
 
 	if a.mode != modeNormal {
@@ -120,5 +108,8 @@ func TestQueueSearchEnterJumpsToMatch(t *testing.T) {
 	}
 	if a.tv.GetFocus() != a.queue.table {
 		t.Errorf("focus after Enter = %T, want the Queue table", a.tv.GetFocus())
+	}
+	if got := a.queue.search.GetText(); got != "" {
+		t.Errorf("search field text after Enter = %q, want cleared", got)
 	}
 }
