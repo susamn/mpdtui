@@ -150,6 +150,7 @@ const helpText = `[::b]Global[-:-:-]
   Enter          drill into artist/album, or add+play a track
   a              add selected artist/album/track to queue (no play)
   Backspace      go back up a level
+  Esc            clear active search
 
 [::b]Playlists panel[-:-:-]
   Enter          load playlist into queue and play
