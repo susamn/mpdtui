@@ -2,20 +2,13 @@
 package ui
 
 import (
-	"bytes"
-	"encoding/base64"
 	"fmt"
-	"image"
-	_ "image/jpeg"
-	"image/png"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
-	"github.com/qeesung/image2ascii/convert"
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
@@ -46,9 +39,7 @@ type App struct {
 
 	nowPlaying *tview.TextView
 	hintBar    *tview.TextView
-	albumArt      *tview.TextView
-	currentArtURI string
-	kittyPNG      []byte
+	albumArt   *albumArtPanel
 
 	panels   []tview.Primitive
 	panelIdx int
@@ -115,14 +106,12 @@ func (a *App) build() {
 	a.nowPlaying.SetBorder(true).SetTitle(" Now Playing ").SetTitleColor(tcell.ColorYellow)
 	a.nowPlaying.SetBorderColor(tcell.ColorYellow)
 
-	a.albumArt = tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter)
-	a.albumArt.SetBorder(true).SetTitle(" Album Art ")
-	a.albumArt.SetText("\n\n[::d]Album Art Loading...[-:-:-]")
+	a.albumArt = newAlbumArtPanel(a)
 
 	a.hintBar = tview.NewTextView().SetDynamicColors(true)
 
 	bottomLeft := tview.NewFlex().SetDirection(tview.FlexColumn).
-		AddItem(a.albumArt, 0, 1, false).
+		AddItem(a.albumArt.view, 0, 1, false).
 		AddItem(a.playlists.list, 0, 1, false)
 
 	left := tview.NewFlex().SetDirection(tview.FlexRow).
@@ -150,31 +139,8 @@ func (a *App) build() {
 	a.tv.SetRoot(a.pages, true).SetFocus(a.library.list)
 	a.updateHintBar()
 
-	a.tv.SetAfterDrawFunc(func(screen tcell.Screen) {
-		if len(a.kittyPNG) > 0 && strings.Contains(os.Getenv("TERM"), "kitty") {
-			x, y, w, h := a.albumArt.GetInnerRect()
-			if w == 0 || h == 0 {
-				return
-			}
-			// Move cursor to panel content area
-			fmt.Printf("\033[%d;%dH", y+1, x+1)
-			
-			b64 := base64.StdEncoding.EncodeToString(a.kittyPNG)
-			chunkSize := 4096
-			for i := 0; i < len(b64); i += chunkSize {
-				end := i + chunkSize
-				m := 1
-				if end >= len(b64) {
-					end = len(b64)
-					m = 0
-				}
-				if i == 0 {
-					fmt.Printf("\033_Ga=T,f=100,q=2,c=%d,r=%d,m=%d;%s\033\\", w, h, m, b64[i:end])
-				} else {
-					fmt.Printf("\033_Gm=%d;%s\033\\", m, b64[i:end])
-				}
-			}
-		}
+	a.tv.SetAfterDrawFunc(func(tcell.Screen) {
+		a.albumArt.draw()
 	})
 }
 
@@ -237,57 +203,7 @@ func (a *App) refreshNowPlaying() {
 	}
 	a.renderNowPlaying(st, song)
 	a.queue.setCurrent(st.SongID)
-
-	if song.File != "" && song.File != a.currentArtURI {
-		a.currentArtURI = song.File
-		go a.updateAlbumArt(song.File)
-	}
-}
-
-func (a *App) updateAlbumArt(uri string) {
-	b, err := a.client.FetchAlbumArt(uri)
-	if err != nil || len(b) == 0 {
-		a.kittyPNG = nil
-		a.tv.QueueUpdateDraw(func() {
-			a.albumArt.Clear()
-			a.albumArt.SetText("\n\n[::d]No Album Art[-:-:-]")
-		})
-		return
-	}
-
-	img, _, err := image.Decode(bytes.NewReader(b))
-	if err != nil {
-		a.kittyPNG = nil
-		a.tv.QueueUpdateDraw(func() {
-			a.albumArt.Clear()
-			a.albumArt.SetText("\n\n[::d]Decode Error[-:-:-]")
-		})
-		return
-	}
-
-	if strings.Contains(os.Getenv("TERM"), "kitty") {
-		var buf bytes.Buffer
-		png.Encode(&buf, img)
-		a.kittyPNG = buf.Bytes()
-		a.tv.QueueUpdateDraw(func() {
-			a.albumArt.Clear() // clears the panel so we can draw the image over it
-		})
-		return
-	}
-
-	a.kittyPNG = nil
-	opts := convert.DefaultOptions
-	opts.FixedWidth = 30
-	opts.FixedHeight = 15
-
-	converter := convert.NewImageConverter()
-	asciiStr := converter.Image2ASCIIString(img, &opts)
-
-	a.tv.QueueUpdateDraw(func() {
-		a.albumArt.Clear()
-		ansiWriter := tview.ANSIWriter(a.albumArt)
-		fmt.Fprint(ansiWriter, asciiStr)
-	})
+	a.albumArt.onTrackChanged(song.File)
 }
 
 func (a *App) cycleFocus(delta int) {
