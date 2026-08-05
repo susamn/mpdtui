@@ -2,6 +2,7 @@ package ui
 
 import (
 	"encoding/binary"
+	"io"
 	"math"
 	"math/cmplx"
 	"os"
@@ -13,8 +14,8 @@ import (
 
 const (
 	sampleRate = 44100
-	numSamples = 1024
-	numBins    = 20
+	numSamples = 4096
+	numBins    = 40
 	fifoPath   = "/tmp/mpd.fifo"
 )
 
@@ -61,7 +62,7 @@ func (v *Visualizer) Stop() {
 }
 
 func (v *Visualizer) readLoop() {
-	buf := make([]byte, numSamples*2)
+	buf := make([]byte, numSamples*4) // 16-bit stereo = 4 bytes per sample
 
 	for {
 		select {
@@ -84,13 +85,13 @@ func (v *Visualizer) readLoop() {
 			default:
 			}
 
-			n, err := file.Read(buf)
-			if err != nil || n < numSamples*2 {
+			n, err := io.ReadFull(file, buf)
+			if err != nil || n < numSamples*4 {
 				time.Sleep(50 * time.Millisecond)
 				
 				v.mu.Lock()
 				for i := range v.amplitudes {
-					v.amplitudes[i] *= 0.7
+					v.amplitudes[i] *= 0.5
 					v.peaks[i] -= 0.1
 					if v.peaks[i] < 0 {
 						v.peaks[i] = 0
@@ -102,8 +103,9 @@ func (v *Visualizer) readLoop() {
 
 			samples := make([]float64, numSamples)
 			for i := 0; i < numSamples; i++ {
-				val := int16(binary.LittleEndian.Uint16(buf[i*2 : i*2+2]))
-				samples[i] = float64(val) / 32768.0
+				valL := int16(binary.LittleEndian.Uint16(buf[i*4 : i*4+2]))
+				valR := int16(binary.LittleEndian.Uint16(buf[i*4+2 : i*4+4]))
+				samples[i] = (float64(valL) + float64(valR)) / 2.0 / 32768.0
 			}
 
 			for i := 0; i < numSamples; i++ {
@@ -139,19 +141,23 @@ func (v *Visualizer) readLoop() {
 					sum += cmplx.Abs(coeffs[j])
 				}
 				avg := sum / float64(idxEnd-idxStart)
-				val := avg * 20.0 
+				
+				// Log scale to make quieter frequencies visible
+				val := math.Log10(avg*500.0 + 1.0) * 0.4
+				if val > 1.0 {
+					val = 1.0
+				}
 				newAmps[i] = val
 			}
 
 			v.mu.Lock()
 			for i := 0; i < numBins; i++ {
-				v.amplitudes[i] = v.amplitudes[i]*0.5 + newAmps[i]*0.5
+				v.amplitudes[i] = v.amplitudes[i]*0.4 + newAmps[i]*0.6
 				
-				// Raindrop peak physics
 				if v.amplitudes[i] >= v.peaks[i] {
 					v.peaks[i] = v.amplitudes[i]
 				} else {
-					v.peaks[i] -= 0.05 // gravity pull down
+					v.peaks[i] -= 0.04
 					if v.peaks[i] < 0 {
 						v.peaks[i] = 0
 					}
@@ -168,15 +174,27 @@ func (v *Visualizer) Render() string {
 	defer v.mu.Unlock()
 
 	out := ""
-	for _, peak := range v.peaks {
-		idx := int(peak * float64(len(bars)))
-		if idx < 0 {
-			idx = 0
-		}
-		if idx >= len(bars) {
-			idx = len(bars) - 1
-		}
-		out += bars[idx]
+	// Plot continuous line using Braille characters.
+	// Braille characters have 2 columns and 4 rows.
+	for i := 0; i < len(v.peaks)-1; i += 2 {
+		y1 := v.peaks[i]
+		y2 := v.peaks[i+1]
+
+		row1 := int(y1 * 3.99)
+		row2 := int(y2 * 3.99)
+		if row1 < 0 { row1 = 0 }
+		if row1 > 3 { row1 = 3 }
+		if row2 < 0 { row2 = 0 }
+		if row2 > 3 { row2 = 3 }
+
+		dots1 := []int{0x40, 0x04, 0x02, 0x01}
+		dots2 := []int{0x80, 0x20, 0x10, 0x08}
+
+		val := 0x2800 + dots1[row1] + dots2[row2]
+		
+		// Fill area under the curve? 
+		// For a continuous *line*, we just plot the dots.
+		out += string(rune(val))
 	}
 	return out
 }
