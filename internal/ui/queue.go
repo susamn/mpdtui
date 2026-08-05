@@ -11,11 +11,13 @@ import (
 )
 
 // queuePanel shows the current playback queue as a table, with the
-// playing track marked.
+// playing track marked, plus a persistent search field pinned below it
+// (see search, wired up in app.go's openQueueSearch/closeOverlay).
 type queuePanel struct {
-	app   *App
-	table *tview.Table
-	songs []mpdclient.Song
+	app    *App
+	table  *tview.Table
+	search *tview.InputField
+	songs  []mpdclient.Song
 }
 
 func newQueuePanel(app *App) *queuePanel {
@@ -37,6 +39,20 @@ func newQueuePanel(app *App) *queuePanel {
 		q.app.refreshNowPlaying()
 	})
 	q.table = t
+
+	search := tview.NewInputField().SetLabel("Search track: ")
+	search.SetBorder(true)
+	search.SetDoneFunc(func(key tcell.Key) {
+		text := strings.TrimSpace(search.GetText())
+		q.app.closeOverlay()
+		if key == tcell.KeyEnter && text != "" {
+			if !q.jumpToMatch(text) {
+				q.app.showMessage("no match for " + text)
+			}
+		}
+	})
+	q.search = search
+
 	return q
 }
 

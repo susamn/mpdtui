@@ -99,6 +99,7 @@ func (a *App) build() {
 	wireFocusColors(a.library.list)
 	wireFocusColors(a.playlists.list)
 	wireFocusColors(a.queue.table)
+	wireFocusColors(a.queue.search)
 
 	a.nowPlaying = tview.NewTextView().SetDynamicColors(true)
 	a.nowPlaying.SetBorder(true).SetTitle(" Now Playing ").SetTitleColor(tcell.ColorYellow)
@@ -110,9 +111,13 @@ func (a *App) build() {
 		AddItem(a.library.list, 0, 2, true).
 		AddItem(a.playlists.list, 0, 1, false)
 
+	queueBox := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(a.queue.search, 3, 0, false).
+		AddItem(a.queue.table, 0, 1, true)
+
 	main := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(left, 0, 1, true).
-		AddItem(a.queue.table, 0, 2, false)
+		AddItem(queueBox, 0, 2, false)
 
 	a.root = tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(main, 0, 1, true).

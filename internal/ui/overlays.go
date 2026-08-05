@@ -50,8 +50,8 @@ func (a *App) openInput(label, initial string, onSubmit func(string)) {
 
 // openSearch opens the '/' search, contextual on the focused panel:
 // filters Playlists in place, full-text searches the Library (both via a
-// centered popup), or jumps to a match in the Queue (via a vim-style
-// bottom bar that leaves the queue on screen -- see openQueueSearch).
+// centered popup), or focuses the Queue's own persistent search field
+// (see openQueueSearch and queuePanel.search).
 func (a *App) openSearch() {
 	switch a.tv.GetFocus() {
 	case a.playlists.list:
@@ -72,39 +72,24 @@ func (a *App) openSearch() {
 	}
 }
 
-// openQueueSearch replaces the hint bar (bottom row of the layout) with a
-// text input, vim command-line style: the Queue underneath stays fully
-// visible and unfiltered while typing. Enter jumps the selection to the
-// first track whose name matches (no match: a flash message, selection
-// unchanged); Esc (handled globally in overlay mode) cancels. Either way
-// the hint bar is restored and focus returns to the Queue.
+// openQueueSearch focuses the "Search track: " field permanently pinned
+// below the Queue table (built once in newQueuePanel, not created/torn
+// down per search) -- unlike Library/Playlists, nothing is added to or
+// removed from the layout here. queuePanel's own SetDoneFunc handles
+// Enter (jump to the first match, or a flash message if none); Esc is
+// handled globally in overlay mode and calls closeOverlay below either
+// way, clearing the field and returning focus to the Queue table.
 func (a *App) openQueueSearch() {
-	input := tview.NewInputField().SetLabel("/")
-
 	a.beforeOverlayFocus = a.tv.GetFocus()
 	a.mode = modeOverlay
 	a.closeOverlay = func() {
-		a.root.RemoveItem(input)
-		a.root.AddItem(a.hintBar, 1, 0, false)
+		a.queue.search.SetText("")
 		a.mode = modeNormal
 		if a.beforeOverlayFocus != nil {
 			a.tv.SetFocus(a.beforeOverlayFocus)
 		}
 	}
-
-	input.SetDoneFunc(func(key tcell.Key) {
-		text := strings.TrimSpace(input.GetText())
-		a.closeOverlay()
-		if key == tcell.KeyEnter && text != "" {
-			if !a.queue.jumpToMatch(text) {
-				a.showMessage("no match for " + text)
-			}
-		}
-	})
-
-	a.root.RemoveItem(a.hintBar)
-	a.root.AddItem(input, 1, 0, true)
-	a.tv.SetFocus(input)
+	a.tv.SetFocus(a.queue.search)
 }
 
 func (a *App) handleSavePlaylist() {
