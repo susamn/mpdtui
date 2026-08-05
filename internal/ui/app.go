@@ -39,6 +39,7 @@ type App struct {
 
 	nowPlaying *tview.TextView
 	hintBar    *tview.TextView
+	albumArt   *tview.TextView
 
 	panels   []tview.Primitive
 	panelIdx int
@@ -105,11 +106,16 @@ func (a *App) build() {
 	a.nowPlaying.SetBorder(true).SetTitle(" Now Playing ").SetTitleColor(tcell.ColorYellow)
 	a.nowPlaying.SetBorderColor(tcell.ColorYellow)
 
+	a.albumArt = tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter)
+	a.albumArt.SetBorder(true).SetTitle(" Album Art ")
+	a.albumArt.SetText("\n\n[::d]Album Art Loading...[-:-:-]")
+
 	a.hintBar = tview.NewTextView().SetDynamicColors(true)
 
 	left := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(a.library.list, 0, 2, true).
-		AddItem(a.playlists.list, 0, 1, false)
+		AddItem(a.playlists.list, 0, 1, false).
+		AddItem(a.albumArt, 0, 1, false)
 
 	queueBox := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(a.queue.search, 3, 0, false).
