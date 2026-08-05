@@ -16,5 +16,5 @@ func (a *App) renderNowPlaying(st mpdclient.Status, song mpdclient.Song) {
 		StateGlyph(st.State), track, bar, FormatDuration(st.Elapsed), FormatDuration(st.Duration))
 	line2 := fmt.Sprintf("vol %s%%   repeat %s   random %s   single %s   consume %s",
 		VolText(st.Volume), OnOff(st.Repeat), OnOff(st.Random), OnOff(st.Single), OnOff(st.Consume))
-	a.nowPlaying.SetText(line1 + "\n" + line2)
+	a.nowPlayingText.SetText(line1 + "\n" + line2)
 }

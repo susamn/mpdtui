@@ -37,7 +37,11 @@ type App struct {
 	playlists *playlistsPanel
 	queue     *queuePanel
 
-	nowPlaying *tview.TextView
+	nowPlaying     *tview.Flex
+	nowPlayingText *tview.TextView
+	visualizerView *tview.TextView
+	vis            *Visualizer
+
 	hintBar    *tview.TextView
 
 	panels   []tview.Primitive
@@ -71,6 +75,10 @@ func Run(client *mpdclient.Client) error {
 		w.Close()
 	}()
 
+	a.vis = NewVisualizer()
+	a.vis.Start()
+	defer a.vis.Stop()
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
@@ -101,7 +109,12 @@ func (a *App) build() {
 	wireFocusColors(a.queue.table)
 	wireFocusColors(a.queue.search)
 
-	a.nowPlaying = tview.NewTextView().SetDynamicColors(true)
+	a.nowPlayingText = tview.NewTextView().SetDynamicColors(true)
+	a.visualizerView = tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignRight)
+	
+	a.nowPlaying = tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(a.nowPlayingText, 0, 1, false).
+		AddItem(a.visualizerView, 22, 0, false)
 	a.nowPlaying.SetBorder(true).SetTitle(" Now Playing ").SetTitleColor(tcell.ColorYellow)
 	a.nowPlaying.SetBorderColor(tcell.ColorYellow)
 
@@ -142,7 +155,9 @@ func (a *App) refreshAll() {
 
 func (a *App) eventLoop() {
 	ticker := time.NewTicker(500 * time.Millisecond)
+	visTicker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
+	defer visTicker.Stop()
 
 	for {
 		select {
@@ -161,7 +176,13 @@ func (a *App) eventLoop() {
 			a.tv.QueueUpdateDraw(func() { a.showError(fmt.Errorf("lost MPD event connection")) })
 			return
 		case <-ticker.C:
-			a.tv.QueueUpdateDraw(func() { a.refreshNowPlaying() })
+			a.tv.QueueUpdateDraw(func() { 
+				a.refreshNowPlaying()
+			})
+		case <-visTicker.C:
+			a.tv.QueueUpdateDraw(func() {
+				a.visualizerView.SetText("\n[yellow]" + a.vis.Render() + "[-]") 
+			})
 		case <-a.done:
 			return
 		}
