@@ -2,13 +2,18 @@
 package ui
 
 import (
+	"bytes"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/qeesung/image2ascii/convert"
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
@@ -39,7 +44,9 @@ type App struct {
 
 	nowPlaying *tview.TextView
 	hintBar    *tview.TextView
-	albumArt   *tview.TextView
+	albumArt *tview.TextView
+
+	currentArtURI string
 
 	panels   []tview.Primitive
 	panelIdx int
@@ -201,6 +208,44 @@ func (a *App) refreshNowPlaying() {
 	}
 	a.renderNowPlaying(st, song)
 	a.queue.setCurrent(st.SongID)
+
+	if song.File != "" && song.File != a.currentArtURI {
+		a.currentArtURI = song.File
+		go a.updateAlbumArt(song.File)
+	}
+}
+
+func (a *App) updateAlbumArt(uri string) {
+	b, err := a.client.FetchAlbumArt(uri)
+	if err != nil || len(b) == 0 {
+		a.tv.QueueUpdateDraw(func() {
+			a.albumArt.Clear()
+			a.albumArt.SetText("\n\n[::d]No Album Art[-:-:-]")
+		})
+		return
+	}
+
+	img, _, err := image.Decode(bytes.NewReader(b))
+	if err != nil {
+		a.tv.QueueUpdateDraw(func() {
+			a.albumArt.Clear()
+			a.albumArt.SetText("\n\n[::d]Decode Error[-:-:-]")
+		})
+		return
+	}
+
+	opts := convert.DefaultOptions
+	opts.FixedWidth = 30
+	opts.FixedHeight = 15
+
+	converter := convert.NewImageConverter()
+	asciiStr := converter.Image2ASCIIString(img, &opts)
+
+	a.tv.QueueUpdateDraw(func() {
+		a.albumArt.Clear()
+		ansiWriter := tview.ANSIWriter(a.albumArt)
+		fmt.Fprint(ansiWriter, asciiStr)
+	})
 }
 
 func (a *App) cycleFocus(delta int) {
