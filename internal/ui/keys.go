@@ -127,6 +127,11 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			a.updateHintBar()
 			return nil
 		}
+		if a.tv.GetFocus() == a.library.list && a.library.level == libSearch {
+			a.library.back()
+			a.updateHintBar()
+			return nil
+		}
 	}
 
 	return event

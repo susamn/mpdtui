@@ -113,6 +113,7 @@ Press `?` inside the full UI for the in-app keybinding list.
 | Library | `Enter` | Drill into artist/album, or add+play a track |
 | Library | `a` | Add selected item to queue (no play) |
 | Library | `Backspace` | Go back up a level |
+| Library | `Esc` | Clear active search |
 | Playlists | `Enter` | Load playlist into queue and play |
 | Playlists | `a` | Append playlist to queue |
 | Playlists | `d` | Delete playlist (confirm) |

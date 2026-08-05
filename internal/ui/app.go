@@ -242,6 +242,9 @@ func (a *App) updateHintBar() {
 	switch a.tv.GetFocus() {
 	case a.library.list:
 		panelHints = "Enter:open/play  a:add  Bksp:back"
+		if a.library.level == libSearch {
+			panelHints += "  Esc:clear search"
+		}
 	case a.playlists.list:
 		panelHints = "Enter:load+play  a:append  d:delete  S:save queue"
 		if a.playlists.filter != "" {
