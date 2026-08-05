@@ -3,12 +3,14 @@ package ui
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"image"
 	_ "image/jpeg"
-	_ "image/png"
+	"image/png"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -44,9 +46,9 @@ type App struct {
 
 	nowPlaying *tview.TextView
 	hintBar    *tview.TextView
-	albumArt *tview.TextView
-
+	albumArt      *tview.TextView
 	currentArtURI string
+	kittyPNG      []byte
 
 	panels   []tview.Primitive
 	panelIdx int
@@ -147,6 +149,33 @@ func (a *App) build() {
 	a.tv.SetInputCapture(a.globalInputCapture)
 	a.tv.SetRoot(a.pages, true).SetFocus(a.library.list)
 	a.updateHintBar()
+
+	a.tv.SetAfterDrawFunc(func(screen tcell.Screen) {
+		if len(a.kittyPNG) > 0 && strings.Contains(os.Getenv("TERM"), "kitty") {
+			x, y, w, h := a.albumArt.GetInnerRect()
+			if w == 0 || h == 0 {
+				return
+			}
+			// Move cursor to panel content area
+			fmt.Printf("\033[%d;%dH", y+1, x+1)
+			
+			b64 := base64.StdEncoding.EncodeToString(a.kittyPNG)
+			chunkSize := 4096
+			for i := 0; i < len(b64); i += chunkSize {
+				end := i + chunkSize
+				m := 1
+				if end >= len(b64) {
+					end = len(b64)
+					m = 0
+				}
+				if i == 0 {
+					fmt.Printf("\033_Ga=T,f=100,q=2,c=%d,r=%d,m=%d;%s\033\\", w, h, m, b64[i:end])
+				} else {
+					fmt.Printf("\033_Gm=%d;%s\033\\", m, b64[i:end])
+				}
+			}
+		}
+	})
 }
 
 func (a *App) refreshAll() {
@@ -218,6 +247,7 @@ func (a *App) refreshNowPlaying() {
 func (a *App) updateAlbumArt(uri string) {
 	b, err := a.client.FetchAlbumArt(uri)
 	if err != nil || len(b) == 0 {
+		a.kittyPNG = nil
 		a.tv.QueueUpdateDraw(func() {
 			a.albumArt.Clear()
 			a.albumArt.SetText("\n\n[::d]No Album Art[-:-:-]")
@@ -227,6 +257,7 @@ func (a *App) updateAlbumArt(uri string) {
 
 	img, _, err := image.Decode(bytes.NewReader(b))
 	if err != nil {
+		a.kittyPNG = nil
 		a.tv.QueueUpdateDraw(func() {
 			a.albumArt.Clear()
 			a.albumArt.SetText("\n\n[::d]Decode Error[-:-:-]")
@@ -234,6 +265,17 @@ func (a *App) updateAlbumArt(uri string) {
 		return
 	}
 
+	if strings.Contains(os.Getenv("TERM"), "kitty") {
+		var buf bytes.Buffer
+		png.Encode(&buf, img)
+		a.kittyPNG = buf.Bytes()
+		a.tv.QueueUpdateDraw(func() {
+			a.albumArt.Clear() // clears the panel so we can draw the image over it
+		})
+		return
+	}
+
+	a.kittyPNG = nil
 	opts := convert.DefaultOptions
 	opts.FixedWidth = 30
 	opts.FixedHeight = 15
