@@ -121,6 +121,12 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			a.library.back()
 			return nil
 		}
+	case tcell.KeyEscape:
+		if a.tv.GetFocus() == a.playlists.list && a.playlists.filter != "" {
+			a.playlists.setFilter("")
+			a.updateHintBar()
+			return nil
+		}
 	}
 
 	return event
