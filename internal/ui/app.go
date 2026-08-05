@@ -112,10 +112,13 @@ func (a *App) build() {
 
 	a.hintBar = tview.NewTextView().SetDynamicColors(true)
 
+	bottomLeft := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(a.albumArt, 0, 1, false).
+		AddItem(a.playlists.list, 0, 1, false)
+
 	left := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(a.library.list, 0, 2, true).
-		AddItem(a.playlists.list, 0, 1, false).
-		AddItem(a.albumArt, 0, 1, false)
+		AddItem(bottomLeft, 0, 1, false)
 
 	queueBox := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(a.queue.search, 3, 0, false).
