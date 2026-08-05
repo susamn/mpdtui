@@ -117,6 +117,7 @@ Press `?` inside the full UI for the in-app keybinding list.
 | Playlists | `a` | Append playlist to queue |
 | Playlists | `d` | Delete playlist (confirm) |
 | Playlists | `S` | Save current queue as a new playlist |
+| Playlists | `Esc` | Clear active filter |
 | Queue | `Enter` | Play selected track |
 | Queue | `d` | Remove selected track |
 | Queue | `J` / `K` | Move selected track down / up |

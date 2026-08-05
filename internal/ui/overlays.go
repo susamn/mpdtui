@@ -132,6 +132,7 @@ const helpText = `[::b]Global[-:-:-]
   d              delete playlist (confirm)
   S              save current queue as a new playlist
   /              filter playlists by name
+  Esc            clear active filter
 
 [::b]Queue panel[-:-:-]
   Enter          play selected track

@@ -244,6 +244,9 @@ func (a *App) updateHintBar() {
 		panelHints = "Enter:open/play  a:add  Bksp:back"
 	case a.playlists.list:
 		panelHints = "Enter:load+play  a:append  d:delete  S:save queue"
+		if a.playlists.filter != "" {
+			panelHints += "  Esc:clear filter"
+		}
 	case a.queue.table:
 		panelHints = "Enter:play  d:remove  J/K:move"
 	}
