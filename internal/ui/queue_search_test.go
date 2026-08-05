@@ -42,14 +42,18 @@ func TestQueueJumpToMatchNoMatchLeavesSelectionAlone(t *testing.T) {
 	}
 }
 
-// TestQueueSearchOpensBottomBarNotPopup asserts '/' on the Queue panel does
-// NOT redirect into a Library search (the bug being fixed) and instead
-// swaps the hint bar for an inline input, leaving the Queue table itself
-// still part of the layout (nothing filtered out from under it).
-func TestQueueSearchOpensBottomBarNotPopup(t *testing.T) {
+// TestQueueSearchOpensNestedInQueuePanel asserts '/' on the Queue panel
+// does NOT redirect into a Library search (the bug being fixed) and does
+// NOT use a centered popup (unlike Library/Playlists): the input takes
+// over the Queue's own slot in the main layout, stacked above the table,
+// which itself stays part of that same slot (nothing filtered out from
+// under it, and a.main's item count is unchanged -- the table moved
+// slots, it wasn't removed from the layout).
+func TestQueueSearchOpensNestedInQueuePanel(t *testing.T) {
 	a := newTestApp()
 	a.queue.songs = testSongs()
 	a.tv.SetFocus(a.queue.table)
+	itemCountBefore := a.main.GetItemCount()
 
 	a.openSearch()
 
@@ -59,18 +63,22 @@ func TestQueueSearchOpensBottomBarNotPopup(t *testing.T) {
 	if a.library.level == libSearch {
 		t.Error("'/' on Queue should not trigger a Library search")
 	}
+	if got := a.main.GetItemCount(); got != itemCountBefore {
+		t.Errorf("main layout item count = %d, want %d (table replaced in place, not removed)", got, itemCountBefore)
+	}
 	input, ok := a.tv.GetFocus().(*tview.InputField)
 	if !ok {
 		t.Fatalf("focus after openSearch = %T, want *tview.InputField", a.tv.GetFocus())
 	}
-	if input.GetLabel() != "/" {
-		t.Errorf("input label = %q, want \"/\"", input.GetLabel())
+	if input.GetLabel() != "Search track: " {
+		t.Errorf("input label = %q, want %q", input.GetLabel(), "Search track: ")
 	}
 }
 
-func TestQueueSearchEscapeCancelsAndRestoresHintBar(t *testing.T) {
+func TestQueueSearchEscapeCancelsAndRestoresLayout(t *testing.T) {
 	a := newTestApp()
 	a.tv.SetFocus(a.queue.table)
+	itemCountBefore := a.main.GetItemCount()
 	a.openSearch()
 
 	esc := tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone)
@@ -83,6 +91,9 @@ func TestQueueSearchEscapeCancelsAndRestoresHintBar(t *testing.T) {
 	}
 	if a.tv.GetFocus() != a.queue.table {
 		t.Errorf("focus after Escape = %T, want the Queue table", a.tv.GetFocus())
+	}
+	if got := a.main.GetItemCount(); got != itemCountBefore {
+		t.Errorf("main layout item count after Escape = %d, want %d (restored)", got, itemCountBefore)
 	}
 }
 

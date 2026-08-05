@@ -121,7 +121,7 @@ Press `?` inside the full UI for the in-app keybinding list.
 | Queue | `Enter` | Play selected track |
 | Queue | `d` | Remove selected track |
 | Queue | `J` / `K` | Move selected track down / up |
-| Queue | `/` | Search: bottom bar, Enter jumps to first match (Esc cancels) |
+| Queue | `/` | Search: "Search track:" box above the queue, Enter jumps to first match (Esc cancels) |
 
 **Mini mode** (`-mini`): `Space` play/pause, `n`/`p` next/prev, `s` stop,
 `-`/`=` volume, `q`/`Ctrl-C` quit.

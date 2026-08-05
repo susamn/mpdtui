@@ -32,6 +32,7 @@ type App struct {
 
 	pages *tview.Pages
 	root  *tview.Flex
+	main  *tview.Flex
 
 	library   *libraryPanel
 	playlists *playlistsPanel
@@ -110,12 +111,12 @@ func (a *App) build() {
 		AddItem(a.library.list, 0, 2, true).
 		AddItem(a.playlists.list, 0, 1, false)
 
-	main := tview.NewFlex().SetDirection(tview.FlexColumn).
+	a.main = tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(left, 0, 1, true).
 		AddItem(a.queue.table, 0, 2, false)
 
 	a.root = tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(main, 0, 1, true).
+		AddItem(a.main, 0, 1, true).
 		AddItem(a.nowPlaying, 4, 0, false).
 		AddItem(a.hintBar, 1, 0, false)
 
