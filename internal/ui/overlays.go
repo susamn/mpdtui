@@ -48,23 +48,63 @@ func (a *App) openInput(label, initial string, onSubmit func(string)) {
 	a.showOverlay("input", centered(field, 60, 3), field)
 }
 
-// openSearch opens the '/' overlay, contextual on the focused panel:
-// filters Playlists in place, or full-text searches the Library.
+// openSearch opens the '/' search, contextual on the focused panel:
+// filters Playlists in place, full-text searches the Library (both via a
+// centered popup), or jumps to a match in the Queue (via a vim-style
+// bottom bar that leaves the queue on screen -- see openQueueSearch).
 func (a *App) openSearch() {
-	if a.tv.GetFocus() == a.playlists.list {
+	switch a.tv.GetFocus() {
+	case a.playlists.list:
 		a.openInput("Filter playlists: ", a.playlists.filter, func(text string) {
 			a.playlists.setFilter(strings.TrimSpace(text))
 		})
-		return
+	case a.queue.table:
+		a.openQueueSearch()
+	case a.library.list:
+		a.openInput("Search library: ", "", func(text string) {
+			text = strings.TrimSpace(text)
+			if text == "" {
+				return
+			}
+			a.library.showSearch(text)
+			a.focusPanelPrimitive(a.library.list)
+		})
 	}
-	a.openInput("Search library: ", "", func(text string) {
-		text = strings.TrimSpace(text)
-		if text == "" {
-			return
+}
+
+// openQueueSearch replaces the hint bar (bottom row of the layout) with a
+// text input, vim command-line style: the Queue underneath stays fully
+// visible and unfiltered while typing. Enter jumps the selection to the
+// first track whose name matches (no match: a flash message, selection
+// unchanged); Esc (handled globally in overlay mode) cancels. Either way
+// the hint bar is restored and focus returns to the Queue.
+func (a *App) openQueueSearch() {
+	input := tview.NewInputField().SetLabel("/")
+
+	a.beforeOverlayFocus = a.tv.GetFocus()
+	a.mode = modeOverlay
+	a.closeOverlay = func() {
+		a.root.RemoveItem(input)
+		a.root.AddItem(a.hintBar, 1, 0, false)
+		a.mode = modeNormal
+		if a.beforeOverlayFocus != nil {
+			a.tv.SetFocus(a.beforeOverlayFocus)
 		}
-		a.library.showSearch(text)
-		a.focusPanelPrimitive(a.library.list)
+	}
+
+	input.SetDoneFunc(func(key tcell.Key) {
+		text := strings.TrimSpace(input.GetText())
+		a.closeOverlay()
+		if key == tcell.KeyEnter && text != "" {
+			if !a.queue.jumpToMatch(text) {
+				a.showMessage("no match for " + text)
+			}
+		}
 	})
+
+	a.root.RemoveItem(a.hintBar)
+	a.root.AddItem(input, 1, 0, true)
+	a.tv.SetFocus(input)
 }
 
 func (a *App) handleSavePlaylist() {
@@ -117,7 +157,7 @@ const helpText = `[::b]Global[-:-:-]
   Z              toggle single
   D              clear entire queue (confirm)
   Tab, 1/2/3     cycle / jump focus between panels
-  /              search (contextual: Library or Playlists)
+  /              search (contextual: Library/Playlists filter, Queue jump)
   ?              this help
   q              quit
 
@@ -138,4 +178,5 @@ const helpText = `[::b]Global[-:-:-]
   Enter          play selected track
   d              remove selected track
   J / K          move selected track down / up
+  /              search: jump to first match (Esc cancels)
 `

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -83,6 +84,20 @@ func (q *queuePanel) setCurrent(id int) {
 			cell.SetText("  ")
 		}
 	}
+}
+
+// jumpToMatch selects (but does not remove or hide) the first queued track
+// whose display name contains query, case-insensitive. Returns false if
+// nothing matched, leaving the current selection untouched.
+func (q *queuePanel) jumpToMatch(query string) bool {
+	needle := strings.ToLower(query)
+	for i, s := range q.songs {
+		if strings.Contains(strings.ToLower(s.DisplayName()), needle) {
+			q.table.Select(i, 0)
+			return true
+		}
+	}
+	return false
 }
 
 func (q *queuePanel) selectedSong() (mpdclient.Song, bool) {

@@ -102,7 +102,7 @@ Press `?` inside the full UI for the in-app keybinding list.
 | `Z` | Toggle single |
 | `D` | Clear entire queue (confirm) |
 | `Tab`, `1`/`2`/`3` | Cycle / jump focus between panels |
-| `/` | Search (contextual: Library or Playlists) |
+| `/` | Search (contextual: filters Library/Playlists, jumps to a match in Queue) |
 | `?` | Help overlay |
 | `q` | Quit |
 
@@ -121,6 +121,7 @@ Press `?` inside the full UI for the in-app keybinding list.
 | Queue | `Enter` | Play selected track |
 | Queue | `d` | Remove selected track |
 | Queue | `J` / `K` | Move selected track down / up |
+| Queue | `/` | Search: bottom bar, Enter jumps to first match (Esc cancels) |
 
 **Mini mode** (`-mini`): `Space` play/pause, `n`/`p` next/prev, `s` stop,
 `-`/`=` volume, `q`/`Ctrl-C` quit.

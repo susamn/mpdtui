@@ -31,6 +31,7 @@ type App struct {
 	watcher *mpdclient.Watcher
 
 	pages *tview.Pages
+	root  *tview.Flex
 
 	library   *libraryPanel
 	playlists *playlistsPanel
@@ -113,14 +114,14 @@ func (a *App) build() {
 		AddItem(left, 0, 1, true).
 		AddItem(a.queue.table, 0, 2, false)
 
-	root := tview.NewFlex().SetDirection(tview.FlexRow).
+	a.root = tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(main, 0, 1, true).
 		AddItem(a.nowPlaying, 4, 0, false).
 		AddItem(a.hintBar, 1, 0, false)
 
 	a.panels = []tview.Primitive{a.library.list, a.playlists.list, a.queue.table}
 
-	a.pages = tview.NewPages().AddPage("main", root, true, true)
+	a.pages = tview.NewPages().AddPage("main", a.root, true, true)
 
 	a.tv.SetInputCapture(a.globalInputCapture)
 	a.tv.SetRoot(a.pages, true).SetFocus(a.library.list)
