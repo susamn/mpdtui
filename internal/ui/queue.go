@@ -81,9 +81,50 @@ func (q *queuePanel) render(curID int) {
 		q.table.SetCell(i, 0, tview.NewTableCell(marker))
 		q.table.SetCell(i, 1, tview.NewTableCell(fmt.Sprintf("%3d", i+1)))
 		q.table.SetCell(i, 2, tview.NewTableCell(s.DisplayName()).SetExpansion(1))
-		q.table.SetCell(i, 3, tview.NewTableCell(FormatDuration(s.Duration)))
+		q.table.SetCell(i, 3, formatTagCell(s.File))
+		q.table.SetCell(i, 4, tview.NewTableCell(FormatDuration(s.Duration)))
 	}
 	q.table.SetTitle(fmt.Sprintf(" Queue (%d) ", len(q.songs)))
+}
+
+// formatStyle pairs a background/foreground for one track format's badge.
+// Chosen so each is legible on its own; not trying to avoid every possible
+// clash with the row-selection highlight (blue bg/yellow fg), which
+// already makes the whole selected row visually distinct regardless.
+type formatStyle struct {
+	bg, fg tcell.Color
+}
+
+var (
+	formatStyles = map[string]formatStyle{
+		"FLAC": {tcell.ColorGreen, tcell.ColorBlack},
+		"WAV":  {tcell.ColorTeal, tcell.ColorWhite},
+		"MP3":  {tcell.ColorSteelBlue, tcell.ColorWhite},
+		"M4A":  {tcell.ColorDarkMagenta, tcell.ColorWhite},
+		"AAC":  {tcell.ColorDarkMagenta, tcell.ColorWhite},
+		"OGG":  {tcell.ColorDarkOrange, tcell.ColorBlack},
+		"OPUS": {tcell.ColorDarkOrange, tcell.ColorBlack},
+		"WMA":  {tcell.ColorFireBrick, tcell.ColorWhite},
+	}
+	defaultFormatStyle = formatStyle{tcell.ColorGray, tcell.ColorWhite}
+)
+
+// formatTagCell renders file's format (MP3/FLAC/WMA/...) as a small
+// colored, button-like badge: tight padding, right-aligned so it sits
+// flush against the duration column next to it.
+func formatTagCell(file string) *tview.TableCell {
+	format := TrackFormat(file)
+	if format == "" {
+		return tview.NewTableCell("").SetAlign(tview.AlignRight)
+	}
+	style, ok := formatStyles[format]
+	if !ok {
+		style = defaultFormatStyle
+	}
+	return tview.NewTableCell(" " + format + " ").
+		SetBackgroundColor(style.bg).
+		SetTextColor(style.fg).
+		SetAlign(tview.AlignRight)
 }
 
 // setCurrent repaints just the playing-track marker column, without

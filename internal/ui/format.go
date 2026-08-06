@@ -74,3 +74,17 @@ func VolText(v int) string {
 	}
 	return strconv.Itoa(v)
 }
+
+// TrackFormat derives a track's container/codec label (MP3, FLAC, M4A,
+// WMA, ...) from its file extension, ignoring any dots in the directory
+// portion of the path. Returns "" if the file has no usable extension.
+func TrackFormat(file string) string {
+	if i := strings.LastIndexByte(file, '/'); i >= 0 {
+		file = file[i+1:]
+	}
+	i := strings.LastIndexByte(file, '.')
+	if i <= 0 || i == len(file)-1 {
+		return ""
+	}
+	return strings.ToUpper(file[i+1:])
+}
