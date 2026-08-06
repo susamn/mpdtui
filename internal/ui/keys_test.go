@@ -70,7 +70,7 @@ func TestEscapeDoesNotTouchPlaylistsFilterFromOtherPanel(t *testing.T) {
 	a := newTestApp()
 	a.playlists.names = []string{"Rock Anthems", "Jazz Classics"}
 	a.playlists.setFilter("rock")
-	a.tv.SetFocus(a.library.list)
+	a.tv.SetFocus(a.library.tree)
 
 	esc := tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone)
 	if result := a.globalInputCapture(esc); result == nil {
@@ -85,23 +85,23 @@ func TestEscapeClearsLibrarySearch(t *testing.T) {
 	a := &App{tv: tview.NewApplication(), client: dialOrSkip(t)}
 	a.build()
 
-	a.library.level = libSearch
+	a.library.mode = libSearch
 	a.library.query = "test"
 
-	a.tv.SetFocus(a.library.list)
+	a.tv.SetFocus(a.library.tree)
 	esc := tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone)
 	if result := a.globalInputCapture(esc); result != nil {
 		t.Errorf("Escape over an active library search should be consumed, got %v", result)
 	}
 
-	if a.library.level != libArtists {
-		t.Errorf("level after Escape = %v, want libArtists", a.library.level)
+	if a.library.mode != libBrowse {
+		t.Errorf("mode after Escape = %v, want libBrowse", a.library.mode)
 	}
 }
 
 func TestEscapeIgnoredWithoutActiveLibrarySearch(t *testing.T) {
 	a := newTestApp()
-	a.tv.SetFocus(a.library.list)
+	a.tv.SetFocus(a.library.tree)
 
 	esc := tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone)
 	if result := a.globalInputCapture(esc); result == nil {

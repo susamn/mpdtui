@@ -193,3 +193,35 @@ func TestFetchAlbumArt(t *testing.T) {
 		t.Logf("FetchAlbumArt(%s): %v (no art embedded/alongside -- expected on a library without covers)", tracks[0].File, err)
 	}
 }
+
+func TestListDirectory(t *testing.T) {
+	c := dialOrSkip(t)
+
+	root, err := c.ListDirectory("")
+	if err != nil {
+		t.Fatalf("ListDirectory(\"\"): %v", err)
+	}
+	if len(root) == 0 {
+		t.Skip("library root has no entries to browse")
+	}
+
+	var dir mpdclient.DirEntry
+	found := false
+	for _, e := range root {
+		if e.Type == mpdclient.EntryDirectory {
+			dir, found = e, true
+			break
+		}
+	}
+	if !found {
+		t.Skip("library root has no subdirectories to descend into")
+	}
+
+	children, err := c.ListDirectory(dir.Path)
+	if err != nil {
+		t.Fatalf("ListDirectory(%q): %v", dir.Path, err)
+	}
+	if len(children) == 0 {
+		t.Fatalf("expected %q to have at least one child entry", dir.Path)
+	}
+}

@@ -89,11 +89,19 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			a.handleClearQueue()
 			return nil
 		case 'J':
-			a.handleQueueMove(1)
-			return nil
+			if a.tv.GetFocus() == a.queue.table {
+				a.handleQueueMove(1)
+				return nil
+			}
+			// Not on Queue: let the focused primitive handle it natively
+			// (e.g. the Library tree's own "jump to child" motion).
+			return event
 		case 'K':
-			a.handleQueueMove(-1)
-			return nil
+			if a.tv.GetFocus() == a.queue.table {
+				a.handleQueueMove(-1)
+				return nil
+			}
+			return event
 		case 'S':
 			a.handleSavePlaylist()
 			return nil
@@ -117,12 +125,12 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 		a.cycleFocus(-1)
 		return nil
 	case tcell.KeyBackspace, tcell.KeyBackspace2:
-		if a.tv.GetFocus() == a.library.list {
+		if a.tv.GetFocus() == a.library.tree {
 			a.library.back()
 			return nil
 		}
 	case tcell.KeyEscape:
-		if a.tv.GetFocus() == a.library.list && a.library.level == libSearch {
+		if a.tv.GetFocus() == a.library.tree && a.library.mode == libSearch {
 			a.library.back()
 			a.updateHintBar()
 			return nil
@@ -132,20 +140,15 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			a.updateHintBar()
 			return nil
 		}
-		if a.tv.GetFocus() == a.library.list && a.library.level == libSearch {
-			a.library.back()
-			a.updateHintBar()
-			return nil
-		}
 	}
 
 	return event
 }
 
-// translateVimMotion maps j/k/g/G to Down/Up/Home/End for *tview.List,
-// which (unlike Table) has no built-in vim motions. Table already
-// handles these natively, so other primitives pass the event through
-// unchanged.
+// translateVimMotion maps j/k/g/G to Down/Up/Home/End for *tview.List
+// (Playlists), which has no built-in vim motions. Table (Queue) and
+// TreeView (Library) both already handle j/k/g/G natively, so they pass
+// the event through unchanged.
 func translateVimMotion(event *tcell.EventKey, focus tview.Primitive) *tcell.EventKey {
 	if _, ok := focus.(*tview.List); !ok {
 		return event
@@ -253,24 +256,14 @@ func (a *App) toggleConsume() {
 
 func (a *App) handleAdd() {
 	switch a.tv.GetFocus() {
-	case a.library.list:
-		songs, err := a.library.selectedForAdd()
-		if err != nil {
-			a.showError(err)
-			return
-		}
-		a.queueAddSongs(songs)
+	case a.library.tree:
+		a.library.addSelected()
 	case a.playlists.list:
 		name := a.playlists.selectedName()
 		if name == "" {
 			return
 		}
-		if err := a.client.PlaylistAppend(name); err != nil {
-			a.showError(err)
-			return
-		}
-		a.queue.refresh()
-		a.showMessage("appended playlist " + name)
+		a.appendPlaylist(name)
 	default:
 		a.invalidKey("a")
 	}
@@ -320,15 +313,9 @@ func (a *App) handleClearQueue() {
 	})
 }
 
+// handleQueueMove is only ever called with the Queue table focused --
+// globalInputCapture gates J/K on that before dispatching here.
 func (a *App) handleQueueMove(delta int) {
-	if a.tv.GetFocus() != a.queue.table {
-		if delta > 0 {
-			a.invalidKey("J")
-		} else {
-			a.invalidKey("K")
-		}
-		return
-	}
 	song, ok := a.queue.selectedSong()
 	if !ok {
 		return

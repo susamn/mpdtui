@@ -57,7 +57,7 @@ func TestQueueSearchFocusesPersistentField(t *testing.T) {
 	if a.mode != modeOverlay {
 		t.Fatalf("mode = %d, want modeOverlay", a.mode)
 	}
-	if a.library.level == libSearch {
+	if a.library.mode == libSearch {
 		t.Error("'/' on Queue should not trigger a Library search")
 	}
 	if a.tv.GetFocus() != a.queue.search {

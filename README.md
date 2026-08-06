@@ -32,7 +32,8 @@ single-line inline player for a shell or tmux pane.
 
 ## Features
 
-- **Library** — browse Artist → Album → Track, or free-text search
+- **Library** — expandable directory tree (MPD's actual filesystem layout,
+  lazily loaded per folder), or free-text tag search
 - **Playlists** — load, append, save, delete stored playlists
 - **Queue** — reorder, remove, clear, jump to any track
 - **Now Playing bar** — live progress, volume, repeat/random/single/consume
@@ -110,9 +111,10 @@ Press `?` inside the full UI for the in-app keybinding list.
 
 | Panel | Key | Action |
 |---|---|---|
-| Library | `Enter` | Drill into artist/album, or add+play a track |
-| Library | `a` | Add selected item to queue (no play) |
-| Library | `Backspace` | Go back up a level |
+| Library | `Enter` | Expand/collapse a folder, or add+play a track |
+| Library | `a` | Add selected folder (recursively) or track to queue (no play) |
+| Library | `Backspace` | Collapse folder, or go up to its parent |
+| Library | `j`/`k`/`g`/`G` | Native tree navigation (also `J`/`K` to jump in/out a level) |
 | Library | `Esc` | Clear active search |
 | Playlists | `Enter` | Load playlist into queue and play |
 | Playlists | `a` | Append playlist to queue |

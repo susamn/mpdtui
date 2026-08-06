@@ -97,7 +97,7 @@ func (a *App) build() {
 	a.playlists = newPlaylistsPanel(a)
 	a.queue = newQueuePanel(a)
 
-	wireFocusColors(a.library.list)
+	wireFocusColors(a.library.tree)
 	wireFocusColors(a.playlists.list)
 	wireFocusColors(a.queue.table)
 	wireFocusColors(a.queue.search)
@@ -115,7 +115,7 @@ func (a *App) build() {
 		AddItem(a.playlists.list, 0, 1, false)
 
 	left := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(a.library.list, 0, 2, true).
+		AddItem(a.library.tree, 0, 2, true).
 		AddItem(bottomLeft, 0, 1, false)
 
 	queueBox := tview.NewFlex().SetDirection(tview.FlexRow).
@@ -131,12 +131,12 @@ func (a *App) build() {
 		AddItem(a.nowPlaying, 4, 0, false).
 		AddItem(a.hintBar, 1, 0, false)
 
-	a.panels = []tview.Primitive{a.library.list, a.playlists.list, a.queue.table}
+	a.panels = []tview.Primitive{a.library.tree, a.playlists.list, a.queue.table}
 
 	a.pages = tview.NewPages().AddPage("main", a.root, true, true)
 
 	a.tv.SetInputCapture(a.globalInputCapture)
-	a.tv.SetRoot(a.pages, true).SetFocus(a.library.list)
+	a.tv.SetRoot(a.pages, true).SetFocus(a.library.tree)
 	a.updateHintBar()
 
 	a.tv.SetAfterDrawFunc(func(tcell.Screen) {
@@ -145,7 +145,7 @@ func (a *App) build() {
 }
 
 func (a *App) refreshAll() {
-	a.library.showArtists()
+	a.library.showRoot()
 	a.playlists.refresh()
 	a.queue.refresh()
 	a.refreshNowPlaying()
@@ -258,9 +258,9 @@ func (a *App) flash(text string) {
 func (a *App) updateHintBar() {
 	var panelHints string
 	switch a.tv.GetFocus() {
-	case a.library.list:
-		panelHints = "Enter:open/play  a:add  Bksp:back"
-		if a.library.level == libSearch {
+	case a.library.tree:
+		panelHints = "Enter:expand/play  a:add  Bksp:back"
+		if a.library.mode == libSearch {
 			panelHints += "  Esc:clear search"
 		}
 	case a.playlists.list:
@@ -289,18 +289,26 @@ func (a *App) addAndPlay(song mpdclient.Song) {
 	a.refreshNowPlaying()
 }
 
-func (a *App) queueAddSongs(songs []mpdclient.Song) {
-	if len(songs) == 0 {
+// queueAddPath adds path to the queue without playing it. path may be a
+// single track or a directory -- MPD's own "add" command recurses through
+// a directory server-side, so there's no need to fetch and iterate its
+// contents here.
+func (a *App) queueAddPath(path string) {
+	if err := a.client.QueueAdd(path); err != nil {
+		a.showError(err)
 		return
 	}
-	for _, s := range songs {
-		if err := a.client.QueueAdd(s.File); err != nil {
-			a.showError(err)
-			return
-		}
+	a.queue.refresh()
+	a.showMessage("added to queue: " + baseName(path))
+}
+
+func (a *App) appendPlaylist(name string) {
+	if err := a.client.PlaylistAppend(name); err != nil {
+		a.showError(err)
+		return
 	}
 	a.queue.refresh()
-	a.showMessage(fmt.Sprintf("added %d track(s) to queue", len(songs)))
+	a.showMessage("appended playlist " + name)
 }
 
 func (a *App) loadPlaylist(name string) {
