@@ -39,6 +39,7 @@ type App struct {
 
 	nowPlaying *tview.TextView
 	hintBar    *tview.TextView
+	albumArt   *albumArtPanel
 
 	panels   []tview.Primitive
 	panelIdx int
@@ -105,11 +106,17 @@ func (a *App) build() {
 	a.nowPlaying.SetBorder(true).SetTitle(" Now Playing ").SetTitleColor(tcell.ColorYellow)
 	a.nowPlaying.SetBorderColor(tcell.ColorYellow)
 
+	a.albumArt = newAlbumArtPanel(a)
+
 	a.hintBar = tview.NewTextView().SetDynamicColors(true)
+
+	bottomLeft := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(a.albumArt.view, 0, 1, false).
+		AddItem(a.playlists.list, 0, 1, false)
 
 	left := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(a.library.list, 0, 2, true).
-		AddItem(a.playlists.list, 0, 1, false)
+		AddItem(bottomLeft, 0, 1, false)
 
 	queueBox := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(a.queue.search, 3, 0, false).
@@ -131,6 +138,10 @@ func (a *App) build() {
 	a.tv.SetInputCapture(a.globalInputCapture)
 	a.tv.SetRoot(a.pages, true).SetFocus(a.library.list)
 	a.updateHintBar()
+
+	a.tv.SetAfterDrawFunc(func(tcell.Screen) {
+		a.albumArt.draw()
+	})
 }
 
 func (a *App) refreshAll() {
@@ -192,6 +203,7 @@ func (a *App) refreshNowPlaying() {
 	}
 	a.renderNowPlaying(st, song)
 	a.queue.setCurrent(st.SongID)
+	a.albumArt.onTrackChanged(song.File)
 }
 
 func (a *App) cycleFocus(delta int) {

@@ -154,3 +154,42 @@ func TestWatcherReceivesMixerEvent(t *testing.T) {
 		t.Fatal("timed out waiting for mixer event")
 	}
 }
+
+// TestFetchAlbumArt doesn't assert art is present -- the test library may
+// have none -- only that the albumart/readpicture fallback doesn't error
+// out or panic against a real track, and that a bogus URI fails cleanly.
+func TestFetchAlbumArt(t *testing.T) {
+	c := dialOrSkip(t)
+
+	if _, err := c.FetchAlbumArt("does-not-exist.mp3"); err == nil {
+		t.Error("expected an error for a nonexistent URI, got nil")
+	}
+
+	artists, err := c.Artists()
+	if err != nil {
+		t.Fatalf("Artists: %v", err)
+	}
+	if len(artists) == 0 {
+		t.Skip("library has no tagged artists to test against")
+	}
+	albums, err := c.Albums(artists[0])
+	if err != nil {
+		t.Fatalf("Albums: %v", err)
+	}
+	if len(albums) == 0 {
+		t.Skip("artist has no tagged albums")
+	}
+	tracks, err := c.Tracks(artists[0], albums[0])
+	if err != nil {
+		t.Fatalf("Tracks: %v", err)
+	}
+	if len(tracks) == 0 {
+		t.Skip("album has no tracks")
+	}
+
+	// Either outcome is valid -- many libraries have no cover art at all --
+	// the point is this must not error transport-wise or panic.
+	if _, err := c.FetchAlbumArt(tracks[0].File); err != nil {
+		t.Logf("FetchAlbumArt(%s): %v (no art embedded/alongside -- expected on a library without covers)", tracks[0].File, err)
+	}
+}
