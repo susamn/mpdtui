@@ -3,101 +3,87 @@ package ui
 import (
 	"fmt"
 	"sort"
+	"strings"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
 )
 
-type libraryLevel int
+// treeSelectedStyle matches the blue-bg/yellow-fg selection convention
+// List/Table use elsewhere in this app. TreeNode's zero-value default
+// style resolves to invisible (default-on-default) once applyTheme
+// flattens PrimitiveBackgroundColor/PrimaryTextColor to the terminal's own
+// colors, so every selectable node needs this set explicitly.
+var treeSelectedStyle = tcell.StyleDefault.Foreground(colorSelectedFg).Background(colorSelectedBg)
 
 const (
-	libArtists libraryLevel = iota
-	libAlbums
-	libTracks
+	folderClosedIcon = "📁"
+	folderOpenIcon   = "📂"
+)
+
+type libraryMode int
+
+const (
+	libBrowse libraryMode = iota
 	libSearch
 )
 
-// libraryPanel browses the MPD library Artist -> Album -> Track, or shows
-// free-text search results in place of that hierarchy.
+// placeholderKind marks a TreeNode as synthetic bookkeeping rather than a
+// real DirEntry: either "this directory's children haven't been fetched
+// yet" (shown as an expand target) or "fetched and confirmed empty" (so
+// re-expanding doesn't refetch). Distinguishing the two by reference type
+// means toggleDirectory doesn't need separate state on libraryPanel itself.
+type placeholderKind int
+
+const (
+	placeholderUnloaded placeholderKind = iota
+	placeholderEmpty
+)
+
+// libraryPanel browses MPD's actual directory structure (lsinfo) as an
+// expandable, lazily-loaded tree, or shows free-text search results as a
+// flat list of leaf nodes in place of it.
 type libraryPanel struct {
 	app  *App
-	list *tview.List
+	tree *tview.TreeView
+	root *tview.TreeNode
 
-	level  libraryLevel
-	artist string
-	album  string
-	query  string
-	songs  []mpdclient.Song // index-aligned with list items at libTracks/libSearch
+	mode  libraryMode
+	query string
 }
 
 func newLibraryPanel(app *App) *libraryPanel {
-	list := tview.NewList()
-	list.ShowSecondaryText(false)
-	list.SetHighlightFullLine(true)
-	list.SetSelectedFocusOnly(true)
-	list.SetSelectedTextColor(colorSelectedFg)
-	list.SetSelectedBackgroundColor(colorSelectedBg)
-	list.SetBorder(true)
-	list.SetTitle(" Library ")
-	return &libraryPanel{app: app, list: list}
+	root := tview.NewTreeNode("Library").SetSelectable(false).SetSelectedTextStyle(treeSelectedStyle)
+	tree := tview.NewTreeView().SetRoot(root).SetTopLevel(1).SetCurrentNode(root)
+	tree.SetBorder(true).SetTitle(" Library ")
+
+	p := &libraryPanel{app: app, tree: tree, root: root}
+	tree.SetSelectedFunc(p.onSelect)
+	return p
 }
 
-func (p *libraryPanel) showArtists() {
-	artists, err := p.app.client.Artists()
-	if err != nil {
-		p.app.showError(err)
-		return
-	}
-	sort.Strings(artists)
-
-	p.level = libArtists
-	p.songs = nil
-	p.list.Clear()
-	for _, artist := range artists {
-		artist := artist
-		p.list.AddItem(artist, "", 0, func() { p.showAlbums(artist) })
-	}
-	p.list.SetTitle(" Library ")
-}
-
-func (p *libraryPanel) showAlbums(artist string) {
-	albums, err := p.app.client.Albums(artist)
-	if err != nil {
-		p.app.showError(err)
-		return
-	}
-	sort.Strings(albums)
-
-	p.level = libAlbums
-	p.artist = artist
-	p.songs = nil
-	p.list.Clear()
-	for _, album := range albums {
-		album := album
-		p.list.AddItem(album, "", 0, func() { p.showTracks(artist, album) })
-	}
-	p.list.SetTitle(fmt.Sprintf(" Library: %s ", artist))
-}
-
-func (p *libraryPanel) showTracks(artist, album string) {
-	songs, err := p.app.client.Tracks(artist, album)
+// showRoot (re)loads the library root, replacing whatever's currently
+// shown -- browsing at any depth, or search results.
+func (p *libraryPanel) showRoot() {
+	entries, err := p.app.client.ListDirectory("")
 	if err != nil {
 		p.app.showError(err)
 		return
 	}
 
-	p.level = libTracks
-	p.artist, p.album = artist, album
-	p.songs = songs
-	p.list.Clear()
-	for _, s := range songs {
-		s := s
-		p.list.AddItem(trackLabel(s), "", 0, func() { p.app.addAndPlay(s) })
+	p.mode = libBrowse
+	p.root.ClearChildren()
+	for _, n := range buildNodes(entries) {
+		p.root.AddChild(n)
 	}
-	p.list.SetTitle(fmt.Sprintf(" Library: %s - %s ", artist, album))
+	p.tree.SetTitle(" Library ")
+	p.tree.SetCurrentNode(p.root)
 }
 
+// showSearch full-text searches the library by tag (independent of the
+// directory tree) and shows the matches as a flat list of file nodes.
 func (p *libraryPanel) showSearch(query string) {
 	songs, err := p.app.client.Search(query)
 	if err != nil {
@@ -105,53 +91,190 @@ func (p *libraryPanel) showSearch(query string) {
 		return
 	}
 
-	p.level = libSearch
+	p.mode = libSearch
 	p.query = query
-	p.songs = songs
-	p.list.Clear()
+	p.root.ClearChildren()
 	for _, s := range songs {
 		s := s
-		p.list.AddItem(trackLabel(s), "", 0, func() { p.app.addAndPlay(s) })
+		entry := mpdclient.DirEntry{Type: mpdclient.EntryFile, Path: s.File, Song: s}
+		p.root.AddChild(tview.NewTreeNode(trackLabel(s)).SetReference(entry).SetSelectedTextStyle(treeSelectedStyle))
 	}
-	p.list.SetTitle(fmt.Sprintf(" Library: search %q (%d) ", query, len(songs)))
+	p.tree.SetTitle(fmt.Sprintf(" Library: search %q (%d) ", query, len(songs)))
+	p.tree.SetCurrentNode(p.root)
 	if len(songs) == 0 {
 		p.app.showMessage("no results for " + query)
 	}
 }
 
-// back moves up one level in the browsing hierarchy. No-op at the top.
+// back handles Backspace: from search results, returns to the directory
+// root (same target Esc uses). While browsing, it collapses the current
+// node if it's an expanded directory, or otherwise moves the selection up
+// to (and collapses) its parent -- standard file-explorer "go back".
 func (p *libraryPanel) back() {
-	switch p.level {
-	case libAlbums:
-		p.showArtists()
-	case libTracks:
-		p.showAlbums(p.artist)
-	case libSearch:
-		p.showArtists()
+	if p.mode == libSearch {
+		p.showRoot()
+		return
+	}
+
+	current := p.tree.GetCurrentNode()
+	if current == nil || current == p.root {
+		return
+	}
+	if entry, ok := current.GetReference().(mpdclient.DirEntry); ok && entry.Type == mpdclient.EntryDirectory && current.IsExpanded() {
+		setDirExpanded(current, entry.Path, false)
+		return
+	}
+
+	path := p.tree.GetPath(current)
+	if len(path) < 2 {
+		return
+	}
+	parent := path[len(path)-2]
+	if entry, ok := parent.GetReference().(mpdclient.DirEntry); ok {
+		setDirExpanded(parent, entry.Path, false)
+	}
+	p.tree.SetCurrentNode(parent)
+}
+
+// onSelect is the TreeView-wide handler for Enter/Space: expand/collapse a
+// directory, add+play a track, or append a stored playlist encountered in
+// the tree. Nodes with no DirEntry reference (the root, or an unloaded/
+// empty placeholder) have nothing to do.
+func (p *libraryPanel) onSelect(node *tview.TreeNode) {
+	entry, ok := node.GetReference().(mpdclient.DirEntry)
+	if !ok {
+		return
+	}
+	switch entry.Type {
+	case mpdclient.EntryDirectory:
+		p.toggleDirectory(node, entry)
+	case mpdclient.EntryFile:
+		p.app.addAndPlay(entry.Song)
+	case mpdclient.EntryPlaylist:
+		p.app.appendPlaylist(entry.Path)
 	}
 }
 
-// selectedForAdd resolves the current selection to the song(s) it
-// represents, for the 'a' add-to-queue action: a whole artist's
-// discography, a whole album, or a single track.
-func (p *libraryPanel) selectedForAdd() ([]mpdclient.Song, error) {
-	idx := p.list.GetCurrentItem()
-	if idx < 0 || p.list.GetItemCount() == 0 {
-		return nil, nil
+// toggleDirectory expands or collapses node, fetching its children from
+// MPD the first time it's expanded (detected via the unloaded placeholder
+// child every directory node starts with -- see buildNodes).
+func (p *libraryPanel) toggleDirectory(node *tview.TreeNode, entry mpdclient.DirEntry) {
+	if node.IsExpanded() {
+		setDirExpanded(node, entry.Path, false)
+		return
 	}
-	switch p.level {
-	case libArtists:
-		artist, _ := p.list.GetItemText(idx)
-		return p.app.client.ArtistTracks(artist)
-	case libAlbums:
-		album, _ := p.list.GetItemText(idx)
-		return p.app.client.Tracks(p.artist, album)
-	case libTracks, libSearch:
-		if idx < len(p.songs) {
-			return []mpdclient.Song{p.songs[idx]}, nil
+
+	children := node.GetChildren()
+	if len(children) == 1 {
+		if kind, ok := children[0].GetReference().(placeholderKind); ok && kind == placeholderUnloaded {
+			fetched, err := p.app.client.ListDirectory(entry.Path)
+			if err != nil {
+				p.app.showError(err)
+				return
+			}
+			node.ClearChildren()
+			if len(fetched) == 0 {
+				node.AddChild(tview.NewTreeNode("[::d](empty)[-:-:-]").SetSelectable(false).SetReference(placeholderEmpty))
+			} else {
+				for _, n := range buildNodes(fetched) {
+					node.AddChild(n)
+				}
+			}
 		}
 	}
-	return nil, nil
+	setDirExpanded(node, entry.Path, true)
+}
+
+// addSelected implements 'a' (add to queue, no play): the whole subtree
+// for a directory (MPD's own "add" command recurses server-side -- no need
+// to fetch and iterate children here), a single track for a file, or an
+// append for a playlist entry (there's no meaningful "add without loading"
+// distinction for a stored playlist, so it behaves like Enter).
+func (p *libraryPanel) addSelected() {
+	node := p.tree.GetCurrentNode()
+	if node == nil {
+		return
+	}
+	entry, ok := node.GetReference().(mpdclient.DirEntry)
+	if !ok {
+		return
+	}
+	switch entry.Type {
+	case mpdclient.EntryDirectory, mpdclient.EntryFile:
+		p.app.queueAddPath(entry.Path)
+	case mpdclient.EntryPlaylist:
+		p.app.appendPlaylist(entry.Path)
+	}
+}
+
+// buildNodes turns entries into tree nodes, directories first then
+// everything else alphabetically, matching common file-explorer ordering.
+// Each directory node starts collapsed with a single unloaded placeholder
+// child, populated lazily by toggleDirectory.
+func buildNodes(entries []mpdclient.DirEntry) []*tview.TreeNode {
+	sorted := make([]mpdclient.DirEntry, len(entries))
+	copy(sorted, entries)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		di := sorted[i].Type == mpdclient.EntryDirectory
+		dj := sorted[j].Type == mpdclient.EntryDirectory
+		if di != dj {
+			return di
+		}
+		// Case-insensitive: this library mixes folder-naming conventions
+		// (e.g. both "Alisha Chinoy" and "alisha-chinai" exist as separate
+		// top-level directories), and a case-sensitive sort would scatter
+		// them apart into a Digits/Uppercase/lowercase clustering instead
+		// of the alphabetical order a user actually expects.
+		return strings.ToLower(entryLabel(sorted[i])) < strings.ToLower(entryLabel(sorted[j]))
+	})
+
+	nodes := make([]*tview.TreeNode, len(sorted))
+	for i, e := range sorted {
+		node := tview.NewTreeNode(entryLabel(e)).SetReference(e).SetSelectedTextStyle(treeSelectedStyle)
+		if e.Type == mpdclient.EntryDirectory {
+			node.SetExpanded(false)
+			node.AddChild(tview.NewTreeNode("").SetSelectable(false).SetReference(placeholderUnloaded))
+		}
+		nodes[i] = node
+	}
+	return nodes
+}
+
+func entryLabel(e mpdclient.DirEntry) string {
+	switch e.Type {
+	case mpdclient.EntryDirectory:
+		return folderLabel(e.Path, false) // buildNodes always starts directories collapsed
+	case mpdclient.EntryPlaylist:
+		return e.Path
+	default: // EntryFile
+		return trackLabel(e.Song)
+	}
+}
+
+// folderLabel prefixes a directory's name with a closed or open folder
+// icon depending on expanded, so a folder's row visibly reflects its
+// current state rather than showing a static icon that looks stale once
+// its children are showing underneath it.
+func folderLabel(path string, expanded bool) string {
+	icon := folderClosedIcon
+	if expanded {
+		icon = folderOpenIcon
+	}
+	return icon + " " + baseName(path)
+}
+
+// setDirExpanded expands or collapses a directory node, keeping its
+// folder icon in sync with the new state.
+func setDirExpanded(node *tview.TreeNode, path string, expanded bool) {
+	node.SetExpanded(expanded)
+	node.SetText(folderLabel(path, expanded))
+}
+
+func baseName(path string) string {
+	if i := strings.LastIndexByte(path, '/'); i >= 0 {
+		return path[i+1:]
+	}
+	return path
 }
 
 func trackLabel(s mpdclient.Song) string {

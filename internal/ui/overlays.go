@@ -60,14 +60,14 @@ func (a *App) openSearch() {
 		})
 	case a.queue.table:
 		a.openQueueSearch()
-	case a.library.list:
+	case a.library.tree:
 		a.openInput("Search library: ", "", func(text string) {
 			text = strings.TrimSpace(text)
 			if text == "" {
 				return
 			}
 			a.library.showSearch(text)
-			a.focusPanelPrimitive(a.library.list)
+			a.focusPanelPrimitive(a.library.tree)
 		})
 	}
 }
@@ -147,9 +147,9 @@ const helpText = `[::b]Global[-:-:-]
   q              quit
 
 [::b]Library panel[-:-:-]
-  Enter          drill into artist/album, or add+play a track
-  a              add selected artist/album/track to queue (no play)
-  Backspace      go back up a level
+  Enter          expand/collapse a folder, or add+play a track
+  a              add selected folder/track to queue (no play)
+  Backspace      collapse folder, or go up to its parent
   Esc            clear active search
 
 [::b]Playlists panel[-:-:-]
