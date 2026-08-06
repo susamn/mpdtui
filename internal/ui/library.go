@@ -18,6 +18,11 @@ import (
 // colors, so every selectable node needs this set explicitly.
 var treeSelectedStyle = tcell.StyleDefault.Foreground(colorSelectedFg).Background(colorSelectedBg)
 
+const (
+	folderClosedIcon = "📁"
+	folderOpenIcon   = "📂"
+)
+
 type libraryMode int
 
 const (
@@ -116,7 +121,7 @@ func (p *libraryPanel) back() {
 		return
 	}
 	if entry, ok := current.GetReference().(mpdclient.DirEntry); ok && entry.Type == mpdclient.EntryDirectory && current.IsExpanded() {
-		current.SetExpanded(false)
+		setDirExpanded(current, entry.Path, false)
 		return
 	}
 
@@ -125,7 +130,9 @@ func (p *libraryPanel) back() {
 		return
 	}
 	parent := path[len(path)-2]
-	parent.SetExpanded(false)
+	if entry, ok := parent.GetReference().(mpdclient.DirEntry); ok {
+		setDirExpanded(parent, entry.Path, false)
+	}
 	p.tree.SetCurrentNode(parent)
 }
 
@@ -153,7 +160,7 @@ func (p *libraryPanel) onSelect(node *tview.TreeNode) {
 // child every directory node starts with -- see buildNodes).
 func (p *libraryPanel) toggleDirectory(node *tview.TreeNode, entry mpdclient.DirEntry) {
 	if node.IsExpanded() {
-		node.SetExpanded(false)
+		setDirExpanded(node, entry.Path, false)
 		return
 	}
 
@@ -175,7 +182,7 @@ func (p *libraryPanel) toggleDirectory(node *tview.TreeNode, entry mpdclient.Dir
 			}
 		}
 	}
-	node.SetExpanded(true)
+	setDirExpanded(node, entry.Path, true)
 }
 
 // addSelected implements 'a' (add to queue, no play): the whole subtree
@@ -236,12 +243,31 @@ func buildNodes(entries []mpdclient.DirEntry) []*tview.TreeNode {
 func entryLabel(e mpdclient.DirEntry) string {
 	switch e.Type {
 	case mpdclient.EntryDirectory:
-		return baseName(e.Path)
+		return folderLabel(e.Path, false) // buildNodes always starts directories collapsed
 	case mpdclient.EntryPlaylist:
 		return e.Path
 	default: // EntryFile
 		return trackLabel(e.Song)
 	}
+}
+
+// folderLabel prefixes a directory's name with a closed or open folder
+// icon depending on expanded, so a folder's row visibly reflects its
+// current state rather than showing a static icon that looks stale once
+// its children are showing underneath it.
+func folderLabel(path string, expanded bool) string {
+	icon := folderClosedIcon
+	if expanded {
+		icon = folderOpenIcon
+	}
+	return icon + " " + baseName(path)
+}
+
+// setDirExpanded expands or collapses a directory node, keeping its
+// folder icon in sync with the new state.
+func setDirExpanded(node *tview.TreeNode, path string, expanded bool) {
+	node.SetExpanded(expanded)
+	node.SetText(folderLabel(path, expanded))
 }
 
 func baseName(path string) string {

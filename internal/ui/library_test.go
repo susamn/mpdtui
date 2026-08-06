@@ -23,7 +23,7 @@ func TestBuildNodesSortsDirectoriesFirstThenAlphabetical(t *testing.T) {
 		t.Fatalf("got %d nodes, want 4", len(nodes))
 	}
 
-	wantOrder := []string{"abba", "queen", "Favorite Songs", "Zzz Track  [0:00]"}
+	wantOrder := []string{folderClosedIcon + " abba", folderClosedIcon + " queen", "Favorite Songs", "Zzz Track  [0:00]"}
 	for i, want := range wantOrder {
 		entry := nodes[i].GetReference().(mpdclient.DirEntry)
 		if got := entryLabel(entry); got != want {
@@ -49,7 +49,12 @@ func TestBuildNodesSortIsCaseInsensitive(t *testing.T) {
 	for i, n := range nodes {
 		got[i] = entryLabel(n.GetReference().(mpdclient.DirEntry))
 	}
-	want := []string{"abba", "Alisha Chinoy", "alisha-chinai", "queen"}
+	want := []string{
+		folderClosedIcon + " abba",
+		folderClosedIcon + " Alisha Chinoy",
+		folderClosedIcon + " alisha-chinai",
+		folderClosedIcon + " queen",
+	}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Errorf("order = %v, want %v", got, want)
@@ -95,7 +100,7 @@ func TestLibraryBackCollapsesExpandedDirectoryFirst(t *testing.T) {
 	p := newBrowsingLibraryPanel()
 	dirNodes := buildNodes([]mpdclient.DirEntry{{Type: mpdclient.EntryDirectory, Path: "queen"}})
 	dir := dirNodes[0]
-	dir.SetExpanded(true) // simulate an already-expanded, already-loaded directory
+	setDirExpanded(dir, "queen", true) // simulate an already-expanded, already-loaded directory
 	p.root.AddChild(dir)
 	p.tree.SetCurrentNode(dir)
 
@@ -107,13 +112,16 @@ func TestLibraryBackCollapsesExpandedDirectoryFirst(t *testing.T) {
 	if p.tree.GetCurrentNode() != dir {
 		t.Error("back() collapsing a directory should leave it selected, not jump to its parent")
 	}
+	if got, want := dir.GetText(), folderLabel("queen", false); got != want {
+		t.Errorf("folder icon after collapsing = %q, want %q (closed)", got, want)
+	}
 }
 
 func TestLibraryBackOnFileJumpsToAndCollapsesParent(t *testing.T) {
 	p := newBrowsingLibraryPanel()
 	dirNodes := buildNodes([]mpdclient.DirEntry{{Type: mpdclient.EntryDirectory, Path: "queen"}})
 	dir := dirNodes[0]
-	dir.SetExpanded(true)
+	setDirExpanded(dir, "queen", true)
 	dir.ClearChildren()
 	fileNode := buildNodes([]mpdclient.DirEntry{{Type: mpdclient.EntryFile, Path: "queen/bohemian-rhapsody.mp3", Song: mpdclient.Song{Title: "Bohemian Rhapsody"}}})[0]
 	dir.AddChild(fileNode)
@@ -127,6 +135,9 @@ func TestLibraryBackOnFileJumpsToAndCollapsesParent(t *testing.T) {
 	}
 	if dir.IsExpanded() {
 		t.Error("back() on a file should collapse its parent directory")
+	}
+	if got, want := dir.GetText(), folderLabel("queen", false); got != want {
+		t.Errorf("folder icon after collapsing = %q, want %q (closed)", got, want)
 	}
 }
 
@@ -166,6 +177,9 @@ func TestLibraryToggleDirectoryLazyLoads(t *testing.T) {
 	if !dirNode.IsExpanded() {
 		t.Fatal("toggleDirectory should expand a collapsed directory")
 	}
+	if got, want := dirNode.GetText(), folderLabel(entry.Path, true); got != want {
+		t.Errorf("folder icon after expanding = %q, want %q (open)", got, want)
+	}
 	childrenAfterFirstExpand := len(dirNode.GetChildren())
 	if childrenAfterFirstExpand == 0 {
 		t.Fatal("expanding should have populated at least one child (or the empty-placeholder)")
@@ -174,6 +188,9 @@ func TestLibraryToggleDirectoryLazyLoads(t *testing.T) {
 	a.library.toggleDirectory(dirNode, entry) // collapse
 	if dirNode.IsExpanded() {
 		t.Fatal("second toggle should collapse the directory")
+	}
+	if got, want := dirNode.GetText(), folderLabel(entry.Path, false); got != want {
+		t.Errorf("folder icon after collapsing = %q, want %q (closed)", got, want)
 	}
 	if got := len(dirNode.GetChildren()); got != childrenAfterFirstExpand {
 		t.Errorf("collapsing changed child count from %d to %d, want unchanged (children are kept, not discarded)", childrenAfterFirstExpand, got)
