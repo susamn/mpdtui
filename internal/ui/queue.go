@@ -87,43 +87,58 @@ func (q *queuePanel) render(curID int) {
 	q.table.SetTitle(fmt.Sprintf(" Queue (%d) ", len(q.songs)))
 }
 
-// formatStyle pairs a background/foreground for one track format's badge.
-// Chosen so each is legible on its own; not trying to avoid every possible
-// clash with the row-selection highlight (blue bg/yellow fg), which
-// already makes the whole selected row visually distinct regardless.
-type formatStyle struct {
-	bg, fg tcell.Color
+// formatColors maps a track format to a single foreground color for its
+// tag. Deliberately no background fill: a solid-filled cell repeated down
+// a column of same-format rows (e.g. a run of consecutive MP3 tracks) has
+// no vertical gap between rows in a table, so it reads as one continuous
+// colored bar rather than individual tags. Colored text alone avoids
+// that, and sidesteps needing a contrasting text color per background
+// (which produced unreadable pairings, e.g. white-on-SteelBlue in some
+// terminal themes). Note: cell text can't use "[MP3]"-style brackets --
+// tview's Table has no way to disable its dynamic-color tag parsing
+// (unlike TextView's SetDynamicColors), so "[...]" is always parsed as a
+// style/region tag, not literal brackets, and silently disappears.
+//
+// Colors are deliberately from tcell's basic 16-color ANSI set (Black,
+// Maroon, Green, Olive, Navy, Purple, Teal, Silver, Gray, Red, Lime,
+// Yellow, Blue, Fuchsia, Aqua, White) rather than tcell's extended
+// "DodgerBlue"/"FireBrick"/"MediumOrchid"-style named colors, which are
+// true 24-bit RGB values (tcell.ColorIsRGB) requiring the terminal to
+// negotiate truecolor support. The basic 16 need no such negotiation and
+// are the same family already proven to work elsewhere in this app
+// (colorSelectedBg/Fg, colorActiveBorder) -- the safer default absent a
+// specific reason to need a wider palette.
+var formatColors = map[string]tcell.Color{
+	"FLAC": tcell.ColorGreen,
+	"WAV":  tcell.ColorTeal,
+	"MP3":  tcell.ColorAqua,
+	"M4A":  tcell.ColorFuchsia,
+	"AAC":  tcell.ColorFuchsia,
+	"OGG":  tcell.ColorYellow,
+	"OPUS": tcell.ColorYellow,
+	"WMA":  tcell.ColorRed,
 }
 
-var (
-	formatStyles = map[string]formatStyle{
-		"FLAC": {tcell.ColorGreen, tcell.ColorBlack},
-		"WAV":  {tcell.ColorTeal, tcell.ColorWhite},
-		"MP3":  {tcell.ColorSteelBlue, tcell.ColorWhite},
-		"M4A":  {tcell.ColorDarkMagenta, tcell.ColorWhite},
-		"AAC":  {tcell.ColorDarkMagenta, tcell.ColorWhite},
-		"OGG":  {tcell.ColorDarkOrange, tcell.ColorBlack},
-		"OPUS": {tcell.ColorDarkOrange, tcell.ColorBlack},
-		"WMA":  {tcell.ColorFireBrick, tcell.ColorWhite},
-	}
-	defaultFormatStyle = formatStyle{tcell.ColorGray, tcell.ColorWhite}
-)
+const defaultFormatColor = tcell.ColorGray
 
-// formatTagCell renders file's format (MP3/FLAC/WMA/...) as a small
-// colored, button-like badge: tight padding, right-aligned so it sits
-// flush against the duration column next to it.
+// formatGap is trailing space after the tag, separating it from the
+// duration column next to it.
+const formatGap = "   "
+
+// formatTagCell renders file's format (MP3/FLAC/WMA/...) as small colored
+// text, right-aligned so it sits consistently before the duration column,
+// with a gap after it rather than touching that column directly.
 func formatTagCell(file string) *tview.TableCell {
 	format := TrackFormat(file)
 	if format == "" {
 		return tview.NewTableCell("").SetAlign(tview.AlignRight)
 	}
-	style, ok := formatStyles[format]
+	color, ok := formatColors[format]
 	if !ok {
-		style = defaultFormatStyle
+		color = defaultFormatColor
 	}
-	return tview.NewTableCell(" " + format + " ").
-		SetBackgroundColor(style.bg).
-		SetTextColor(style.fg).
+	return tview.NewTableCell(format + formatGap).
+		SetTextColor(color).
 		SetAlign(tview.AlignRight)
 }
 
