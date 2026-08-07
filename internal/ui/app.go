@@ -41,6 +41,7 @@ type App struct {
 	hintBar    *tview.TextView
 	albumArt   *albumArtPanel
 	trackInfo  *trackInfoCard
+	visualizer *visualizerPanel
 
 	panels   []tview.Primitive
 	panelIdx int
@@ -109,6 +110,7 @@ func (a *App) build() {
 
 	a.albumArt = newAlbumArtPanel(a)
 	a.trackInfo = newTrackInfoCard(a)
+	a.visualizer = newVisualizerPanel(a)
 
 	a.hintBar = tview.NewTextView().SetDynamicColors(true)
 
@@ -132,9 +134,16 @@ func (a *App) build() {
 		AddItem(left, 0, 1, true).
 		AddItem(queueBox, 0, 2, false)
 
+	// nowPlayingRow splits the Now Playing row 50/50: playback status on
+	// the left (unchanged), the visualizer container on the right (see
+	// visualizer.go's Visualization doc comment for its sizing contract).
+	nowPlayingRow := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(a.nowPlaying, 0, 1, false).
+		AddItem(a.visualizer.view, 0, 1, false)
+
 	a.root = tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(main, 0, 1, true).
-		AddItem(a.nowPlaying, 4, 0, false).
+		AddItem(nowPlayingRow, 4, 0, false).
 		AddItem(a.hintBar, 1, 0, false)
 
 	a.panels = []tview.Primitive{a.library.tree, a.playlists.list, a.queue.table}
@@ -215,6 +224,7 @@ func (a *App) refreshNowPlaying() {
 	a.queue.setCurrent(st.SongID)
 	a.albumArt.onTrackChanged(song.File)
 	a.trackInfo.render(song)
+	a.visualizer.tick(st)
 }
 
 func (a *App) cycleFocus(delta int) {
@@ -282,7 +292,7 @@ func (a *App) updateHintBar() {
 	case a.queue.table:
 		panelHints = "Enter:play  d:remove  J/K:move"
 	}
-	global := "Space:play/pause  s:stop  n/p:next/prev  ,/.:seek  -/=:vol  z:shuffle  x:repeat  D:clear queue  /:search  f:find  i:info  ?:help  Tab/1-3:panels  q:quit"
+	global := "Space:play/pause  s:stop  n/p:next/prev  ,/.:seek  -/=:vol  z:shuffle  x:repeat  D:clear queue  /:search  f:find  i:info  v:visualizer  ?:help  Tab/1-3:panels  q:quit"
 	a.hintBar.SetText("[::b]" + panelHints + "[-:-:-]  |  " + global)
 }
 

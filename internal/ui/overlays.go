@@ -146,6 +146,7 @@ const helpText = `[::b]Global[-:-:-]
   f              global search from any panel: "a/p/t <term>" for
                  album/playlist/track (e.g. "a hello", "p oldies")
   i              track info card for the currently playing track
+  v              cycle Now Playing visualizations
   ?              this help
   q              quit
 

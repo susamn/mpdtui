@@ -87,6 +87,9 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 		case 'i':
 			a.openTrackInfo()
 			return nil
+		case 'v':
+			a.visualizer.next()
+			return nil
 		case '?':
 			a.openHelp()
 			return nil
