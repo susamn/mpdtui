@@ -49,7 +49,7 @@ single-line inline player for a shell or tmux pane.
   flags, updated instantly via MPD's `idle` protocol (stays in sync even
   when playback changes from another client, e.g. `mpc`); its right half
   shows a small playback-driven visualization (`v` to cycle, currently a
-  sonar-style ping)
+  dancing equalizer scaled by actual volume)
 - **Lightweight inline mode** (`-mini`) — two live status lines (queue/
   playlist counts, then track/progress), no alt-screen takeover, for
   tmux status panes or a quick glance

@@ -42,11 +42,11 @@ func (r recordingViz) Render(width, height int, elapsed time.Duration, st mpdcli
 
 func TestVisualizerPanelStartsOnFirstRegisteredVisualization(t *testing.T) {
 	a := newTestApp()
-	if got := a.visualizer.current().Name(); got != "Sonar" {
-		t.Errorf("initial visualization = %q, want %q", got, "Sonar")
+	if got := a.visualizer.current().Name(); got != "Equalizer" {
+		t.Errorf("initial visualization = %q, want %q", got, "Equalizer")
 	}
-	if title := a.visualizer.view.GetTitle(); !strings.Contains(title, "Sonar") {
-		t.Errorf("border title = %q, want it to contain %q", title, "Sonar")
+	if title := a.visualizer.view.GetTitle(); !strings.Contains(title, "Equalizer") {
+		t.Errorf("border title = %q, want it to contain %q", title, "Equalizer")
 	}
 }
 
