@@ -90,6 +90,9 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 		case 'v':
 			a.visualizer.next()
 			return nil
+		case 'o':
+			a.handleCycleSort()
+			return nil
 		case '?':
 			a.openHelp()
 			return nil
@@ -277,6 +280,25 @@ func (a *App) toggleConsume() {
 	}
 	if err := a.client.SetConsume(!st.Consume); err != nil {
 		a.showError(err)
+	}
+}
+
+// handleCycleSort is 'o': cycles the focused panel's sort mode (name vs.
+// recency). Library only honors this in browse mode -- search results
+// have their own fixed ordering, so cycling sort there would silently do
+// nothing useful, hence the explicit invalidKey instead of a no-op.
+func (a *App) handleCycleSort() {
+	switch a.tv.GetFocus() {
+	case a.library.tree:
+		if a.library.mode != libBrowse {
+			a.invalidKey("o")
+			return
+		}
+		a.library.cycleSortMode()
+	case a.playlists.list:
+		a.playlists.cycleSortMode()
+	default:
+		a.invalidKey("o")
 	}
 }
 

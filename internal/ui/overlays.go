@@ -147,6 +147,7 @@ const helpText = `[::b]Global[-:-:-]
                  album/playlist/track (e.g. "a hello", "p oldies")
   i              track info card for the currently playing track
   v              cycle Now Playing visualizations
+  o              cycle sort mode (Library/Playlists: name/recent)
   ?              this help
   q              quit
 
@@ -154,6 +155,7 @@ const helpText = `[::b]Global[-:-:-]
   Enter          expand/collapse a folder, or add+play a track
   a              add selected folder/track to queue (no play)
   Backspace      collapse folder, or go up to its parent
+  o              cycle sort: name / most recently modified
   Esc            clear active search
 
 [::b]Playlists panel[-:-:-]
@@ -162,7 +164,10 @@ const helpText = `[::b]Global[-:-:-]
   d              delete playlist (confirm)
   S              save current queue as a new playlist
   /              filter playlists by name
+  o              cycle sort: most recently updated / name
   Esc            clear active filter
+  🆕 badge shows the 5 most recently updated playlists,
+  regardless of sort mode
 
 [::b]Queue panel[-:-:-]
   Enter          play selected track

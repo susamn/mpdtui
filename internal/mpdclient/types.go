@@ -66,6 +66,22 @@ type Playlist struct {
 	LastModified time.Time
 }
 
+// parseTimestamp parses an RFC 3339 timestamp (MPD's Last-Modified format,
+// e.g. "2026-08-05T03:46:30Z") from a[key]. Returns the zero time if the
+// key is missing or unparseable, rather than erroring the whole response
+// over one bad/absent field.
+func parseTimestamp(a mpd.Attrs, key string) time.Time {
+	v, ok := a[key]
+	if !ok {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
 func parseStatus(a mpd.Attrs) Status {
 	vol, _ := strconv.Atoi(a["volume"])
 	songID, err := strconv.Atoi(a["songid"])

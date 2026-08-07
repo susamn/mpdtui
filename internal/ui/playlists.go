@@ -22,6 +22,31 @@ const playlistRecentBadgeCount = 5
 // for its own redraw-time positioning.
 const playlistRecentIcon = "🆕"
 
+// playlistsSortMode controls the display order of playlistsPanel.pls.
+// Independent of the 🆕 badge, which always reflects actual recency
+// (recentPlaylistBadges from a recency-sorted copy) regardless of which
+// mode is currently displayed -- so sorting alphabetically doesn't hide
+// which ones are actually recent, it just changes where they show up in
+// the list. Cycled with 'o' while the Playlists panel is focused (see
+// App.handleCycleSort).
+type playlistsSortMode int
+
+const (
+	playlistsSortRecent playlistsSortMode = iota // most recently updated first (default, matches badge criterion)
+	playlistsSortName                            // alphabetical, case-insensitive
+)
+
+func (m playlistsSortMode) label() string {
+	if m == playlistsSortName {
+		return "name"
+	}
+	return "recent"
+}
+
+func (m playlistsSortMode) next() playlistsSortMode {
+	return (m + 1) % 2
+}
+
 // playlistsPanel lists stored (saved) MPD playlists, sorted by most
 // recently updated first, optionally filtered by a substring set via the
 // search overlay. The playlistRecentBadgeCount most recently updated get
@@ -30,11 +55,12 @@ type playlistsPanel struct {
 	app  *App
 	list *tview.List
 
-	pls    []mpdclient.Playlist // full set, sorted by Last-Modified descending
+	pls    []mpdclient.Playlist // full set, ordered per sortMode
 	shown  []mpdclient.Playlist // currently displayed (post-filter), same relative order
 	filter string
 
-	badged map[string]bool // playlist names among the most recently updated
+	sortMode playlistsSortMode
+	badged   map[string]bool // playlist names among the most recently updated, independent of sortMode
 
 	lastWidth int  // inner width last used by realign, to skip redundant work
 	dirty     bool // set by render(), forces realign to reapply regardless of lastWidth
@@ -66,6 +92,16 @@ func sortPlaylistsByRecency(pls []mpdclient.Playlist) {
 	})
 }
 
+// sortPlaylistsByName sorts pls in place, alphabetically and
+// case-insensitively -- the same comparison Library's buildNodes uses,
+// for the same reason (this library mixes naming conventions, and a
+// case-sensitive sort would scatter otherwise-adjacent names apart).
+func sortPlaylistsByName(pls []mpdclient.Playlist) {
+	sort.Slice(pls, func(i, j int) bool {
+		return strings.ToLower(pls[i].Name) < strings.ToLower(pls[j].Name)
+	})
+}
+
 // recentPlaylistBadges returns the names of the first n entries of pls as
 // a set, for O(1) badge lookup during render/realign. Assumes pls is
 // already sorted most-recent-first (sortPlaylistsByRecency); n larger
@@ -84,9 +120,34 @@ func (p *playlistsPanel) refresh() {
 		p.app.showError(err)
 		return
 	}
-	sortPlaylistsByRecency(pls)
+
+	// Badges always reflect actual recency, independent of sortMode --
+	// computed from a separate sorted copy so displaying alphabetically
+	// doesn't change which playlists count as "recently updated".
+	byRecency := make([]mpdclient.Playlist, len(pls))
+	copy(byRecency, pls)
+	sortPlaylistsByRecency(byRecency)
+	p.badged = recentPlaylistBadges(byRecency, playlistRecentBadgeCount)
+
+	if p.sortMode == playlistsSortName {
+		sortPlaylistsByName(pls)
+	} else {
+		pls = byRecency
+	}
 	p.pls = pls
-	p.badged = recentPlaylistBadges(pls, playlistRecentBadgeCount)
+	p.render()
+}
+
+// cycleSortMode advances to the next sort mode and re-sorts the
+// already-fetched playlists in place -- no MPD round-trip needed, this is
+// purely a different view of the same data.
+func (p *playlistsPanel) cycleSortMode() {
+	p.sortMode = p.sortMode.next()
+	if p.sortMode == playlistsSortName {
+		sortPlaylistsByName(p.pls)
+	} else {
+		sortPlaylistsByRecency(p.pls)
+	}
 	p.render()
 }
 
@@ -113,9 +174,9 @@ func (p *playlistsPanel) render() int {
 	p.dirty = true
 	p.realign()
 
-	title := " Playlists "
+	title := fmt.Sprintf(" Playlists (%s) ", p.sortMode.label())
 	if p.filter != "" {
-		title = fmt.Sprintf(" Playlists: filter %q ", p.filter)
+		title = fmt.Sprintf(" Playlists (%s): filter %q ", p.sortMode.label(), p.filter)
 	}
 	p.list.SetTitle(title)
 	return len(shown)

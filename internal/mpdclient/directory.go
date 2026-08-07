@@ -23,6 +23,13 @@ type DirEntry struct {
 	Type EntryType
 	Path string // MPD's own path, usable as-is for a further ListDirectory call, QueueAdd, PlaylistAppend, etc.
 	Song Song   // populated only when Type == EntryFile
+	// LastModified is MPD's last-modified timestamp for this entry, or
+	// the zero time if MPD didn't report one. Files reliably report a
+	// real mtime; directories are inconsistent (verified against a live
+	// server -- root-level directories reported none, nested ones did),
+	// so any code sorting/filtering by this must handle the zero value
+	// as "unknown", not "very old".
+	LastModified time.Time
 }
 
 // ListDirectory lists the immediate children of path (empty string means
@@ -46,11 +53,11 @@ func parseDirEntries(attrs []mpd.Attrs) []DirEntry {
 	for _, a := range attrs {
 		switch {
 		case a["directory"] != "":
-			entries = append(entries, DirEntry{Type: EntryDirectory, Path: a["directory"]})
+			entries = append(entries, DirEntry{Type: EntryDirectory, Path: a["directory"], LastModified: parseLibraryLastModified(a)})
 		case a["playlist"] != "":
-			entries = append(entries, DirEntry{Type: EntryPlaylist, Path: a["playlist"]})
+			entries = append(entries, DirEntry{Type: EntryPlaylist, Path: a["playlist"], LastModified: parseLibraryLastModified(a)})
 		case a["file"] != "":
-			entries = append(entries, DirEntry{Type: EntryFile, Path: a["file"], Song: parseLibrarySong(a)})
+			entries = append(entries, DirEntry{Type: EntryFile, Path: a["file"], Song: parseLibrarySong(a), LastModified: parseLibraryLastModified(a)})
 		}
 	}
 	return entries
@@ -70,6 +77,14 @@ func parseLibrarySong(a mpd.Attrs) Song {
 		Title:    a["title"],
 		Duration: parseLibraryDuration(a),
 	}
+}
+
+// parseLibraryLastModified reads lsinfo's lowercased "last-modified" field
+// (gompd's ListInfo lowercases every key -- unlike ListPlaylists, which
+// preserves "Last-Modified" capitalized; see parsePlaylistLastModified in
+// playlists.go).
+func parseLibraryLastModified(a mpd.Attrs) time.Time {
+	return parseTimestamp(a, "last-modified")
 }
 
 func parseLibraryDuration(a mpd.Attrs) time.Duration {

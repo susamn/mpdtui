@@ -2,6 +2,7 @@ package ui
 
 import (
 	"testing"
+	"time"
 
 	"github.com/rivo/tview"
 
@@ -18,7 +19,7 @@ func testDirEntries() []mpdclient.DirEntry {
 }
 
 func TestBuildNodesSortsDirectoriesFirstThenAlphabetical(t *testing.T) {
-	nodes := buildNodes(testDirEntries())
+	nodes := buildNodes(testDirEntries(), librarySortName)
 	if len(nodes) != 4 {
 		t.Fatalf("got %d nodes, want 4", len(nodes))
 	}
@@ -43,7 +44,7 @@ func TestBuildNodesSortIsCaseInsensitive(t *testing.T) {
 		{Type: mpdclient.EntryDirectory, Path: "Alisha Chinoy"},
 		{Type: mpdclient.EntryDirectory, Path: "alisha-chinai"},
 		{Type: mpdclient.EntryDirectory, Path: "abba"},
-	})
+	}, librarySortName)
 
 	got := make([]string, len(nodes))
 	for i, n := range nodes {
@@ -63,8 +64,57 @@ func TestBuildNodesSortIsCaseInsensitive(t *testing.T) {
 	}
 }
 
+func TestBuildNodesSortRecentOrdersMostRecentFirstWithinType(t *testing.T) {
+	old := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	newest := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+
+	nodes := buildNodes([]mpdclient.DirEntry{
+		{Type: mpdclient.EntryFile, Path: "old-track.mp3", Song: mpdclient.Song{Title: "Old Track"}, LastModified: old},
+		{Type: mpdclient.EntryDirectory, Path: "old-dir", LastModified: old},
+		{Type: mpdclient.EntryFile, Path: "new-track.mp3", Song: mpdclient.Song{Title: "New Track"}, LastModified: newest},
+		{Type: mpdclient.EntryDirectory, Path: "new-dir", LastModified: newest},
+	}, librarySortRecent)
+
+	// Directories still grouped first (both come before both files), but
+	// within each group the newer entry leads.
+	want := []string{
+		folderClosedIcon + " new-dir",
+		folderClosedIcon + " old-dir",
+		"New Track  [0:00]",
+		"Old Track  [0:00]",
+	}
+	for i, w := range want {
+		entry := nodes[i].GetReference().(mpdclient.DirEntry)
+		if got := entryLabel(entry); got != w {
+			t.Errorf("node %d = %q, want %q", i, got, w)
+		}
+	}
+}
+
+func TestBuildNodesSortRecentTiebreaksAlphabeticallyOnEqualTimestamps(t *testing.T) {
+	// Both zero (unreported) -- must still be deterministic, not just
+	// "whatever order they happened to arrive in".
+	nodes := buildNodes([]mpdclient.DirEntry{
+		{Type: mpdclient.EntryFile, Path: "zebra.mp3", Song: mpdclient.Song{Title: "Zebra"}},
+		{Type: mpdclient.EntryFile, Path: "apple.mp3", Song: mpdclient.Song{Title: "Apple"}},
+	}, librarySortRecent)
+
+	if got := entryLabel(nodes[0].GetReference().(mpdclient.DirEntry)); got != "Apple  [0:00]" {
+		t.Errorf("node 0 = %q, want %q", got, "Apple  [0:00]")
+	}
+}
+
+func TestLibrarySortModeNextTogglesBetweenNameAndRecent(t *testing.T) {
+	if got := librarySortName.next(); got != librarySortRecent {
+		t.Errorf("librarySortName.next() = %v, want librarySortRecent", got)
+	}
+	if got := librarySortRecent.next(); got != librarySortName {
+		t.Errorf("librarySortRecent.next() = %v, want librarySortName", got)
+	}
+}
+
 func TestBuildNodesDirectoryStartsCollapsedWithUnloadedPlaceholder(t *testing.T) {
-	nodes := buildNodes([]mpdclient.DirEntry{{Type: mpdclient.EntryDirectory, Path: "queen"}})
+	nodes := buildNodes([]mpdclient.DirEntry{{Type: mpdclient.EntryDirectory, Path: "queen"}}, librarySortName)
 	dir := nodes[0]
 
 	if dir.IsExpanded() {
@@ -81,7 +131,7 @@ func TestBuildNodesDirectoryStartsCollapsedWithUnloadedPlaceholder(t *testing.T)
 }
 
 func TestBuildNodesFileHasNoChildren(t *testing.T) {
-	nodes := buildNodes([]mpdclient.DirEntry{{Type: mpdclient.EntryFile, Path: "track.mp3", Song: mpdclient.Song{Title: "Track"}}})
+	nodes := buildNodes([]mpdclient.DirEntry{{Type: mpdclient.EntryFile, Path: "track.mp3", Song: mpdclient.Song{Title: "Track"}}}, librarySortName)
 	if len(nodes[0].GetChildren()) != 0 {
 		t.Error("a file node should have no children")
 	}
@@ -98,7 +148,7 @@ func newBrowsingLibraryPanel() *libraryPanel {
 
 func TestLibraryBackCollapsesExpandedDirectoryFirst(t *testing.T) {
 	p := newBrowsingLibraryPanel()
-	dirNodes := buildNodes([]mpdclient.DirEntry{{Type: mpdclient.EntryDirectory, Path: "queen"}})
+	dirNodes := buildNodes([]mpdclient.DirEntry{{Type: mpdclient.EntryDirectory, Path: "queen"}}, librarySortName)
 	dir := dirNodes[0]
 	setDirExpanded(dir, "queen", true) // simulate an already-expanded, already-loaded directory
 	p.root.AddChild(dir)
@@ -119,11 +169,11 @@ func TestLibraryBackCollapsesExpandedDirectoryFirst(t *testing.T) {
 
 func TestLibraryBackOnFileJumpsToAndCollapsesParent(t *testing.T) {
 	p := newBrowsingLibraryPanel()
-	dirNodes := buildNodes([]mpdclient.DirEntry{{Type: mpdclient.EntryDirectory, Path: "queen"}})
+	dirNodes := buildNodes([]mpdclient.DirEntry{{Type: mpdclient.EntryDirectory, Path: "queen"}}, librarySortName)
 	dir := dirNodes[0]
 	setDirExpanded(dir, "queen", true)
 	dir.ClearChildren()
-	fileNode := buildNodes([]mpdclient.DirEntry{{Type: mpdclient.EntryFile, Path: "queen/bohemian-rhapsody.mp3", Song: mpdclient.Song{Title: "Bohemian Rhapsody"}}})[0]
+	fileNode := buildNodes([]mpdclient.DirEntry{{Type: mpdclient.EntryFile, Path: "queen/bohemian-rhapsody.mp3", Song: mpdclient.Song{Title: "Bohemian Rhapsody"}}}, librarySortName)[0]
 	dir.AddChild(fileNode)
 	p.root.AddChild(dir)
 	p.tree.SetCurrentNode(fileNode)
@@ -199,5 +249,33 @@ func TestLibraryToggleDirectoryLazyLoads(t *testing.T) {
 	a.library.toggleDirectory(dirNode, entry) // re-expand
 	if got := len(dirNode.GetChildren()); got != childrenAfterFirstExpand {
 		t.Errorf("re-expanding refetched instead of reusing cached children: child count %d, want %d", got, childrenAfterFirstExpand)
+	}
+}
+
+// TestLibraryCycleSortModeUpdatesTitleAndReloadsRoot exercises the actual
+// MPD fetch cycleSortMode triggers via showRoot. Read-only.
+func TestLibraryCycleSortModeUpdatesTitleAndReloadsRoot(t *testing.T) {
+	c := dialOrSkip(t)
+	a := &App{tv: tview.NewApplication(), client: c}
+	a.build()
+	a.library.showRoot()
+
+	if a.library.sortMode != librarySortName {
+		t.Fatalf("setup: default sort mode = %v, want librarySortName", a.library.sortMode)
+	}
+	if title := a.library.tree.GetTitle(); title != " Library (name) " {
+		t.Errorf("title before cycling = %q, want %q", title, " Library (name) ")
+	}
+
+	a.library.cycleSortMode()
+
+	if a.library.sortMode != librarySortRecent {
+		t.Errorf("sort mode after cycleSortMode() = %v, want librarySortRecent", a.library.sortMode)
+	}
+	if title := a.library.tree.GetTitle(); title != " Library (recent) " {
+		t.Errorf("title after cycling = %q, want %q", title, " Library (recent) ")
+	}
+	if len(a.library.root.GetChildren()) == 0 {
+		t.Error("cycleSortMode() should have reloaded the root with at least one entry")
 	}
 }

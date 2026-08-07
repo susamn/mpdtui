@@ -48,6 +48,62 @@ func TestSortPlaylistsByRecencyTiebreaksAlphabetically(t *testing.T) {
 	}
 }
 
+func TestSortPlaylistsByNameCaseInsensitive(t *testing.T) {
+	pls := []mpdclient.Playlist{{Name: "queen"}, {Name: "Alisha Chinoy"}, {Name: "alisha-chinai"}, {Name: "abba"}}
+	sortPlaylistsByName(pls)
+
+	want := []string{"abba", "Alisha Chinoy", "alisha-chinai", "queen"}
+	for i, w := range want {
+		if pls[i].Name != w {
+			t.Errorf("pls[%d].Name = %q, want %q (order: %v)", i, pls[i].Name, w, pls)
+		}
+	}
+}
+
+func TestPlaylistsSortModeNextTogglesBetweenRecentAndName(t *testing.T) {
+	if got := playlistsSortRecent.next(); got != playlistsSortName {
+		t.Errorf("playlistsSortRecent.next() = %v, want playlistsSortName", got)
+	}
+	if got := playlistsSortName.next(); got != playlistsSortRecent {
+		t.Errorf("playlistsSortName.next() = %v, want playlistsSortRecent", got)
+	}
+}
+
+func TestPlaylistsCycleSortModeReordersWithoutChangingBadges(t *testing.T) {
+	a := newTestApp()
+	old := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	newest := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	a.playlists.pls = []mpdclient.Playlist{
+		{Name: "Zebra", LastModified: newest},
+		{Name: "Apple", LastModified: old},
+	}
+	sortPlaylistsByRecency(a.playlists.pls)
+	a.playlists.badged = recentPlaylistBadges(a.playlists.pls, 1) // "Zebra" (the recent one)
+	a.playlists.render()
+
+	if title := a.playlists.list.GetTitle(); title != " Playlists (recent) " {
+		t.Fatalf("setup: title = %q, want %q", title, " Playlists (recent) ")
+	}
+
+	a.playlists.cycleSortMode()
+
+	if a.playlists.sortMode != playlistsSortName {
+		t.Errorf("sortMode after cycleSortMode() = %v, want playlistsSortName", a.playlists.sortMode)
+	}
+	if title := a.playlists.list.GetTitle(); title != " Playlists (name) " {
+		t.Errorf("title after cycling = %q, want %q", title, " Playlists (name) ")
+	}
+	name, _ := a.playlists.list.GetItemText(0)
+	if !strings.HasPrefix(name, "Apple") {
+		t.Errorf("first item after switching to name sort = %q, want it to start with %q", name, "Apple")
+	}
+	// Badge criterion is independent of display order -- still "Zebra",
+	// even though it's no longer first in the list.
+	if !a.playlists.badged["Zebra"] || a.playlists.badged["Apple"] {
+		t.Errorf("badged = %v, want only Zebra (unaffected by the sort mode change)", a.playlists.badged)
+	}
+}
+
 func TestRecentPlaylistBadgesTakesFirstN(t *testing.T) {
 	pls := []mpdclient.Playlist{{Name: "A"}, {Name: "B"}, {Name: "C"}, {Name: "D"}}
 	badged := recentPlaylistBadges(pls, 2)

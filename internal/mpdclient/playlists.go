@@ -19,20 +19,12 @@ func (c *Client) Playlists() ([]Playlist, error) {
 	return pls, nil
 }
 
-// parsePlaylistLastModified parses MPD's "Last-Modified" field (ISO
-// 8601/RFC 3339, e.g. "2026-08-05T03:46:30Z") from a listplaylists
-// response row. Returns the zero time if the field is missing or
-// unparseable, rather than erroring the whole listing over it.
+// parsePlaylistLastModified reads listplaylists' "Last-Modified" field
+// (capitalized, unlike lsinfo's lowercased "last-modified" -- see
+// parseDirEntries in directory.go for that one; gompd is inconsistent
+// about casing between commands).
 func parsePlaylistLastModified(a mpd.Attrs) time.Time {
-	v, ok := a["Last-Modified"]
-	if !ok {
-		return time.Time{}
-	}
-	t, err := time.Parse(time.RFC3339, v)
-	if err != nil {
-		return time.Time{}
-	}
-	return t
+	return parseTimestamp(a, "Last-Modified")
 }
 
 // PlaylistTracks returns the tracks stored in playlist name.

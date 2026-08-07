@@ -122,3 +122,56 @@ func TestEscapeIgnoredWithoutActiveLibrarySearch(t *testing.T) {
 		t.Error("Escape with no active library search should pass through, not be consumed")
 	}
 }
+
+func TestOKeyCyclesPlaylistsSortMode(t *testing.T) {
+	a := newTestApp()
+	setPlaylistsForTest(a.playlists, []string{"Rock", "Jazz"})
+	a.tv.SetFocus(a.playlists.list)
+
+	oKey := tcell.NewEventKey(tcell.KeyRune, 'o', tcell.ModNone)
+	if result := a.globalInputCapture(oKey); result != nil {
+		t.Errorf("'o' should be consumed, got %v", result)
+	}
+	if a.playlists.sortMode != playlistsSortName {
+		t.Errorf("sortMode after 'o' = %v, want playlistsSortName", a.playlists.sortMode)
+	}
+}
+
+func TestOKeyCyclesLibrarySortModeInBrowseMode(t *testing.T) {
+	a := &App{tv: tview.NewApplication(), client: dialOrSkip(t)}
+	a.build()
+	a.library.showRoot()
+	a.tv.SetFocus(a.library.tree)
+
+	oKey := tcell.NewEventKey(tcell.KeyRune, 'o', tcell.ModNone)
+	if result := a.globalInputCapture(oKey); result != nil {
+		t.Errorf("'o' should be consumed, got %v", result)
+	}
+	if a.library.sortMode != librarySortRecent {
+		t.Errorf("sortMode after 'o' = %v, want librarySortRecent", a.library.sortMode)
+	}
+}
+
+func TestOKeyInLibrarySearchModeDoesNotChangeSortMode(t *testing.T) {
+	a := newTestApp()
+	a.library.mode = libSearch
+	a.tv.SetFocus(a.library.tree)
+
+	oKey := tcell.NewEventKey(tcell.KeyRune, 'o', tcell.ModNone)
+	if result := a.globalInputCapture(oKey); result != nil {
+		t.Errorf("'o' should be consumed (flashes invalid) even in search mode, got %v", result)
+	}
+	if a.library.sortMode != librarySortName {
+		t.Errorf("sortMode changed while in search mode: got %v, want unchanged librarySortName", a.library.sortMode)
+	}
+}
+
+func TestOKeyOnQueuePanelIsInvalid(t *testing.T) {
+	a := newTestApp()
+	a.tv.SetFocus(a.queue.table)
+
+	oKey := tcell.NewEventKey(tcell.KeyRune, 'o', tcell.ModNone)
+	if result := a.globalInputCapture(oKey); result != nil {
+		t.Errorf("'o' should be consumed (flashes invalid), got %v", result)
+	}
+}

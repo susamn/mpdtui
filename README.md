@@ -39,9 +39,11 @@ single-line inline player for a shell or tmux pane.
 ## Features
 
 - **Library** — expandable directory tree (MPD's actual filesystem layout,
-  lazily loaded per folder), or free-text tag search
-- **Playlists** — load, append, save, delete stored playlists; sorted by
-  most recently updated first, with a 🆕 badge on the 5 most recent
+  lazily loaded per folder), or free-text tag search; `o` cycles
+  name/most-recently-modified sort
+- **Playlists** — load, append, save, delete stored playlists; `o` cycles
+  between most-recently-updated and alphabetical, with a 🆕 badge on the
+  5 most recent regardless of which sort is showing
 - **Queue** — reorder, remove, clear, jump to any track; each row shows a
   color-coded format badge (MP3/FLAC/M4A/...) next to its runtime
 - **Library stats** — live total tracks/artists/playlists, shown
@@ -119,6 +121,7 @@ Press `?` inside the full UI for the in-app keybinding list.
 | `f` | Global search from any panel -- type `a`/`p`/`t` + a term, e.g. `a hello`, `p oldies`, `t help me` (album/playlist/track); stays open with "no X found" if nothing matches |
 | `i` | Track info card for the currently playing track (Track/Album/Artist/Genre/Year), anchored to the bottom-right quarter of the Queue panel |
 | `v` | Cycle Now Playing visualizations (right half of the Now Playing bar) |
+| `o` | Cycle sort mode (Library: name/recent, Playlists: recent/name) -- current mode shown in the panel's title |
 | `?` | Help overlay |
 | `q` | Quit |
 

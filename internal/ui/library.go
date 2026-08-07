@@ -30,6 +30,28 @@ const (
 	libSearch
 )
 
+// librarySortMode controls buildNodes' within-type ordering (directories
+// are always grouped before files/playlists regardless of mode -- see
+// buildNodes). Cycled with 'o' while the Library panel is focused in
+// browse mode (see App.handleCycleSort).
+type librarySortMode int
+
+const (
+	librarySortName   librarySortMode = iota // alphabetical, case-insensitive
+	librarySortRecent                        // most recently modified first
+)
+
+func (m librarySortMode) label() string {
+	if m == librarySortRecent {
+		return "recent"
+	}
+	return "name"
+}
+
+func (m librarySortMode) next() librarySortMode {
+	return (m + 1) % 2
+}
+
 // placeholderKind marks a TreeNode as synthetic bookkeeping rather than a
 // real DirEntry: either "this directory's children haven't been fetched
 // yet" (shown as an expand target) or "fetched and confirmed empty" (so
@@ -50,8 +72,9 @@ type libraryPanel struct {
 	tree *tview.TreeView
 	root *tview.TreeNode
 
-	mode  libraryMode
-	query string
+	mode     libraryMode
+	query    string
+	sortMode librarySortMode
 }
 
 func newLibraryPanel(app *App) *libraryPanel {
@@ -75,11 +98,24 @@ func (p *libraryPanel) showRoot() {
 
 	p.mode = libBrowse
 	p.root.ClearChildren()
-	for _, n := range buildNodes(entries) {
+	for _, n := range buildNodes(entries, p.sortMode) {
 		p.root.AddChild(n)
 	}
-	p.tree.SetTitle(" Library ")
+	p.tree.SetTitle(fmt.Sprintf(" Library (%s) ", p.sortMode.label()))
 	p.tree.SetCurrentNode(p.root)
+}
+
+// cycleSortMode advances to the next sort mode and reloads the root with
+// it. Only meaningful in browse mode (see App.handleCycleSort, which
+// gates the 'o' key on that); search results have their own fixed
+// ordering. Reloading the root is a deliberate simplification -- MPD's
+// lazy per-folder loading means an already-expanded subtree fetched under
+// the old mode would otherwise keep its old order until collapsed and
+// re-expanded, so this resets to a fresh, consistently-sorted top level
+// instead of leaving mixed-order state around.
+func (p *libraryPanel) cycleSortMode() {
+	p.sortMode = p.sortMode.next()
+	p.showRoot()
 }
 
 // showSearch full-text searches the library by tag (independent of the
@@ -274,7 +310,7 @@ func (p *libraryPanel) toggleDirectory(node *tview.TreeNode, entry mpdclient.Dir
 			if len(fetched) == 0 {
 				node.AddChild(tview.NewTreeNode("[::d](empty)[-:-:-]").SetSelectable(false).SetReference(placeholderEmpty))
 			} else {
-				for _, n := range buildNodes(fetched) {
+				for _, n := range buildNodes(fetched, p.sortMode) {
 					node.AddChild(n)
 				}
 			}
@@ -317,11 +353,19 @@ func (p *libraryPanel) addSelected() {
 	}
 }
 
-// buildNodes turns entries into tree nodes, directories first then
-// everything else alphabetically, matching common file-explorer ordering.
-// Each directory node starts collapsed with a single unloaded placeholder
-// child, populated lazily by toggleDirectory.
-func buildNodes(entries []mpdclient.DirEntry) []*tview.TreeNode {
+// buildNodes turns entries into tree nodes, directories always grouped
+// first (both sort modes keep this -- mixing directories and files by
+// recency reads as a jumbled listing, whereas file explorers conventionally
+// keep folders first even under "sort by date modified"), then ordered by
+// mode within each group: alphabetical (librarySortName, matching common
+// file-explorer ordering) or most-recently-modified-first
+// (librarySortRecent, falling back to the same alphabetical comparison for
+// equal or missing timestamps -- see DirEntry.LastModified's doc comment
+// on why "missing" can't just sort as "oldest"... it does here, but
+// deterministically, via the name tiebreak, rather than clumping
+// unpredictably). Each directory node starts collapsed with a single
+// unloaded placeholder child, populated lazily by toggleDirectory.
+func buildNodes(entries []mpdclient.DirEntry, mode librarySortMode) []*tview.TreeNode {
 	sorted := make([]mpdclient.DirEntry, len(entries))
 	copy(sorted, entries)
 	sort.SliceStable(sorted, func(i, j int) bool {
@@ -330,11 +374,18 @@ func buildNodes(entries []mpdclient.DirEntry) []*tview.TreeNode {
 		if di != dj {
 			return di
 		}
+		if mode == librarySortRecent {
+			li, lj := sorted[i].LastModified, sorted[j].LastModified
+			if !li.Equal(lj) {
+				return li.After(lj)
+			}
+		}
 		// Case-insensitive: this library mixes folder-naming conventions
 		// (e.g. both "Alisha Chinoy" and "alisha-chinai" exist as separate
 		// top-level directories), and a case-sensitive sort would scatter
 		// them apart into a Digits/Uppercase/lowercase clustering instead
-		// of the alphabetical order a user actually expects.
+		// of the alphabetical order a user actually expects. Also serves
+		// as librarySortRecent's tiebreak for equal/missing timestamps.
 		return strings.ToLower(entryLabel(sorted[i])) < strings.ToLower(entryLabel(sorted[j]))
 	})
 
