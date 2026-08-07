@@ -20,6 +20,12 @@ Bordered panels, single-key contextual actions, vim-style navigation — no
 mouse required. Two run modes: a full panel UI, and a lightweight
 single-line inline player for a shell or tmux pane.
 
+## Screenshot
+
+<p align="center">
+  <img src="assets/screenshot.png" width="900" alt="mpdtui full panel UI: Library tree, Album Art, Playlists, Queue with format tags, and live stats">
+</p>
+
 ## Demo
 
 <p align="center">
