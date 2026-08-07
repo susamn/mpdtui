@@ -175,7 +175,8 @@ func (q *queuePanel) render(curID int) {
 		q.table.SetCell(row, 2, tview.NewTableCell(truncateWithEllipsis(title, queueTitleMaxLen)+queueColumnGap).
 			SetAttributes(tcell.AttrBold))
 		q.table.SetCell(row, 3, tview.NewTableCell(truncateWithEllipsis(s.Album, queueAlbumMaxLen)+queueColumnGap))
-		q.table.SetCell(row, 4, tview.NewTableCell(truncateWithEllipsis(s.Artist, queueArtistMaxLen)+queueColumnGap))
+		q.table.SetCell(row, 4, tview.NewTableCell(truncateWithEllipsis(s.Artist, queueArtistMaxLen)+queueColumnGap).
+			SetExpansion(1))
 		q.table.SetCell(row, 5, formatTagCell(s.File))
 		q.table.SetCell(row, 6, tview.NewTableCell(FormatDuration(s.Duration)).SetAlign(tview.AlignRight))
 	}

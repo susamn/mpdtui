@@ -230,6 +230,22 @@ func TestQueueRenderShowsTitleAlbumArtistInOrder(t *testing.T) {
 	}
 }
 
+// TestQueueRenderArtistColumnExpands guards against the Type/Duration
+// columns floating with dead space after them instead of sitting flush
+// against the table's right edge: without any column carrying Expansion,
+// tview.Table leaves leftover width undistributed (see Table.Draw's
+// "If we have space left, distribute it" step, which only touches columns
+// with Expansion > 0).
+func TestQueueRenderArtistColumnExpands(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track", Artist: "Artist"}}
+	a.queue.render(-1)
+
+	if got := a.queue.table.GetCell(queueHeaderRows, 4).Expansion; got != 1 {
+		t.Errorf("artist cell Expansion = %d, want 1", got)
+	}
+}
+
 func TestQueueRenderTitleFallsBackToFilename(t *testing.T) {
 	a := newTestApp()
 	a.queue.songs = []mpdclient.Song{{ID: 1, File: "music/artist/untagged-track.mp3"}}
