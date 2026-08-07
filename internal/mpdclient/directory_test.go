@@ -2,6 +2,7 @@ package mpdclient
 
 import (
 	"testing"
+	"time"
 
 	"github.com/fhs/gompd/v2/mpd"
 )
@@ -57,5 +58,32 @@ func TestParseDirEntriesSkipsUnrecognizedRows(t *testing.T) {
 	entries := parseDirEntries([]mpd.Attrs{{}})
 	if len(entries) != 0 {
 		t.Errorf("got %d entries from a row with no directory/playlist/file key, want 0", len(entries))
+	}
+}
+
+func TestParseDirEntriesParsesLastModified(t *testing.T) {
+	attrs := []mpd.Attrs{
+		{"directory": "queen/absolute-greatest", "last-modified": "2026-02-20T04:39:02Z"},
+		{"file": "queen/track.mp3", "last-modified": "2022-11-13T21:01:51Z"},
+		{"playlist": "Rock", "last-modified": "2026-08-05T03:46:30Z"},
+	}
+	entries := parseDirEntries(attrs)
+	if len(entries) != 3 {
+		t.Fatalf("got %d entries, want 3", len(entries))
+	}
+	want := []string{"2026-02-20T04:39:02Z", "2022-11-13T21:01:51Z", "2026-08-05T03:46:30Z"}
+	for i, w := range want {
+		if entries[i].LastModified.Format(time.RFC3339) != w {
+			t.Errorf("entries[%d].LastModified = %v, want %s", i, entries[i].LastModified, w)
+		}
+	}
+}
+
+func TestParseDirEntriesMissingLastModifiedIsZero(t *testing.T) {
+	// Verified against a live server: root-level directories don't
+	// always report last-modified even though nested ones do.
+	entries := parseDirEntries([]mpd.Attrs{{"directory": "4-non-blondes"}})
+	if !entries[0].LastModified.IsZero() {
+		t.Errorf("LastModified with no last-modified key = %v, want the zero time", entries[0].LastModified)
 	}
 }
