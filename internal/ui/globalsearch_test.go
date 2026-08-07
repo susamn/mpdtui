@@ -155,6 +155,17 @@ func TestOpenGlobalSearchPlaylistMatchClosesAndFocusesPlaylists(t *testing.T) {
 	}
 }
 
+func TestOpenGlobalSearchDefaultsToTrackPrefix(t *testing.T) {
+	a := newTestApp()
+	a.tv.SetFocus(a.queue.table)
+	a.openGlobalSearch()
+
+	field := a.tv.GetFocus().(*tview.InputField)
+	if got := field.GetText(); got != "t " {
+		t.Errorf("default field text = %q, want %q", got, "t ")
+	}
+}
+
 func TestOpenGlobalSearchEscRestoresOriginalFocus(t *testing.T) {
 	a := newTestApp()
 	a.tv.SetFocus(a.queue.table)
