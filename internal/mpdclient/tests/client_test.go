@@ -3,6 +3,7 @@
 package tests
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -247,5 +248,56 @@ func TestLibraryStats(t *testing.T) {
 	// than zero of each; a negative count would mean parsing failed).
 	if stats.Tracks < 0 || stats.Artists < 0 {
 		t.Errorf("negative stats: %+v", stats)
+	}
+}
+
+// firstTaggedAlbum finds an (artist, album) pair with non-empty names.
+// Real libraries often have an untagged-track bucket that shows up as an
+// empty-string "artist"/"album" (first alphabetically, so artists[0] is a
+// trap here) -- a substring search against "" trivially matches
+// everything instead of testing anything meaningful.
+func firstTaggedAlbum(t *testing.T, c *mpdclient.Client) (artist, album string) {
+	t.Helper()
+	artists, err := c.Artists()
+	if err != nil {
+		t.Fatalf("Artists: %v", err)
+	}
+	for _, a := range artists {
+		if a == "" {
+			continue
+		}
+		albums, err := c.Albums(a)
+		if err != nil {
+			t.Fatalf("Albums(%q): %v", a, err)
+		}
+		for _, al := range albums {
+			if al != "" {
+				return a, al
+			}
+		}
+	}
+	t.Skip("library has no artist with a non-empty tagged album to search against")
+	return "", ""
+}
+
+func TestSearchAlbums(t *testing.T) {
+	c := dialOrSkip(t)
+	_, album := firstTaggedAlbum(t, c)
+
+	songs, err := c.SearchAlbums(album)
+	if err != nil {
+		t.Fatalf("SearchAlbums(%q): %v", album, err)
+	}
+	if len(songs) == 0 {
+		t.Fatalf("expected at least one track for album %q", album)
+	}
+	// MPD's search is substring/case-insensitive, so a different album
+	// that happens to contain this one's name as a substring is a
+	// legitimate match too -- only assert containment, not exact equality.
+	needle := strings.ToLower(album)
+	for _, s := range songs {
+		if !strings.Contains(strings.ToLower(s.Album), needle) {
+			t.Errorf("track %q has Album = %q, doesn't contain %q", s.File, s.Album, album)
+		}
 	}
 }

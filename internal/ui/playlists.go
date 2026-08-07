@@ -45,7 +45,9 @@ func (p *playlistsPanel) refresh() {
 	p.render()
 }
 
-func (p *playlistsPanel) render() {
+// render redisplays the (optionally filtered) list and returns how many
+// entries are currently shown.
+func (p *playlistsPanel) render() int {
 	shown := p.names
 	if p.filter != "" {
 		shown = nil
@@ -68,11 +70,13 @@ func (p *playlistsPanel) render() {
 		title = fmt.Sprintf(" Playlists: filter %q ", p.filter)
 	}
 	p.list.SetTitle(title)
+	return len(shown)
 }
 
-func (p *playlistsPanel) setFilter(f string) {
+// setFilter applies f and returns how many playlists matched.
+func (p *playlistsPanel) setFilter(f string) int {
 	p.filter = f
-	p.render()
+	return p.render()
 }
 
 func (p *playlistsPanel) selectedName() string {

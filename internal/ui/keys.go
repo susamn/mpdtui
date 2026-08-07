@@ -64,6 +64,9 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 		case '/':
 			a.openSearch()
 			return nil
+		case 'f':
+			a.openGlobalSearch()
+			return nil
 		case '?':
 			a.openHelp()
 			return nil

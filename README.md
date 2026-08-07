@@ -113,6 +113,7 @@ Press `?` inside the full UI for the in-app keybinding list.
 | `D` | Clear entire queue (confirm) |
 | `Tab`, `1`/`2`/`3` | Cycle / jump focus between panels |
 | `/` | Search (contextual: filters Library/Playlists, jumps to a match in Queue) |
+| `f` | Global search from any panel -- type `a`/`p`/`t` + a term, e.g. `a hello`, `p oldies`, `t help me` (album/playlist/track); stays open with "no X found" if nothing matches |
 | `?` | Help overlay |
 | `q` | Quit |
 
