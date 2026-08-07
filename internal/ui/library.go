@@ -84,11 +84,12 @@ func (p *libraryPanel) showRoot() {
 
 // showSearch full-text searches the library by tag (independent of the
 // directory tree) and shows the matches as a flat list of file nodes.
-func (p *libraryPanel) showSearch(query string) {
+// Returns the number of matched tracks.
+func (p *libraryPanel) showSearch(query string) int {
 	songs, err := p.app.client.Search(query)
 	if err != nil {
 		p.app.showError(err)
-		return
+		return 0
 	}
 
 	p.mode = libSearch
@@ -104,12 +105,89 @@ func (p *libraryPanel) showSearch(query string) {
 	if len(songs) == 0 {
 		p.app.showMessage("no results for " + query)
 	}
+	return len(songs)
+}
+
+// albumGroup marks a TreeNode as an album-search result header rather
+// than a real MPD directory: its tracks are already fetched (the same
+// search call that found this album also returned them), so expanding it
+// needs no further MPD round-trip, unlike toggleDirectory's lazy
+// real-directory case.
+type albumGroup struct {
+	label string
+	songs []mpdclient.Song
+}
+
+// showAlbumSearch searches the library by Album tag and groups matching
+// tracks by (Artist, Album) into expandable headers -- unlike showSearch's
+// flat per-track results, "found an album" reads better as "here's the
+// album, browse into it" than a flat dump of its tracks. Returns the
+// number of matched albums.
+func (p *libraryPanel) showAlbumSearch(query string) int {
+	songs, err := p.app.client.SearchAlbums(query)
+	if err != nil {
+		p.app.showError(err)
+		return 0
+	}
+
+	p.mode = libSearch
+	p.query = query
+	p.root.ClearChildren()
+
+	groups := groupByAlbum(songs)
+	for _, g := range groups {
+		g := g
+		node := tview.NewTreeNode(fmt.Sprintf("%s (%d)", g.label, len(g.songs))).
+			SetReference(g).
+			SetSelectedTextStyle(treeSelectedStyle).
+			SetExpanded(false)
+		for _, s := range g.songs {
+			s := s
+			entry := mpdclient.DirEntry{Type: mpdclient.EntryFile, Path: s.File, Song: s}
+			node.AddChild(tview.NewTreeNode(trackLabel(s)).SetReference(entry).SetSelectedTextStyle(treeSelectedStyle))
+		}
+		p.root.AddChild(node)
+	}
+
+	p.tree.SetTitle(fmt.Sprintf(" Library: album search %q (%d) ", query, len(groups)))
+	p.tree.SetCurrentNode(p.root)
+	if len(groups) == 0 {
+		p.app.showMessage("no albums found for " + query)
+	}
+	return len(groups)
+}
+
+// groupByAlbum groups songs by (Artist, Album), sorted alphabetically.
+func groupByAlbum(songs []mpdclient.Song) []*albumGroup {
+	index := make(map[string]*albumGroup)
+	var order []string
+	for _, s := range songs {
+		key := s.Artist + "\x00" + s.Album
+		g, ok := index[key]
+		if !ok {
+			label := s.Album
+			if s.Artist != "" {
+				label = s.Artist + " - " + s.Album
+			}
+			g = &albumGroup{label: label}
+			index[key] = g
+			order = append(order, key)
+		}
+		g.songs = append(g.songs, s)
+	}
+	sort.Strings(order)
+	groups := make([]*albumGroup, len(order))
+	for i, key := range order {
+		groups[i] = index[key]
+	}
+	return groups
 }
 
 // back handles Backspace: from search results, returns to the directory
 // root (same target Esc uses). While browsing, it collapses the current
-// node if it's an expanded directory, or otherwise moves the selection up
-// to (and collapses) its parent -- standard file-explorer "go back".
+// node if it's an expanded directory or album-search group, or otherwise
+// moves the selection up to (and collapses) its parent -- standard
+// file-explorer "go back".
 func (p *libraryPanel) back() {
 	if p.mode == libSearch {
 		p.showRoot()
@@ -120,8 +198,7 @@ func (p *libraryPanel) back() {
 	if current == nil || current == p.root {
 		return
 	}
-	if entry, ok := current.GetReference().(mpdclient.DirEntry); ok && entry.Type == mpdclient.EntryDirectory && current.IsExpanded() {
-		setDirExpanded(current, entry.Path, false)
+	if current.IsExpanded() && collapseGroup(current) {
 		return
 	}
 
@@ -130,17 +207,38 @@ func (p *libraryPanel) back() {
 		return
 	}
 	parent := path[len(path)-2]
-	if entry, ok := parent.GetReference().(mpdclient.DirEntry); ok {
-		setDirExpanded(parent, entry.Path, false)
-	}
+	collapseGroup(parent)
 	p.tree.SetCurrentNode(parent)
 }
 
+// collapseGroup collapses node if it's a directory or an album-search
+// group, returning whether it was one -- regardless of prior expanded
+// state (SetExpanded(false) on an already-collapsed node is a harmless
+// no-op). Directories additionally get their folder icon updated to
+// match.
+func collapseGroup(node *tview.TreeNode) bool {
+	switch ref := node.GetReference().(type) {
+	case mpdclient.DirEntry:
+		if ref.Type == mpdclient.EntryDirectory {
+			setDirExpanded(node, ref.Path, false)
+			return true
+		}
+	case *albumGroup:
+		node.SetExpanded(false)
+		return true
+	}
+	return false
+}
+
 // onSelect is the TreeView-wide handler for Enter/Space: expand/collapse a
-// directory, add+play a track, or append a stored playlist encountered in
-// the tree. Nodes with no DirEntry reference (the root, or an unloaded/
-// empty placeholder) have nothing to do.
+// directory or album-search group, add+play a track, or append a stored
+// playlist encountered in the tree. Nodes with no reference (the root, or
+// an unloaded/empty placeholder) have nothing to do.
 func (p *libraryPanel) onSelect(node *tview.TreeNode) {
+	if _, ok := node.GetReference().(*albumGroup); ok {
+		node.SetExpanded(!node.IsExpanded())
+		return
+	}
 	entry, ok := node.GetReference().(mpdclient.DirEntry)
 	if !ok {
 		return
@@ -187,12 +285,24 @@ func (p *libraryPanel) toggleDirectory(node *tview.TreeNode, entry mpdclient.Dir
 
 // addSelected implements 'a' (add to queue, no play): the whole subtree
 // for a directory (MPD's own "add" command recurses server-side -- no need
-// to fetch and iterate children here), a single track for a file, or an
-// append for a playlist entry (there's no meaningful "add without loading"
-// distinction for a stored playlist, so it behaves like Enter).
+// to fetch and iterate children here), every track in an album-search
+// group, a single track for a file, or an append for a playlist entry
+// (there's no meaningful "add without loading" distinction for a stored
+// playlist, so it behaves like Enter).
 func (p *libraryPanel) addSelected() {
 	node := p.tree.GetCurrentNode()
 	if node == nil {
+		return
+	}
+	if g, ok := node.GetReference().(*albumGroup); ok {
+		for _, s := range g.songs {
+			if err := p.app.client.QueueAdd(s.File); err != nil {
+				p.app.showError(err)
+				return
+			}
+		}
+		p.app.queue.refresh()
+		p.app.showMessage(fmt.Sprintf("added %d track(s) from %s", len(g.songs), g.label))
 		return
 	}
 	entry, ok := node.GetReference().(mpdclient.DirEntry)

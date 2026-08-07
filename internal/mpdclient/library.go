@@ -45,6 +45,16 @@ func (c *Client) Search(query string) ([]Song, error) {
 	return parseSongs(list), nil
 }
 
+// SearchAlbums performs a case-insensitive free-text search restricted to
+// the Album tag, returning every track belonging to a matching album.
+func (c *Client) SearchAlbums(query string) ([]Song, error) {
+	list, err := call(c, func(conn *mpd.Client) ([]mpd.Attrs, error) { return conn.Search("album", query) })
+	if err != nil {
+		return nil, err
+	}
+	return parseSongs(list), nil
+}
+
 // AllSongs returns every track in the library.
 func (c *Client) AllSongs() ([]Song, error) {
 	list, err := call(c, func(conn *mpd.Client) ([]mpd.Attrs, error) { return conn.ListAllInfo("") })

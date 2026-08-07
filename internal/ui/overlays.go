@@ -143,6 +143,8 @@ const helpText = `[::b]Global[-:-:-]
   D              clear entire queue (confirm)
   Tab, 1/2/3     cycle / jump focus between panels
   /              search (contextual: Library/Playlists filter, Queue jump)
+  f              global search from any panel: "a/p/t <term>" for
+                 album/playlist/track (e.g. "a hello", "p oldies")
   ?              this help
   q              quit
 
