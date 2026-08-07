@@ -99,27 +99,26 @@ func (q *queuePanel) render(curID int) {
 // (unlike TextView's SetDynamicColors), so "[...]" is always parsed as a
 // style/region tag, not literal brackets, and silently disappears.
 //
-// Colors are deliberately from tcell's basic 16-color ANSI set (Black,
-// Maroon, Green, Olive, Navy, Purple, Teal, Silver, Gray, Red, Lime,
-// Yellow, Blue, Fuchsia, Aqua, White) rather than tcell's extended
-// "DodgerBlue"/"FireBrick"/"MediumOrchid"-style named colors, which are
-// true 24-bit RGB values (tcell.ColorIsRGB) requiring the terminal to
-// negotiate truecolor support. The basic 16 need no such negotiation and
-// are the same family already proven to work elsewhere in this app
-// (colorSelectedBg/Fg, colorActiveBorder) -- the safer default absent a
-// specific reason to need a wider palette.
+// A first pass here used tcell's extended RGB-based names, then got
+// swapped to the basic 16-color ANSI set out of a since-disproven worry
+// that RGB colors (tcell.ColorIsRGB, true 24-bit values needing truecolor
+// negotiation) weren't rendering -- that finding was actually an artifact
+// of sampling the selected row, whose color the table's own selection
+// style always overrides regardless of format, not a real rendering
+// failure. RGB colors are back, verified rendering correctly on
+// non-selected rows.
 var formatColors = map[string]tcell.Color{
-	"FLAC": tcell.ColorGreen,
-	"WAV":  tcell.ColorTeal,
-	"MP3":  tcell.ColorAqua,
-	"M4A":  tcell.ColorFuchsia,
-	"AAC":  tcell.ColorFuchsia,
-	"OGG":  tcell.ColorYellow,
-	"OPUS": tcell.ColorYellow,
-	"WMA":  tcell.ColorRed,
+	"FLAC": tcell.ColorLime,
+	"MP3":  tcell.ColorSkyblue,
+	"WAV":  tcell.ColorTurquoise,
+	"M4A":  tcell.ColorLavender,
+	"AAC":  tcell.ColorLavender,
+	"OGG":  tcell.ColorAquaMarine,
+	"OPUS": tcell.ColorAquaMarine,
+	"WMA":  tcell.ColorOrange,
 }
 
-const defaultFormatColor = tcell.ColorGray
+const defaultFormatColor = tcell.ColorHotPink
 
 // formatGap is trailing space after the tag, separating it from the
 // duration column next to it.
