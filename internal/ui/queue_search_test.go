@@ -24,21 +24,21 @@ func TestQueueJumpToMatchSelectsFirstCaseInsensitiveMatch(t *testing.T) {
 	if ok := a.queue.jumpToMatch("boards"); !ok {
 		t.Fatal("expected a match for \"boards\"")
 	}
-	if row, _ := a.queue.table.GetSelection(); row != 0 {
-		t.Errorf("selected row = %d, want 0 (first Boards of Canada track)", row)
+	if row, _ := a.queue.table.GetSelection(); row != queueHeaderRows {
+		t.Errorf("selected row = %d, want %d (first Boards of Canada track)", row, queueHeaderRows)
 	}
 }
 
 func TestQueueJumpToMatchNoMatchLeavesSelectionAlone(t *testing.T) {
 	a := newTestApp()
 	a.queue.songs = testSongs()
-	a.queue.table.Select(1, 0)
+	a.queue.table.Select(1+queueHeaderRows, 0)
 
 	if ok := a.queue.jumpToMatch("nonexistent"); ok {
 		t.Fatal("expected no match for \"nonexistent\"")
 	}
-	if row, _ := a.queue.table.GetSelection(); row != 1 {
-		t.Errorf("selection changed on no-match: row = %d, want 1 (untouched)", row)
+	if row, _ := a.queue.table.GetSelection(); row != 1+queueHeaderRows {
+		t.Errorf("selection changed on no-match: row = %d, want %d (untouched)", row, 1+queueHeaderRows)
 	}
 }
 
@@ -103,8 +103,8 @@ func TestQueueSearchEnterJumpsToMatch(t *testing.T) {
 	if a.mode != modeNormal {
 		t.Fatalf("mode after Enter = %d, want modeNormal", a.mode)
 	}
-	if row, _ := a.queue.table.GetSelection(); row != 1 {
-		t.Errorf("selected row after Enter = %d, want 1 (Aphex Twin track)", row)
+	if row, _ := a.queue.table.GetSelection(); row != 1+queueHeaderRows {
+		t.Errorf("selected row after Enter = %d, want %d (Aphex Twin track)", row, 1+queueHeaderRows)
 	}
 	if a.tv.GetFocus() != a.queue.table {
 		t.Errorf("focus after Enter = %T, want the Queue table", a.tv.GetFocus())

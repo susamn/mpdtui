@@ -392,5 +392,5 @@ func (a *App) handleQueueMove(delta int) {
 		return
 	}
 	a.queue.refresh()
-	a.queue.table.Select(newPos, 0)
+	a.queue.table.Select(newPos+queueHeaderRows, 0)
 }

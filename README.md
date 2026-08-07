@@ -44,10 +44,11 @@ single-line inline player for a shell or tmux pane.
 - **Playlists** — load, append, save, delete stored playlists; `o` cycles
   between most-recently-updated and alphabetical, with a 🆕 badge on the
   5 most recent regardless of which sort is showing
-- **Queue** — reorder, remove, clear, jump to any track; each row shows
-  Title/Album/Artist (truncated to 30/20/40 characters with "..." if
-  longer) plus a color-coded format badge (MP3/FLAC/M4A/...) next to its
-  runtime
+- **Queue** — reorder, remove, clear, jump to any track; a pinned header
+  row (Title/Album/Artist/Type/Duration) stays visible while scrolling.
+  Title is bold; Title/Album/Artist are truncated to 30/20/40 characters
+  with "..." if longer; Type shows a color-coded format badge
+  (MP3/FLAC/M4A/...); Type and Duration are right-aligned
 - **Library stats** — live total tracks/artists/playlists, shown
   alongside the Queue search box, refreshed on library/playlist changes
 - **Now Playing bar** — live progress, volume, repeat/random/single/consume

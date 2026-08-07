@@ -27,6 +27,24 @@ func cellFg(cell *tview.TableCell) tcell.Color {
 	return fg
 }
 
+// cellBg/cellBold mirror cellFg's same dual-branch resolution, for
+// background color and the bold attribute respectively.
+func cellBg(cell *tview.TableCell) tcell.Color {
+	if cell.Style == tcell.StyleDefault {
+		return cell.BackgroundColor
+	}
+	_, bg, _ := cell.Style.Decompose()
+	return bg
+}
+
+func cellBold(cell *tview.TableCell) bool {
+	if cell.Style == tcell.StyleDefault {
+		return cell.Attributes&tcell.AttrBold != 0
+	}
+	_, _, attrs := cell.Style.Decompose()
+	return attrs&tcell.AttrBold != 0
+}
+
 func TestFormatTagCellKnownFormatUsesItsColor(t *testing.T) {
 	cell := formatTagCell("track.flac")
 	if got, want := cell.Text, "FLAC"+formatGap; got != want {
@@ -111,6 +129,89 @@ func TestTruncateWithEllipsisIsRuneSafe(t *testing.T) {
 	}
 }
 
+func TestQueueHeaderRowLabelsAndAlignment(t *testing.T) {
+	a := newTestApp()
+	a.queue.render(-1) // no songs -- header should still be there
+
+	wantHeaders := []struct {
+		col   int
+		text  string
+		align int
+	}{
+		{0, "", tview.AlignLeft},
+		{1, "", tview.AlignLeft},
+		{2, "Title", tview.AlignLeft},
+		{3, "Album", tview.AlignLeft},
+		{4, "Artist", tview.AlignLeft},
+		{5, "Type", tview.AlignRight},
+		{6, "Duration", tview.AlignRight},
+	}
+	for _, w := range wantHeaders {
+		cell := a.queue.table.GetCell(0, w.col)
+		if cell.Text != w.text {
+			t.Errorf("header col %d text = %q, want %q", w.col, cell.Text, w.text)
+		}
+		if cell.Align != w.align {
+			t.Errorf("header col %d align = %d, want %d", w.col, cell.Align, w.align)
+		}
+	}
+}
+
+func TestQueueHeaderRowStyledAndNotSelectable(t *testing.T) {
+	a := newTestApp()
+	a.queue.render(-1)
+
+	cell := a.queue.table.GetCell(0, 2) // "Title"
+	if got := cellFg(cell); got != queueHeaderFg {
+		t.Errorf("header foreground = %v, want %v", got, queueHeaderFg)
+	}
+	if got := cellBg(cell); got != queueHeaderBg {
+		t.Errorf("header background = %v, want %v", got, queueHeaderBg)
+	}
+	if !cell.NotSelectable {
+		t.Error("header cell should not be selectable")
+	}
+}
+
+// TestQueueHeaderSurvivesRerender guards against render() forgetting to
+// rebuild the header after Table.Clear() wipes every cell including row 0.
+func TestQueueHeaderSurvivesRerender(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "First"}}
+	a.queue.render(-1)
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "First"}, {ID: 2, Title: "Second"}}
+	a.queue.render(-1) // a second render, exercising Clear() + rebuild again
+
+	if got := a.queue.table.GetCell(0, 2).Text; got != "Title" {
+		t.Errorf("header after a second render = %q, want %q", got, "Title")
+	}
+}
+
+func TestQueueRenderTitleCellIsBold(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Bohemian Rhapsody"}}
+	a.queue.render(-1)
+
+	titleCell := a.queue.table.GetCell(queueHeaderRows, 2)
+	if !cellBold(titleCell) {
+		t.Error("track title cell should be bold")
+	}
+	albumCell := a.queue.table.GetCell(queueHeaderRows, 3)
+	if cellBold(albumCell) {
+		t.Error("album cell should not be bold")
+	}
+}
+
+func TestQueueRenderDurationCellRightAligned(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track"}}
+	a.queue.render(-1)
+
+	if got := a.queue.table.GetCell(queueHeaderRows, 6).Align; got != tview.AlignRight {
+		t.Errorf("duration cell align = %d, want AlignRight", got)
+	}
+}
+
 func TestQueueRenderShowsTitleAlbumArtistInOrder(t *testing.T) {
 	a := newTestApp()
 	a.queue.songs = []mpdclient.Song{
@@ -118,13 +219,13 @@ func TestQueueRenderShowsTitleAlbumArtistInOrder(t *testing.T) {
 	}
 	a.queue.render(-1)
 
-	if got := a.queue.table.GetCell(0, 2).Text; got != "Bohemian Rhapsody"+queueColumnGap {
+	if got := a.queue.table.GetCell(queueHeaderRows, 2).Text; got != "Bohemian Rhapsody"+queueColumnGap {
 		t.Errorf("title cell = %q, want %q", got, "Bohemian Rhapsody"+queueColumnGap)
 	}
-	if got := a.queue.table.GetCell(0, 3).Text; got != "A Night at the Opera"+queueColumnGap {
+	if got := a.queue.table.GetCell(queueHeaderRows, 3).Text; got != "A Night at the Opera"+queueColumnGap {
 		t.Errorf("album cell = %q, want %q", got, "A Night at the Opera"+queueColumnGap)
 	}
-	if got := a.queue.table.GetCell(0, 4).Text; got != "Queen"+queueColumnGap {
+	if got := a.queue.table.GetCell(queueHeaderRows, 4).Text; got != "Queen"+queueColumnGap {
 		t.Errorf("artist cell = %q, want %q", got, "Queen"+queueColumnGap)
 	}
 }
@@ -134,7 +235,7 @@ func TestQueueRenderTitleFallsBackToFilename(t *testing.T) {
 	a.queue.songs = []mpdclient.Song{{ID: 1, File: "music/artist/untagged-track.mp3"}}
 	a.queue.render(-1)
 
-	if got := a.queue.table.GetCell(0, 2).Text; got != "untagged-track.mp3"+queueColumnGap {
+	if got := a.queue.table.GetCell(queueHeaderRows, 2).Text; got != "untagged-track.mp3"+queueColumnGap {
 		t.Errorf("title cell for an untagged track = %q, want the filename %q", got, "untagged-track.mp3"+queueColumnGap)
 	}
 }
@@ -152,13 +253,13 @@ func TestQueueRenderTruncatesEachColumnToItsOwnMax(t *testing.T) {
 	wantTitle := strings.Repeat("t", queueTitleMaxLen-3) + "..." + queueColumnGap
 	wantAlbum := strings.Repeat("a", queueAlbumMaxLen-3) + "..." + queueColumnGap
 	wantArtist := strings.Repeat("r", queueArtistMaxLen-3) + "..." + queueColumnGap
-	if got := a.queue.table.GetCell(0, 2).Text; got != wantTitle {
+	if got := a.queue.table.GetCell(queueHeaderRows, 2).Text; got != wantTitle {
 		t.Errorf("title cell = %q, want %q", got, wantTitle)
 	}
-	if got := a.queue.table.GetCell(0, 3).Text; got != wantAlbum {
+	if got := a.queue.table.GetCell(queueHeaderRows, 3).Text; got != wantAlbum {
 		t.Errorf("album cell = %q, want %q", got, wantAlbum)
 	}
-	if got := a.queue.table.GetCell(0, 4).Text; got != wantArtist {
+	if got := a.queue.table.GetCell(queueHeaderRows, 4).Text; got != wantArtist {
 		t.Errorf("artist cell = %q, want %q", got, wantArtist)
 	}
 }
@@ -177,8 +278,8 @@ func TestQueueJumpToCurrentSelectsThePlayingRow(t *testing.T) {
 		t.Fatal("jumpToCurrent() = false, want true (song id 2 is in the queue)")
 	}
 	row, _ := a.queue.table.GetSelection()
-	if row != 1 {
-		t.Errorf("selected row = %d, want 1 (the row for song id 2)", row)
+	if row != 1+queueHeaderRows {
+		t.Errorf("selected row = %d, want %d (the row for song id 2)", row, 1+queueHeaderRows)
 	}
 }
 
