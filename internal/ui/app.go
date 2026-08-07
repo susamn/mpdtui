@@ -40,6 +40,7 @@ type App struct {
 	nowPlaying *tview.TextView
 	hintBar    *tview.TextView
 	albumArt   *albumArtPanel
+	trackInfo  *trackInfoCard
 
 	panels   []tview.Primitive
 	panelIdx int
@@ -107,6 +108,7 @@ func (a *App) build() {
 	a.nowPlaying.SetBorderColor(tcell.ColorYellow)
 
 	a.albumArt = newAlbumArtPanel(a)
+	a.trackInfo = newTrackInfoCard(a)
 
 	a.hintBar = tview.NewTextView().SetDynamicColors(true)
 
@@ -212,6 +214,7 @@ func (a *App) refreshNowPlaying() {
 	a.renderNowPlaying(st, song)
 	a.queue.setCurrent(st.SongID)
 	a.albumArt.onTrackChanged(song.File)
+	a.trackInfo.render(song)
 }
 
 func (a *App) cycleFocus(delta int) {
@@ -279,7 +282,7 @@ func (a *App) updateHintBar() {
 	case a.queue.table:
 		panelHints = "Enter:play  d:remove  J/K:move"
 	}
-	global := "Space:play/pause  s:stop  n/p:next/prev  ,/.:seek  -/=:vol  z:shuffle  x:repeat  D:clear queue  /:search  f:find  ?:help  Tab/1-3:panels  q:quit"
+	global := "Space:play/pause  s:stop  n/p:next/prev  ,/.:seek  -/=:vol  z:shuffle  x:repeat  D:clear queue  /:search  f:find  i:info  ?:help  Tab/1-3:panels  q:quit"
 	a.hintBar.SetText("[::b]" + panelHints + "[-:-:-]  |  " + global)
 }
 
