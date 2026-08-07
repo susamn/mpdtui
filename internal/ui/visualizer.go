@@ -2,6 +2,7 @@ package ui
 
 import (
 	"strings"
+	"time"
 
 	"github.com/rivo/tview"
 
@@ -12,12 +13,13 @@ import (
 //
 //  1. Create a new file internal/ui/viz_<name>.go with a type implementing
 //     this interface (see viz_sonar.go for a worked example).
-//  2. Register an instance of it in newVisualizerPanel's vizs slice, below.
+//  2. Register an instance of it in newVisualizerPanel's vizs slice,
+//     below.
 //
 // That's the whole contract -- the container (visualizerPanel, in this
 // file) handles sizing, the border/title, cycling, and re-rendering on
 // every playback tick; a visualization only has to turn (width, height,
-// frame, status) into `height` lines of text.
+// elapsed, status) into `height` lines of text.
 //
 // Dimensions: the visualizer container occupies the right 50% of the Now
 // Playing row (see app.go's build(), where nowPlayingRow splits a.nowPlaying
@@ -32,9 +34,10 @@ import (
 // Data available: MPD does not expose real audio data to clients (no
 // spectrum/FFT/waveform feed) -- there is no "microphone into the music"
 // here. Every visualization is driven purely by playback state
-// (mpdclient.Status: State/Volume/Elapsed/Duration/...), the same status
-// already polled every ~500ms for the Now Playing bar. Don't design a
-// visualization that assumes audio-reactive data it can't actually get.
+// (mpdclient.Status: State/Volume/Elapsed/Duration/...) plus real elapsed
+// wall-clock time, the same status already polled every ~500ms for the
+// Now Playing bar. Don't design a visualization that assumes audio-
+// reactive data it can't actually get.
 type Visualization interface {
 	// Name is shown right-aligned in the visualizer panel's border title
 	// while this visualization is the active one.
@@ -42,23 +45,26 @@ type Visualization interface {
 
 	// Render returns exactly `height` lines of content, each rendered
 	// (dynamic-color tags aside) to at most `width` visible columns --
-	// the container does not clip or pad for you. frame increments by
-	// one on every call (roughly every 500ms, the same cadence as
-	// refreshNowPlaying/the Now Playing bar), for animation; st is the
-	// current playback status.
-	Render(width, height, frame int, st mpdclient.Status) []string
+	// the container does not clip or pad for you. elapsed is real
+	// wall-clock time since the container was created (not a tick
+	// counter), specifically so time-based effects (e.g. "every 2
+	// seconds") stay accurate regardless of how often Render actually
+	// gets called -- redraws happen not just on the ~500ms ticker but
+	// also on every player/mixer/options event, so call frequency isn't
+	// a reliable clock. st is the current playback status.
+	Render(width, height int, elapsed time.Duration, st mpdclient.Status) []string
 }
 
 // visualizerPanel is the container: it owns the bordered TextView, the
 // registry of available visualizations, which one is active, and the
-// frame counter. It doesn't know how to draw any specific visualization --
-// that's entirely delegated to Visualization.Render.
+// clock used for elapsed. It doesn't know how to draw any specific
+// visualization -- that's entirely delegated to Visualization.Render.
 type visualizerPanel struct {
-	app   *App
-	view  *tview.TextView
-	vizs  []Visualization
-	idx   int
-	frame int
+	app     *App
+	view    *tview.TextView
+	vizs    []Visualization
+	idx     int
+	started time.Time
 }
 
 func newVisualizerPanel(app *App) *visualizerPanel {
@@ -66,8 +72,9 @@ func newVisualizerPanel(app *App) *visualizerPanel {
 	v.SetBorder(true).SetTitleAlign(tview.AlignRight)
 
 	p := &visualizerPanel{
-		app:  app,
-		view: v,
+		app:     app,
+		view:    v,
+		started: time.Now(),
 		// New visualizations are registered here, in the order 'v'
 		// cycles through them.
 		vizs: []Visualization{
@@ -90,16 +97,14 @@ func (p *visualizerPanel) next() {
 	p.view.SetTitle(" " + p.current().Name() + " ")
 }
 
-// tick advances the animation frame and redraws the active visualization
-// from the current playback status. Called from refreshNowPlaying, so it
+// tick redraws the active visualization from the current playback status
+// and elapsed wall-clock time. Called from refreshNowPlaying, so it
 // shares that same ~500ms/event-driven cadence -- no separate ticker.
 func (p *visualizerPanel) tick(st mpdclient.Status) {
-	p.frame++
-
 	_, _, w, h := p.view.GetInnerRect()
 	if w <= 0 || h <= 0 {
 		return
 	}
-	lines := p.current().Render(w, h, p.frame, st)
+	lines := p.current().Render(w, h, time.Since(p.started), st)
 	p.view.SetText(strings.Join(lines, "\n"))
 }

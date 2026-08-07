@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -17,12 +18,26 @@ type fakeViz struct{ name string }
 
 func (f fakeViz) Name() string { return f.name }
 
-func (f fakeViz) Render(width, height, frame int, st mpdclient.Status) []string {
+func (f fakeViz) Render(width, height int, elapsed time.Duration, st mpdclient.Status) []string {
 	lines := make([]string, height)
 	for i := range lines {
 		lines[i] = f.name
 	}
 	return lines
+}
+
+// recordingViz captures the elapsed duration it was last called with, for
+// asserting visualizerPanel.tick actually passes real elapsed time.
+type recordingViz struct {
+	name string
+	got  *time.Duration
+}
+
+func (r recordingViz) Name() string { return r.name }
+
+func (r recordingViz) Render(width, height int, elapsed time.Duration, st mpdclient.Status) []string {
+	*r.got = elapsed
+	return make([]string, height)
 }
 
 func TestVisualizerPanelStartsOnFirstRegisteredVisualization(t *testing.T) {
@@ -71,7 +86,7 @@ func TestVisualizerPanelNextWithSingleVisualizationIsNoOp(t *testing.T) {
 func TestVisualizerPanelTickRendersFromActiveVisualization(t *testing.T) {
 	v := tview.NewTextView().SetDynamicColors(true)
 	v.SetRect(0, 0, 20, 3)
-	p := &visualizerPanel{view: v, vizs: []Visualization{fakeViz{"Probe"}}}
+	p := &visualizerPanel{view: v, started: time.Now(), vizs: []Visualization{fakeViz{"Probe"}}}
 
 	p.tick(mpdclient.Status{State: mpdclient.StatePlay})
 
@@ -81,18 +96,17 @@ func TestVisualizerPanelTickRendersFromActiveVisualization(t *testing.T) {
 	}
 }
 
-func TestVisualizerPanelTickIncrementsFrame(t *testing.T) {
+func TestVisualizerPanelTickPassesRealElapsedTime(t *testing.T) {
 	v := tview.NewTextView().SetDynamicColors(true)
 	v.SetRect(0, 0, 20, 3)
-	p := &visualizerPanel{view: v, vizs: []Visualization{fakeViz{"Probe"}}}
+	var got time.Duration
+	p := &visualizerPanel{view: v, started: time.Now(), vizs: []Visualization{recordingViz{"Probe", &got}}}
 
-	if p.frame != 0 {
-		t.Fatalf("setup: frame should start at 0, got %d", p.frame)
-	}
+	time.Sleep(5 * time.Millisecond)
 	p.tick(mpdclient.Status{})
-	p.tick(mpdclient.Status{})
-	if p.frame != 2 {
-		t.Errorf("frame after two ticks = %d, want 2", p.frame)
+
+	if got < 5*time.Millisecond {
+		t.Errorf("elapsed passed to Render = %v, want at least 5ms since the panel started", got)
 	}
 }
 

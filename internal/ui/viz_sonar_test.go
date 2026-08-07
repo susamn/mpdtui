@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"mpdtui/internal/mpdclient"
 )
@@ -35,56 +36,90 @@ func TestSonarRenderHandlesZeroWidth(t *testing.T) {
 	}
 }
 
-func TestSonarRenderDrawsCenterDot(t *testing.T) {
+func TestSonarRenderDrawsWaveAtCenterWhenJustSpawned(t *testing.T) {
 	// Odd width/height=1 puts an exact-center cell at x=width/2, y=0
-	// (see the +0.5 centering in Render/sonarRingGlyphAt) -- frame 0
-	// always places the sonar's origin there regardless of play state.
+	// (see the +0.5 centering in Render) -- elapsed=0 always places the
+	// wave's origin there regardless of play state.
 	lines := sonarVisualization{}.Render(5, 1, 0, mpdclient.Status{State: mpdclient.StatePlay})
 	line := []rune(lines[0])
-	if line[2] != '●' {
-		t.Errorf("center cell = %q, want %q", string(line[2]), "●")
+	if line[2] != '○' {
+		t.Errorf("center cell = %q, want %q", string(line[2]), "○")
 	}
 }
 
 // TestSonarRenderReachableAtEvenDimensions is a regression test: with an
 // even width and an even height (e.g. the container's real 2-row height),
-// no cell sits exactly on the geometric center, so a too-narrow band width
-// made the center dot -- and thus the whole frozen/paused frame -- render
-// as entirely blank. See sonarBandWidth's doc comment.
+// no cell sits exactly on the geometric center, so a too-narrow line
+// width made a just-spawned wave -- and thus the whole frozen/paused
+// frame -- render as entirely blank. See sonarLineWidth's doc comment.
 func TestSonarRenderReachableAtEvenDimensions(t *testing.T) {
 	lines := sonarVisualization{}.Render(40, 2, 0, mpdclient.Status{State: mpdclient.StatePause})
 	for _, l := range lines {
-		if strings.ContainsRune(l, '●') {
+		if strings.ContainsRune(l, '○') {
 			return
 		}
 	}
-	t.Errorf("Render(40, 2, 0, paused) has no center dot in any line: %q", lines)
+	t.Errorf("Render(40, 2, 0, paused) has no wave in any line: %q", lines)
 }
 
 func TestSonarFreezesWhenNotPlaying(t *testing.T) {
 	paused := mpdclient.Status{State: mpdclient.StatePause}
-	frame0 := sonarVisualization{}.Render(20, 2, 0, paused)
-	frame100 := sonarVisualization{}.Render(20, 2, 100, paused)
+	at0 := sonarVisualization{}.Render(20, 2, 0, paused)
+	at100s := sonarVisualization{}.Render(20, 2, 100*time.Second, paused)
 
-	for i := range frame0 {
-		if frame0[i] != frame100[i] {
-			t.Errorf("paused: line %d differs across frames: %q vs %q -- should be frozen", i, frame0[i], frame100[i])
+	for i := range at0 {
+		if at0[i] != at100s[i] {
+			t.Errorf("paused: line %d differs across elapsed times: %q vs %q -- should be frozen", i, at0[i], at100s[i])
 		}
 	}
 }
 
 func TestSonarAnimatesWhilePlaying(t *testing.T) {
 	playing := mpdclient.Status{State: mpdclient.StatePlay}
-	frame0 := sonarVisualization{}.Render(20, 2, 0, playing)
-	frame5 := sonarVisualization{}.Render(20, 2, 5, playing)
+	at0 := sonarVisualization{}.Render(20, 2, 0, playing)
+	at1s := sonarVisualization{}.Render(20, 2, 1*time.Second, playing)
 
 	same := true
-	for i := range frame0 {
-		if frame0[i] != frame5[i] {
+	for i := range at0 {
+		if at0[i] != at1s[i] {
 			same = false
 		}
 	}
 	if same {
-		t.Error("playing: rendered output identical across different frames -- expected the rings to animate")
+		t.Error("playing: rendered output identical at different elapsed times -- expected the wave to animate")
+	}
+}
+
+func TestSonarWaveReachesTheEdgeJustBeforeTheInterval(t *testing.T) {
+	// height=1 keeps the vertical aspect correction out of the way (row 0
+	// is exactly on the center line), isolating the horizontal reach.
+	playing := mpdclient.Status{State: mpdclient.StatePlay}
+	width := 20
+
+	justBeforeEdge := sonarVisualization{}.Render(width, 1, sonarWaveInterval-50*time.Millisecond, playing)
+	line := []rune(justBeforeEdge[0])
+	if line[0] != '○' && line[width-1] != '○' {
+		t.Errorf("just before the interval elapses, want the wave near the outer columns, got %q", justBeforeEdge[0])
+	}
+
+	justSpawned := sonarVisualization{}.Render(width, 1, 0, playing)
+	line = []rune(justSpawned[0])
+	if line[0] == '○' || line[width-1] == '○' {
+		t.Errorf("a just-spawned wave (elapsed=0) should not already be at the outer columns, got %q", justSpawned[0])
+	}
+}
+
+func TestSonarWaveRestartsExactlyAtTheInterval(t *testing.T) {
+	// The previous wave should vanish at the edge in the same instant the
+	// next one begins -- i.e. the frame at exactly one interval in should
+	// be identical to the frame at elapsed=0.
+	playing := mpdclient.Status{State: mpdclient.StatePlay}
+	at0 := sonarVisualization{}.Render(20, 2, 0, playing)
+	atOneInterval := sonarVisualization{}.Render(20, 2, sonarWaveInterval, playing)
+
+	for i := range at0 {
+		if at0[i] != atOneInterval[i] {
+			t.Errorf("line %d at elapsed=0 = %q, at elapsed=one interval = %q, want them equal (wave restarted)", i, at0[i], atOneInterval[i])
+		}
 	}
 }
