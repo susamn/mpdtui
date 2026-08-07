@@ -143,7 +143,7 @@ func TestQueueHeaderRowLabelsAndAlignment(t *testing.T) {
 		{2, "Title", tview.AlignLeft},
 		{3, "Album", tview.AlignLeft},
 		{4, "Artist", tview.AlignLeft},
-		{5, "Type", tview.AlignRight},
+		{5, "Type" + formatGap, tview.AlignRight}, // formatGap matches formatTagCell's data-cell padding, see queueHeaderLabels' comment
 		{6, "Duration", tview.AlignRight},
 	}
 	for _, w := range wantHeaders {

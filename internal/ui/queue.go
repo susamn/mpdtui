@@ -122,26 +122,38 @@ const (
 
 // queueHeaderBg/Fg give the header row an inverted look (filled
 // background, dark text) to set it apart from the data rows below.
-const (
-	queueHeaderBg = tcell.ColorWhite
+// queueHeaderBg is a forced true-RGB white (tcell.NewRGBColor), not the
+// basic ANSI tcell.ColorWhite -- that's a legacy 16-color palette slot,
+// confirmed via raw ANSI output to render as the SGR 107 "bright white
+// background" code, which plenty of terminal color themes customize to
+// something duller than actual white. A explicit RGB color is always sent
+// as a true 24-bit escape sequence, bypassing any such palette remapping.
+var (
+	queueHeaderBg = tcell.NewRGBColor(255, 255, 255)
 	queueHeaderFg = tcell.ColorBlack
 )
 
 // queueHeaderLabels are the column headers for the fixed header row, in
 // the same order render() writes data columns -- marker and position get
 // no label (blank), Type/Duration are right-aligned to match their data
-// columns (see formatTagCell and the Duration cell in render()).
+// columns (see formatTagCell and the Duration cell in render()). Type's
+// label carries the same trailing formatGap its data cells do (see
+// formatTagCell) -- without it, the right-aligned header text would sit
+// flush at the column's edge while the data (padded by formatGap to
+// separate it from the Duration column) sits formatGap-width to the left
+// of that same edge, visibly misaligning the two. Duration needs no such
+// adjustment: neither its header nor its data carry any padding.
 var queueHeaderLabels = []struct {
 	text  string
 	align int
 }{
-	{"", tview.AlignLeft},          // marker
-	{"", tview.AlignLeft},          // position
-	{"Title", tview.AlignLeft},     // 2
-	{"Album", tview.AlignLeft},     // 3
-	{"Artist", tview.AlignLeft},    // 4
-	{"Type", tview.AlignRight},     // 5
-	{"Duration", tview.AlignRight}, // 6
+	{"", tview.AlignLeft},                  // marker
+	{"", tview.AlignLeft},                  // position
+	{"Title", tview.AlignLeft},             // 2
+	{"Album", tview.AlignLeft},             // 3
+	{"Artist", tview.AlignLeft},            // 4
+	{"Type" + formatGap, tview.AlignRight}, // 5
+	{"Duration", tview.AlignRight},         // 6
 }
 
 // setQueueHeader (re)writes the fixed header row. Table.Clear() wipes
