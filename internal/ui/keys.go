@@ -25,6 +25,16 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			a.closeOverlay()
 			return nil
 		}
+		// 'q' still quits while the track info card is open -- it's a
+		// read-only display, not a text input, so there's no risk of
+		// swallowing a 'q' the user meant to type (unlike the search/
+		// filter/save-playlist inputs, where 'q' has to stay literal
+		// text). Scoped to just this overlay rather than every overlay
+		// for that reason.
+		if event.Key() == tcell.KeyRune && event.Rune() == 'q' && a.tv.GetFocus() == a.trackInfo {
+			a.tv.Stop()
+			return nil
+		}
 		return event
 	}
 

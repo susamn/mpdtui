@@ -128,6 +128,28 @@ func TestOpenTrackInfoTogglesClosedOnSecondIPress(t *testing.T) {
 	}
 }
 
+func TestQKeyWhileTrackInfoOpenIsConsumed(t *testing.T) {
+	a := newTestApp()
+	a.tv.SetFocus(a.queue.table)
+	a.openTrackInfo()
+
+	qKey := tcell.NewEventKey(tcell.KeyRune, 'q', tcell.ModNone)
+	if result := a.globalInputCapture(qKey); result != nil {
+		t.Errorf("'q' while the track info card is open should be consumed (quit), got %v", result)
+	}
+}
+
+func TestQKeyWhileAnotherOverlayOpenIsNotConsumed(t *testing.T) {
+	a := newTestApp()
+	a.tv.SetFocus(a.queue.table)
+	a.openHelp()
+
+	qKey := tcell.NewEventKey(tcell.KeyRune, 'q', tcell.ModNone)
+	if result := a.globalInputCapture(qKey); result == nil {
+		t.Error("'q' while a different overlay (help) is open should not quit -- only the track info card scopes 'q' to quit")
+	}
+}
+
 func TestIKeyWhileAnotherOverlayOpenDoesNotToggleTrackInfo(t *testing.T) {
 	a := newTestApp()
 	a.tv.SetFocus(a.queue.table)

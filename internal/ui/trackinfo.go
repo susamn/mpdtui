@@ -28,6 +28,7 @@ type trackInfoCard struct {
 func newTrackInfoCard(app *App) *trackInfoCard {
 	v := tview.NewTextView().SetDynamicColors(true)
 	v.SetBorder(true).SetTitle(" Track Info ")
+	v.SetBorderPadding(1, 0, 1, 0)
 	return &trackInfoCard{TextView: v, app: app}
 }
 
