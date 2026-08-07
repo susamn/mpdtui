@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -66,6 +67,99 @@ func TestFormatTagCellTextHasNoBracket(t *testing.T) {
 		if cell := formatTagCell(file); strings.ContainsAny(cell.Text, "[]") {
 			t.Errorf("formatTagCell(%q).Text = %q contains a bracket -- tview will silently swallow it as a tag", file, cell.Text)
 		}
+	}
+}
+
+func TestTruncateWithEllipsisLeavesShortStringsAlone(t *testing.T) {
+	if got := truncateWithEllipsis("short", 30); got != "short" {
+		t.Errorf("truncateWithEllipsis(%q, 30) = %q, want unchanged", "short", got)
+	}
+}
+
+func TestTruncateWithEllipsisExactLengthUnchanged(t *testing.T) {
+	s := strings.Repeat("x", 30)
+	if got := truncateWithEllipsis(s, 30); got != s {
+		t.Errorf("truncateWithEllipsis at exactly max length changed: got %q", got)
+	}
+}
+
+func TestTruncateWithEllipsisTruncatesLongStrings(t *testing.T) {
+	s := strings.Repeat("x", 50)
+	got := truncateWithEllipsis(s, 30)
+	want := strings.Repeat("x", 27) + "..."
+	if got != want {
+		t.Errorf("truncateWithEllipsis(50 x's, 30) = %q, want %q", got, want)
+	}
+	if len([]rune(got)) != 30 {
+		t.Errorf("truncated length = %d runes, want exactly 30", len([]rune(got)))
+	}
+}
+
+// TestTruncateWithEllipsisIsRuneSafe guards against splitting a multi-byte
+// character mid-codepoint: byte-slicing instead of rune-slicing here would
+// corrupt the trailing character(s) of tags containing non-ASCII text,
+// which this library's real tags do (e.g. "Bárbara Martínez", "Céline Dion").
+func TestTruncateWithEllipsisIsRuneSafe(t *testing.T) {
+	s := strings.Repeat("é", 50) // each 'é' is 2 bytes in UTF-8
+	got := truncateWithEllipsis(s, 30)
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncateWithEllipsis produced invalid UTF-8: %q", got)
+	}
+	want := strings.Repeat("é", 27) + "..."
+	if got != want {
+		t.Errorf("truncateWithEllipsis(50 é's, 30) = %q, want %q", got, want)
+	}
+}
+
+func TestQueueRenderShowsTitleAlbumArtistInOrder(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{
+		{ID: 1, Title: "Bohemian Rhapsody", Album: "A Night at the Opera", Artist: "Queen"},
+	}
+	a.queue.render(-1)
+
+	if got := a.queue.table.GetCell(0, 2).Text; got != "Bohemian Rhapsody"+queueColumnGap {
+		t.Errorf("title cell = %q, want %q", got, "Bohemian Rhapsody"+queueColumnGap)
+	}
+	if got := a.queue.table.GetCell(0, 3).Text; got != "A Night at the Opera"+queueColumnGap {
+		t.Errorf("album cell = %q, want %q", got, "A Night at the Opera"+queueColumnGap)
+	}
+	if got := a.queue.table.GetCell(0, 4).Text; got != "Queen"+queueColumnGap {
+		t.Errorf("artist cell = %q, want %q", got, "Queen"+queueColumnGap)
+	}
+}
+
+func TestQueueRenderTitleFallsBackToFilename(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{{ID: 1, File: "music/artist/untagged-track.mp3"}}
+	a.queue.render(-1)
+
+	if got := a.queue.table.GetCell(0, 2).Text; got != "untagged-track.mp3"+queueColumnGap {
+		t.Errorf("title cell for an untagged track = %q, want the filename %q", got, "untagged-track.mp3"+queueColumnGap)
+	}
+}
+
+func TestQueueRenderTruncatesEachColumnToItsOwnMax(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{{
+		ID:     1,
+		Title:  strings.Repeat("t", 50),
+		Album:  strings.Repeat("a", 50),
+		Artist: strings.Repeat("r", 50),
+	}}
+	a.queue.render(-1)
+
+	wantTitle := strings.Repeat("t", queueTitleMaxLen-3) + "..." + queueColumnGap
+	wantAlbum := strings.Repeat("a", queueAlbumMaxLen-3) + "..." + queueColumnGap
+	wantArtist := strings.Repeat("r", queueArtistMaxLen-3) + "..." + queueColumnGap
+	if got := a.queue.table.GetCell(0, 2).Text; got != wantTitle {
+		t.Errorf("title cell = %q, want %q", got, wantTitle)
+	}
+	if got := a.queue.table.GetCell(0, 3).Text; got != wantAlbum {
+		t.Errorf("album cell = %q, want %q", got, wantAlbum)
+	}
+	if got := a.queue.table.GetCell(0, 4).Text; got != wantArtist {
+		t.Errorf("artist cell = %q, want %q", got, wantArtist)
 	}
 }
 

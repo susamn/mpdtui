@@ -98,6 +98,19 @@ func (q *queuePanel) refresh() {
 	q.render(curID)
 }
 
+// Queue table column max lengths (runes), title/album/artist -- the order
+// they're shown in. Longer values are truncated with a trailing "..." (see
+// truncateWithEllipsis); a small trailing gap (queueColumnGap) is appended
+// after each so adjacent columns don't run together, matching the same
+// manual-padding convention formatGap already uses between the format tag
+// and duration columns (tview's Table has no automatic column spacing).
+const (
+	queueTitleMaxLen  = 30
+	queueAlbumMaxLen  = 20
+	queueArtistMaxLen = 40
+	queueColumnGap    = "  "
+)
+
 func (q *queuePanel) render(curID int) {
 	q.table.Clear()
 	for i, s := range q.songs {
@@ -105,13 +118,31 @@ func (q *queuePanel) render(curID int) {
 		if s.ID == curID {
 			marker = "▶ "
 		}
+		title := s.Title
+		if title == "" {
+			title = baseName(s.File)
+		}
 		q.table.SetCell(i, 0, tview.NewTableCell(marker))
 		q.table.SetCell(i, 1, tview.NewTableCell(fmt.Sprintf("%3d", i+1)))
-		q.table.SetCell(i, 2, tview.NewTableCell(s.DisplayName()).SetExpansion(1))
-		q.table.SetCell(i, 3, formatTagCell(s.File))
-		q.table.SetCell(i, 4, tview.NewTableCell(FormatDuration(s.Duration)))
+		q.table.SetCell(i, 2, tview.NewTableCell(truncateWithEllipsis(title, queueTitleMaxLen)+queueColumnGap))
+		q.table.SetCell(i, 3, tview.NewTableCell(truncateWithEllipsis(s.Album, queueAlbumMaxLen)+queueColumnGap))
+		q.table.SetCell(i, 4, tview.NewTableCell(truncateWithEllipsis(s.Artist, queueArtistMaxLen)+queueColumnGap))
+		q.table.SetCell(i, 5, formatTagCell(s.File))
+		q.table.SetCell(i, 6, tview.NewTableCell(FormatDuration(s.Duration)))
 	}
 	q.table.SetTitle(fmt.Sprintf(" Queue (%d) ", len(q.songs)))
+}
+
+// truncateWithEllipsis returns s unchanged if it's at most max runes,
+// otherwise the first max-3 runes followed by "...". Operates on runes,
+// not bytes, so multi-byte characters in track/album/artist tags aren't
+// split mid-character.
+func truncateWithEllipsis(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max-3]) + "..."
 }
 
 // formatColors maps a track format to a single foreground color for its
