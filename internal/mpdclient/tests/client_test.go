@@ -225,3 +225,27 @@ func TestListDirectory(t *testing.T) {
 		t.Fatalf("expected %q to have at least one child entry", dir.Path)
 	}
 }
+
+func TestLibraryStats(t *testing.T) {
+	c := dialOrSkip(t)
+
+	stats, err := c.LibraryStats()
+	if err != nil {
+		t.Fatalf("LibraryStats: %v", err)
+	}
+
+	playlists, err := c.Playlists()
+	if err != nil {
+		t.Fatalf("Playlists: %v", err)
+	}
+	if stats.Playlists != len(playlists) {
+		t.Errorf("stats.Playlists = %d, want %d (len(Playlists()))", stats.Playlists, len(playlists))
+	}
+
+	// Tracks/Artists come straight from MPD's own stats command -- just
+	// sanity-check they're not obviously broken (a real library has more
+	// than zero of each; a negative count would mean parsing failed).
+	if stats.Tracks < 0 || stats.Artists < 0 {
+		t.Errorf("negative stats: %+v", stats)
+	}
+}

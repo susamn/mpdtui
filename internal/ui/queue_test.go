@@ -66,3 +66,23 @@ func TestFormatTagCellTextHasNoBracket(t *testing.T) {
 		}
 	}
 }
+
+// TestQueueRefreshStatsShowsLibraryTotals is an integration test (needs a
+// live MPD server) since LibraryStats itself isn't pure -- it fetches
+// from the library, not just formats already-known numbers.
+func TestQueueRefreshStatsShowsLibraryTotals(t *testing.T) {
+	a := &App{tv: tview.NewApplication(), client: dialOrSkip(t)}
+	a.build()
+
+	a.queue.refreshStats()
+
+	text := a.queue.stats.GetText(true)
+	if text == "" {
+		t.Fatal("stats box text is empty after refreshStats")
+	}
+	for _, want := range []string{"Tracks:", "Artists:", "Playlists:"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("stats text = %q, missing %q", text, want)
+		}
+	}
+}
