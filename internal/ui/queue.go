@@ -27,18 +27,26 @@ type queuePanel struct {
 	currentID int // queue id of the playing/selected track, or -1 if none (see setCurrent)
 }
 
+// queueHeaderRows is the number of fixed rows (see Table.SetFixed) taken
+// up by the column-header row -- every song's table row is offset by this
+// much from its index in songs (row = index + queueHeaderRows), since row
+// 0 is the header, not the first song.
+const queueHeaderRows = 1
+
 func newQueuePanel(app *App) *queuePanel {
 	q := &queuePanel{app: app, currentID: -1}
 
 	t := tview.NewTable()
 	t.SetBorder(true).SetTitle(" Queue ")
 	t.SetSelectable(true, false)
+	t.SetFixed(queueHeaderRows, 0)
 	t.SetSelectedStyle(tcell.StyleDefault.Background(colorSelectedBg).Foreground(colorSelectedFg))
 	t.SetSelectedFunc(func(row, _ int) {
-		if row < 0 || row >= len(q.songs) {
+		i := row - queueHeaderRows
+		if i < 0 || i >= len(q.songs) {
 			return
 		}
-		song := q.songs[row]
+		song := q.songs[i]
 		if err := q.app.client.PlayID(song.ID); err != nil {
 			q.app.showError(err)
 			return
@@ -46,6 +54,7 @@ func newQueuePanel(app *App) *queuePanel {
 		q.app.refreshNowPlaying()
 	})
 	q.table = t
+	setQueueHeader(t)
 
 	search := tview.NewInputField().SetLabel("Search track: ")
 	search.SetBorder(true)
@@ -98,20 +107,104 @@ func (q *queuePanel) refresh() {
 	q.render(curID)
 }
 
+// Queue table column max lengths (runes), title/album/artist -- the order
+// they're shown in. Longer values are truncated with a trailing "..." (see
+// truncateWithEllipsis); a small trailing gap (queueColumnGap) is appended
+// after each so adjacent columns don't run together, matching the same
+// manual-padding convention formatGap already uses between the format tag
+// and duration columns (tview's Table has no automatic column spacing).
+const (
+	queueTitleMaxLen  = 30
+	queueAlbumMaxLen  = 20
+	queueArtistMaxLen = 40
+	queueColumnGap    = "  "
+)
+
+// queueHeaderBg/Fg give the header row an inverted look (filled
+// background, dark text) to set it apart from the data rows below.
+// queueHeaderBg is a forced true-RGB white (tcell.NewRGBColor), not the
+// basic ANSI tcell.ColorWhite -- that's a legacy 16-color palette slot,
+// confirmed via raw ANSI output to render as the SGR 107 "bright white
+// background" code, which plenty of terminal color themes customize to
+// something duller than actual white. A explicit RGB color is always sent
+// as a true 24-bit escape sequence, bypassing any such palette remapping.
+var (
+	queueHeaderBg = tcell.NewRGBColor(255, 255, 255)
+	queueHeaderFg = tcell.ColorBlack
+)
+
+// queueHeaderLabels are the column headers for the fixed header row, in
+// the same order render() writes data columns -- marker and position get
+// no label (blank), Type/Duration are right-aligned to match their data
+// columns (see formatTagCell and the Duration cell in render()). Type's
+// label carries the same trailing formatGap its data cells do (see
+// formatTagCell) -- without it, the right-aligned header text would sit
+// flush at the column's edge while the data (padded by formatGap to
+// separate it from the Duration column) sits formatGap-width to the left
+// of that same edge, visibly misaligning the two. Duration needs no such
+// adjustment: neither its header nor its data carry any padding.
+var queueHeaderLabels = []struct {
+	text  string
+	align int
+}{
+	{"", tview.AlignLeft},                  // marker
+	{"", tview.AlignLeft},                  // position
+	{"Title", tview.AlignLeft},             // 2
+	{"Album", tview.AlignLeft},             // 3
+	{"Artist", tview.AlignLeft},            // 4
+	{"Type" + formatGap, tview.AlignRight}, // 5
+	{"Duration", tview.AlignRight},         // 6
+}
+
+// setQueueHeader (re)writes the fixed header row. Table.Clear() wipes
+// every cell including row 0, so render() calls this again on every
+// refresh rather than relying on it being set once at construction time.
+func setQueueHeader(t *tview.Table) {
+	for col, h := range queueHeaderLabels {
+		t.SetCell(0, col, tview.NewTableCell(h.text).
+			SetAlign(h.align).
+			SetTextColor(queueHeaderFg).
+			SetBackgroundColor(queueHeaderBg).
+			SetSelectable(false))
+	}
+}
+
 func (q *queuePanel) render(curID int) {
 	q.table.Clear()
+	setQueueHeader(q.table)
 	for i, s := range q.songs {
+		row := i + queueHeaderRows
 		marker := "  "
 		if s.ID == curID {
 			marker = "▶ "
 		}
-		q.table.SetCell(i, 0, tview.NewTableCell(marker))
-		q.table.SetCell(i, 1, tview.NewTableCell(fmt.Sprintf("%3d", i+1)))
-		q.table.SetCell(i, 2, tview.NewTableCell(s.DisplayName()).SetExpansion(1))
-		q.table.SetCell(i, 3, formatTagCell(s.File))
-		q.table.SetCell(i, 4, tview.NewTableCell(FormatDuration(s.Duration)))
+		title := s.Title
+		if title == "" {
+			title = baseName(s.File)
+		}
+		q.table.SetCell(row, 0, tview.NewTableCell(marker))
+		q.table.SetCell(row, 1, tview.NewTableCell(fmt.Sprintf("%3d", i+1)))
+		q.table.SetCell(row, 2, tview.NewTableCell(truncateWithEllipsis(title, queueTitleMaxLen)+queueColumnGap).
+			SetAttributes(tcell.AttrBold))
+		q.table.SetCell(row, 3, tview.NewTableCell(truncateWithEllipsis(s.Album, queueAlbumMaxLen)+queueColumnGap))
+		q.table.SetCell(row, 4, tview.NewTableCell(truncateWithEllipsis(s.Artist, queueArtistMaxLen)+queueColumnGap).
+			SetExpansion(1))
+		q.table.SetCell(row, 5, formatTagCell(s.File))
+		q.table.SetCell(row, 6, tview.NewTableCell(FormatDuration(s.Duration)).SetAlign(tview.AlignRight))
 	}
 	q.table.SetTitle(fmt.Sprintf(" Queue (%d) ", len(q.songs)))
+}
+
+// truncateWithEllipsis returns s unchanged if it's at most max runes,
+// otherwise the first max-3 runes followed by "...". Operates on runes,
+// not bytes, so multi-byte characters in track/album/artist tags aren't
+// split mid-character.
+func truncateWithEllipsis(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max-3]) + "..."
 }
 
 // formatColors maps a track format to a single foreground color for its
@@ -174,7 +267,7 @@ func formatTagCell(file string) *tview.TableCell {
 func (q *queuePanel) setCurrent(id int) {
 	q.currentID = id
 	for i, s := range q.songs {
-		cell := q.table.GetCell(i, 0)
+		cell := q.table.GetCell(i+queueHeaderRows, 0)
 		if cell == nil {
 			continue
 		}
@@ -197,7 +290,7 @@ func (q *queuePanel) jumpToCurrent() bool {
 	}
 	for i, s := range q.songs {
 		if s.ID == q.currentID {
-			q.table.Select(i, 0)
+			q.table.Select(i+queueHeaderRows, 0)
 			return true
 		}
 	}
@@ -211,7 +304,7 @@ func (q *queuePanel) jumpToMatch(query string) bool {
 	needle := strings.ToLower(query)
 	for i, s := range q.songs {
 		if strings.Contains(strings.ToLower(s.DisplayName()), needle) {
-			q.table.Select(i, 0)
+			q.table.Select(i+queueHeaderRows, 0)
 			return true
 		}
 	}
@@ -220,8 +313,9 @@ func (q *queuePanel) jumpToMatch(query string) bool {
 
 func (q *queuePanel) selectedSong() (mpdclient.Song, bool) {
 	row, _ := q.table.GetSelection()
-	if row < 0 || row >= len(q.songs) {
+	i := row - queueHeaderRows
+	if i < 0 || i >= len(q.songs) {
 		return mpdclient.Song{}, false
 	}
-	return q.songs[row], true
+	return q.songs[i], true
 }

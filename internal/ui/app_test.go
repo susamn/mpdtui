@@ -84,8 +84,8 @@ func TestLKeyJumpsToCurrentTrackAndFocusesQueue(t *testing.T) {
 		t.Errorf("focus after 'L' = %T, want the Queue table", a.tv.GetFocus())
 	}
 	row, _ := a.queue.table.GetSelection()
-	if row != 1 {
-		t.Errorf("selected row after 'L' = %d, want 1 (song id 2)", row)
+	if row != 1+queueHeaderRows {
+		t.Errorf("selected row after 'L' = %d, want %d (song id 2)", row, 1+queueHeaderRows)
 	}
 }
 
@@ -135,8 +135,8 @@ func TestMaybeJumpToCurrentTrackFocusesQueueWhenChanged(t *testing.T) {
 		t.Errorf("focus after maybeJumpToCurrentTrack(true) = %T, want the Queue table", a.tv.GetFocus())
 	}
 	row, _ := a.queue.table.GetSelection()
-	if row != 1 {
-		t.Errorf("selected row = %d, want 1 (song id 2)", row)
+	if row != 1+queueHeaderRows {
+		t.Errorf("selected row = %d, want %d (song id 2)", row, 1+queueHeaderRows)
 	}
 }
 

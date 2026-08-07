@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -24,6 +25,24 @@ func cellFg(cell *tview.TableCell) tcell.Color {
 	}
 	fg, _, _ := cell.Style.Decompose()
 	return fg
+}
+
+// cellBg/cellBold mirror cellFg's same dual-branch resolution, for
+// background color and the bold attribute respectively.
+func cellBg(cell *tview.TableCell) tcell.Color {
+	if cell.Style == tcell.StyleDefault {
+		return cell.BackgroundColor
+	}
+	_, bg, _ := cell.Style.Decompose()
+	return bg
+}
+
+func cellBold(cell *tview.TableCell) bool {
+	if cell.Style == tcell.StyleDefault {
+		return cell.Attributes&tcell.AttrBold != 0
+	}
+	_, _, attrs := cell.Style.Decompose()
+	return attrs&tcell.AttrBold != 0
 }
 
 func TestFormatTagCellKnownFormatUsesItsColor(t *testing.T) {
@@ -69,6 +88,198 @@ func TestFormatTagCellTextHasNoBracket(t *testing.T) {
 	}
 }
 
+func TestTruncateWithEllipsisLeavesShortStringsAlone(t *testing.T) {
+	if got := truncateWithEllipsis("short", 30); got != "short" {
+		t.Errorf("truncateWithEllipsis(%q, 30) = %q, want unchanged", "short", got)
+	}
+}
+
+func TestTruncateWithEllipsisExactLengthUnchanged(t *testing.T) {
+	s := strings.Repeat("x", 30)
+	if got := truncateWithEllipsis(s, 30); got != s {
+		t.Errorf("truncateWithEllipsis at exactly max length changed: got %q", got)
+	}
+}
+
+func TestTruncateWithEllipsisTruncatesLongStrings(t *testing.T) {
+	s := strings.Repeat("x", 50)
+	got := truncateWithEllipsis(s, 30)
+	want := strings.Repeat("x", 27) + "..."
+	if got != want {
+		t.Errorf("truncateWithEllipsis(50 x's, 30) = %q, want %q", got, want)
+	}
+	if len([]rune(got)) != 30 {
+		t.Errorf("truncated length = %d runes, want exactly 30", len([]rune(got)))
+	}
+}
+
+// TestTruncateWithEllipsisIsRuneSafe guards against splitting a multi-byte
+// character mid-codepoint: byte-slicing instead of rune-slicing here would
+// corrupt the trailing character(s) of tags containing non-ASCII text,
+// which this library's real tags do (e.g. "Bárbara Martínez", "Céline Dion").
+func TestTruncateWithEllipsisIsRuneSafe(t *testing.T) {
+	s := strings.Repeat("é", 50) // each 'é' is 2 bytes in UTF-8
+	got := truncateWithEllipsis(s, 30)
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncateWithEllipsis produced invalid UTF-8: %q", got)
+	}
+	want := strings.Repeat("é", 27) + "..."
+	if got != want {
+		t.Errorf("truncateWithEllipsis(50 é's, 30) = %q, want %q", got, want)
+	}
+}
+
+func TestQueueHeaderRowLabelsAndAlignment(t *testing.T) {
+	a := newTestApp()
+	a.queue.render(-1) // no songs -- header should still be there
+
+	wantHeaders := []struct {
+		col   int
+		text  string
+		align int
+	}{
+		{0, "", tview.AlignLeft},
+		{1, "", tview.AlignLeft},
+		{2, "Title", tview.AlignLeft},
+		{3, "Album", tview.AlignLeft},
+		{4, "Artist", tview.AlignLeft},
+		{5, "Type" + formatGap, tview.AlignRight}, // formatGap matches formatTagCell's data-cell padding, see queueHeaderLabels' comment
+		{6, "Duration", tview.AlignRight},
+	}
+	for _, w := range wantHeaders {
+		cell := a.queue.table.GetCell(0, w.col)
+		if cell.Text != w.text {
+			t.Errorf("header col %d text = %q, want %q", w.col, cell.Text, w.text)
+		}
+		if cell.Align != w.align {
+			t.Errorf("header col %d align = %d, want %d", w.col, cell.Align, w.align)
+		}
+	}
+}
+
+func TestQueueHeaderRowStyledAndNotSelectable(t *testing.T) {
+	a := newTestApp()
+	a.queue.render(-1)
+
+	cell := a.queue.table.GetCell(0, 2) // "Title"
+	if got := cellFg(cell); got != queueHeaderFg {
+		t.Errorf("header foreground = %v, want %v", got, queueHeaderFg)
+	}
+	if got := cellBg(cell); got != queueHeaderBg {
+		t.Errorf("header background = %v, want %v", got, queueHeaderBg)
+	}
+	if !cell.NotSelectable {
+		t.Error("header cell should not be selectable")
+	}
+}
+
+// TestQueueHeaderSurvivesRerender guards against render() forgetting to
+// rebuild the header after Table.Clear() wipes every cell including row 0.
+func TestQueueHeaderSurvivesRerender(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "First"}}
+	a.queue.render(-1)
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "First"}, {ID: 2, Title: "Second"}}
+	a.queue.render(-1) // a second render, exercising Clear() + rebuild again
+
+	if got := a.queue.table.GetCell(0, 2).Text; got != "Title" {
+		t.Errorf("header after a second render = %q, want %q", got, "Title")
+	}
+}
+
+func TestQueueRenderTitleCellIsBold(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Bohemian Rhapsody"}}
+	a.queue.render(-1)
+
+	titleCell := a.queue.table.GetCell(queueHeaderRows, 2)
+	if !cellBold(titleCell) {
+		t.Error("track title cell should be bold")
+	}
+	albumCell := a.queue.table.GetCell(queueHeaderRows, 3)
+	if cellBold(albumCell) {
+		t.Error("album cell should not be bold")
+	}
+}
+
+func TestQueueRenderDurationCellRightAligned(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track"}}
+	a.queue.render(-1)
+
+	if got := a.queue.table.GetCell(queueHeaderRows, 6).Align; got != tview.AlignRight {
+		t.Errorf("duration cell align = %d, want AlignRight", got)
+	}
+}
+
+func TestQueueRenderShowsTitleAlbumArtistInOrder(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{
+		{ID: 1, Title: "Bohemian Rhapsody", Album: "A Night at the Opera", Artist: "Queen"},
+	}
+	a.queue.render(-1)
+
+	if got := a.queue.table.GetCell(queueHeaderRows, 2).Text; got != "Bohemian Rhapsody"+queueColumnGap {
+		t.Errorf("title cell = %q, want %q", got, "Bohemian Rhapsody"+queueColumnGap)
+	}
+	if got := a.queue.table.GetCell(queueHeaderRows, 3).Text; got != "A Night at the Opera"+queueColumnGap {
+		t.Errorf("album cell = %q, want %q", got, "A Night at the Opera"+queueColumnGap)
+	}
+	if got := a.queue.table.GetCell(queueHeaderRows, 4).Text; got != "Queen"+queueColumnGap {
+		t.Errorf("artist cell = %q, want %q", got, "Queen"+queueColumnGap)
+	}
+}
+
+// TestQueueRenderArtistColumnExpands guards against the Type/Duration
+// columns floating with dead space after them instead of sitting flush
+// against the table's right edge: without any column carrying Expansion,
+// tview.Table leaves leftover width undistributed (see Table.Draw's
+// "If we have space left, distribute it" step, which only touches columns
+// with Expansion > 0).
+func TestQueueRenderArtistColumnExpands(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track", Artist: "Artist"}}
+	a.queue.render(-1)
+
+	if got := a.queue.table.GetCell(queueHeaderRows, 4).Expansion; got != 1 {
+		t.Errorf("artist cell Expansion = %d, want 1", got)
+	}
+}
+
+func TestQueueRenderTitleFallsBackToFilename(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{{ID: 1, File: "music/artist/untagged-track.mp3"}}
+	a.queue.render(-1)
+
+	if got := a.queue.table.GetCell(queueHeaderRows, 2).Text; got != "untagged-track.mp3"+queueColumnGap {
+		t.Errorf("title cell for an untagged track = %q, want the filename %q", got, "untagged-track.mp3"+queueColumnGap)
+	}
+}
+
+func TestQueueRenderTruncatesEachColumnToItsOwnMax(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{{
+		ID:     1,
+		Title:  strings.Repeat("t", 50),
+		Album:  strings.Repeat("a", 50),
+		Artist: strings.Repeat("r", 50),
+	}}
+	a.queue.render(-1)
+
+	wantTitle := strings.Repeat("t", queueTitleMaxLen-3) + "..." + queueColumnGap
+	wantAlbum := strings.Repeat("a", queueAlbumMaxLen-3) + "..." + queueColumnGap
+	wantArtist := strings.Repeat("r", queueArtistMaxLen-3) + "..." + queueColumnGap
+	if got := a.queue.table.GetCell(queueHeaderRows, 2).Text; got != wantTitle {
+		t.Errorf("title cell = %q, want %q", got, wantTitle)
+	}
+	if got := a.queue.table.GetCell(queueHeaderRows, 3).Text; got != wantAlbum {
+		t.Errorf("album cell = %q, want %q", got, wantAlbum)
+	}
+	if got := a.queue.table.GetCell(queueHeaderRows, 4).Text; got != wantArtist {
+		t.Errorf("artist cell = %q, want %q", got, wantArtist)
+	}
+}
+
 func TestQueueJumpToCurrentSelectsThePlayingRow(t *testing.T) {
 	a := newTestApp()
 	a.queue.songs = []mpdclient.Song{
@@ -83,8 +294,8 @@ func TestQueueJumpToCurrentSelectsThePlayingRow(t *testing.T) {
 		t.Fatal("jumpToCurrent() = false, want true (song id 2 is in the queue)")
 	}
 	row, _ := a.queue.table.GetSelection()
-	if row != 1 {
-		t.Errorf("selected row = %d, want 1 (the row for song id 2)", row)
+	if row != 1+queueHeaderRows {
+		t.Errorf("selected row = %d, want %d (the row for song id 2)", row, 1+queueHeaderRows)
 	}
 }
 
