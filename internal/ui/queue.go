@@ -12,11 +12,16 @@ import (
 
 // queuePanel shows the current playback queue as a table, with the
 // playing track marked, plus a persistent search field pinned below it
-// (see search, wired up in app.go's openQueueSearch/closeOverlay).
+// (see search, wired up in app.go's openQueueSearch/closeOverlay) and a
+// library-stats box sharing that same row (see stats/refreshStats --
+// laid out here alongside search since that's where the app.go layout
+// puts the spare width, even though the totals it shows are library-wide
+// rather than queue-specific).
 type queuePanel struct {
 	app    *App
 	table  *tview.Table
 	search *tview.InputField
+	stats  *tview.TextView
 	songs  []mpdclient.Song
 }
 
@@ -53,7 +58,27 @@ func newQueuePanel(app *App) *queuePanel {
 	})
 	q.search = search
 
+	stats := tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter)
+	stats.SetBorder(true).SetTitle(" Stats ")
+	q.stats = stats
+
 	return q
+}
+
+// refreshStats fetches and displays library-wide totals (tracks, artists,
+// stored playlists). Kept to a single line since the box only has one
+// row of content to work with (same fixed height as the search field
+// beside it).
+func (q *queuePanel) refreshStats() {
+	stats, err := q.app.client.LibraryStats()
+	if err != nil {
+		q.app.showError(err)
+		return
+	}
+	q.stats.SetText(fmt.Sprintf(
+		"[::b]Tracks:[-] %d  [::b]Artists:[-] %d  [::b]Playlists:[-] %d",
+		stats.Tracks, stats.Artists, stats.Playlists,
+	))
 }
 
 func (q *queuePanel) refresh() {

@@ -62,7 +62,7 @@ func Run(client *mpdclient.Client) error {
 		done:   make(chan struct{}),
 	}
 
-	w, err := client.Watch("player", "mixer", "options", "playlist", "stored_playlist")
+	w, err := client.Watch("player", "mixer", "options", "playlist", "stored_playlist", "database")
 	if err != nil {
 		return fmt.Errorf("watch mpd: %w", err)
 	}
@@ -118,8 +118,12 @@ func (a *App) build() {
 		AddItem(a.library.tree, 0, 2, true).
 		AddItem(bottomLeft, 0, 1, false)
 
+	searchRow := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(a.queue.search, 0, 3, false).
+		AddItem(a.queue.stats, 0, 2, false)
+
 	queueBox := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(a.queue.search, 3, 0, false).
+		AddItem(searchRow, 3, 0, false).
 		AddItem(a.queue.table, 0, 1, true)
 
 	main := tview.NewFlex().SetDirection(tview.FlexColumn).
@@ -148,6 +152,7 @@ func (a *App) refreshAll() {
 	a.library.showRoot()
 	a.playlists.refresh()
 	a.queue.refresh()
+	a.queue.refreshStats()
 	a.refreshNowPlaying()
 }
 
@@ -187,6 +192,9 @@ func (a *App) handleSubsystem(name string) {
 		a.queue.refresh()
 	case "stored_playlist":
 		a.playlists.refresh()
+		a.queue.refreshStats()
+	case "database":
+		a.queue.refreshStats()
 	}
 }
 
