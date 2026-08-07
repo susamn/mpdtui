@@ -1,6 +1,10 @@
 package mpdclient
 
-import "github.com/fhs/gompd/v2/mpd"
+import (
+	"time"
+
+	"github.com/fhs/gompd/v2/mpd"
+)
 
 // Playlists returns every stored (saved) playlist.
 func (c *Client) Playlists() ([]Playlist, error) {
@@ -10,9 +14,25 @@ func (c *Client) Playlists() ([]Playlist, error) {
 	}
 	pls := make([]Playlist, len(list))
 	for i, a := range list {
-		pls[i] = Playlist{Name: a["playlist"]}
+		pls[i] = Playlist{Name: a["playlist"], LastModified: parsePlaylistLastModified(a)}
 	}
 	return pls, nil
+}
+
+// parsePlaylistLastModified parses MPD's "Last-Modified" field (ISO
+// 8601/RFC 3339, e.g. "2026-08-05T03:46:30Z") from a listplaylists
+// response row. Returns the zero time if the field is missing or
+// unparseable, rather than erroring the whole listing over it.
+func parsePlaylistLastModified(a mpd.Attrs) time.Time {
+	v, ok := a["Last-Modified"]
+	if !ok {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
 }
 
 // PlaylistTracks returns the tracks stored in playlist name.

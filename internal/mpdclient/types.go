@@ -60,6 +60,10 @@ func (s Song) DisplayName() string {
 // Playlist is a stored (saved) playlist.
 type Playlist struct {
 	Name string
+	// LastModified is MPD's Last-Modified timestamp for this playlist
+	// (when its file was last written), or the zero time if MPD didn't
+	// report one.
+	LastModified time.Time
 }
 
 func parseStatus(a mpd.Attrs) Status {

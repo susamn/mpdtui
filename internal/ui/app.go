@@ -156,6 +156,7 @@ func (a *App) build() {
 
 	a.tv.SetAfterDrawFunc(func(tcell.Screen) {
 		a.albumArt.draw()
+		a.playlists.realign()
 	})
 }
 

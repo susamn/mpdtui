@@ -20,6 +20,20 @@ func newTestApp() *App {
 	return a
 }
 
+// setPlaylistsForTest bypasses refresh's MPD call to seed the Playlists
+// panel directly, for tests without a live server. Timestamps default to
+// the zero value, which is fine for tests exercising filter/selection
+// behavior rather than recency sort/badge behavior specifically -- render
+// preserves whatever order names are given in here, since only refresh
+// (not render) re-sorts by Last-Modified.
+func setPlaylistsForTest(p *playlistsPanel, names []string) {
+	p.pls = make([]mpdclient.Playlist, len(names))
+	for i, n := range names {
+		p.pls[i] = mpdclient.Playlist{Name: n}
+	}
+	p.render()
+}
+
 // dialOrSkip mirrors internal/mpdclient/tests' helper of the same name:
 // skips the test automatically if no MPD server is reachable, since
 // library.back() genuinely calls out to MPD (unlike the Playlists filter).
@@ -35,7 +49,7 @@ func dialOrSkip(t *testing.T) *mpdclient.Client {
 
 func TestEscapeClearsPlaylistsFilter(t *testing.T) {
 	a := newTestApp()
-	a.playlists.names = []string{"Rock Anthems", "Jazz Classics", "Rock Ballads"}
+	setPlaylistsForTest(a.playlists, []string{"Rock Anthems", "Jazz Classics", "Rock Ballads"})
 	a.playlists.setFilter("rock")
 	if got := a.playlists.list.GetItemCount(); got != 2 {
 		t.Fatalf("setup: filtered item count = %d, want 2", got)
@@ -57,7 +71,7 @@ func TestEscapeClearsPlaylistsFilter(t *testing.T) {
 
 func TestEscapeIgnoredWithoutActiveFilter(t *testing.T) {
 	a := newTestApp()
-	a.playlists.names = []string{"Rock Anthems", "Jazz Classics"}
+	setPlaylistsForTest(a.playlists, []string{"Rock Anthems", "Jazz Classics"})
 	a.tv.SetFocus(a.playlists.list)
 
 	esc := tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone)
@@ -68,7 +82,7 @@ func TestEscapeIgnoredWithoutActiveFilter(t *testing.T) {
 
 func TestEscapeDoesNotTouchPlaylistsFilterFromOtherPanel(t *testing.T) {
 	a := newTestApp()
-	a.playlists.names = []string{"Rock Anthems", "Jazz Classics"}
+	setPlaylistsForTest(a.playlists, []string{"Rock Anthems", "Jazz Classics"})
 	a.playlists.setFilter("rock")
 	a.tv.SetFocus(a.library.tree)
 

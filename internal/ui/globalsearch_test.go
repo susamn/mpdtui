@@ -116,7 +116,7 @@ func TestOpenGlobalSearchInvalidPrefixKeepsPopupOpen(t *testing.T) {
 
 func TestOpenGlobalSearchPlaylistNoMatchKeepsPopupOpen(t *testing.T) {
 	a := newTestApp()
-	a.playlists.names = []string{"Rock Anthems", "Jazz Classics"}
+	setPlaylistsForTest(a.playlists, []string{"Rock Anthems", "Jazz Classics"})
 	a.tv.SetFocus(a.library.tree)
 	a.openGlobalSearch()
 
@@ -135,7 +135,7 @@ func TestOpenGlobalSearchPlaylistNoMatchKeepsPopupOpen(t *testing.T) {
 
 func TestOpenGlobalSearchPlaylistMatchClosesAndFocusesPlaylists(t *testing.T) {
 	a := newTestApp()
-	a.playlists.names = []string{"Rock Anthems", "Jazz Classics"}
+	setPlaylistsForTest(a.playlists, []string{"Rock Anthems", "Jazz Classics"})
 	a.tv.SetFocus(a.queue.table)
 	a.openGlobalSearch()
 
