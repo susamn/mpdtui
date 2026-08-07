@@ -47,7 +47,9 @@ single-line inline player for a shell or tmux pane.
   alongside the Queue search box, refreshed on library/playlist changes
 - **Now Playing bar** — live progress, volume, repeat/random/single/consume
   flags, updated instantly via MPD's `idle` protocol (stays in sync even
-  when playback changes from another client, e.g. `mpc`)
+  when playback changes from another client, e.g. `mpc`); its right half
+  shows a small playback-driven visualization (`v` to cycle, currently a
+  sonar-style ping)
 - **Lightweight inline mode** (`-mini`) — two live status lines (queue/
   playlist counts, then track/progress), no alt-screen takeover, for
   tmux status panes or a quick glance
@@ -115,6 +117,7 @@ Press `?` inside the full UI for the in-app keybinding list.
 | `/` | Search (contextual: filters Library/Playlists, jumps to a match in Queue) |
 | `f` | Global search from any panel -- type `a`/`p`/`t` + a term, e.g. `a hello`, `p oldies`, `t help me` (album/playlist/track); stays open with "no X found" if nothing matches |
 | `i` | Track info card for the currently playing track (Track/Album/Artist/Genre/Year), anchored to the bottom-right quarter of the Queue panel |
+| `v` | Cycle Now Playing visualizations (right half of the Now Playing bar) |
 | `?` | Help overlay |
 | `q` | Quit |
 
