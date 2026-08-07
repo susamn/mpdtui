@@ -89,6 +89,100 @@ func TestLKeyJumpsToCurrentTrackAndFocusesQueue(t *testing.T) {
 	}
 }
 
+func TestTrackChangedForJump(t *testing.T) {
+	cases := []struct {
+		name              string
+		startedUp         bool
+		previousID, newID int
+		want              bool
+	}{
+		{"genuine change after startup", true, 5, 7, true},
+		{"suppressed before startup completes", false, 5, 7, false},
+		{"same track re-confirmed on a tick", true, 5, 5, false},
+		{"playback stopped (newID -1)", true, 5, -1, false},
+		{"first-ever real track after nothing playing", true, -1, 3, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := trackChangedForJump(tc.startedUp, tc.previousID, tc.newID); got != tc.want {
+				t.Errorf("trackChangedForJump(%v, %d, %d) = %v, want %v", tc.startedUp, tc.previousID, tc.newID, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestMaybeJumpToCurrentTrack* exercise maybeJumpToCurrentTrack directly
+// (via newTestApp, no live client) rather than refreshNowPlaying/
+// refreshAll end-to-end: those need a real MPD client for Status/
+// CurrentSong, and -- more importantly -- refreshNowPlaying's
+// albumArt.onTrackChanged spawns a background fetch goroutine that
+// outlives the test if it hasn't returned by the time dialOrSkip's
+// t.Cleanup closes the connection; mpdclient.Client.Close doesn't nil out
+// its underlying conn, and gompd panics (rather than erroring) when a
+// command runs on a closed one. maybeJumpToCurrentTrack contains all the
+// actual decision/focus logic worth testing here, with none of that risk.
+
+func TestMaybeJumpToCurrentTrackFocusesQueueWhenChanged(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "First"}, {ID: 2, Title: "Second"}}
+	a.queue.render(-1)
+	a.queue.setCurrent(2)
+	a.tv.SetFocus(a.library.tree)
+
+	a.maybeJumpToCurrentTrack(true)
+
+	if a.tv.GetFocus() != a.queue.table {
+		t.Errorf("focus after maybeJumpToCurrentTrack(true) = %T, want the Queue table", a.tv.GetFocus())
+	}
+	row, _ := a.queue.table.GetSelection()
+	if row != 1 {
+		t.Errorf("selected row = %d, want 1 (song id 2)", row)
+	}
+}
+
+func TestMaybeJumpToCurrentTrackNoOpWhenNotChanged(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "First"}}
+	a.queue.render(-1)
+	a.queue.setCurrent(1)
+	a.tv.SetFocus(a.library.tree)
+
+	a.maybeJumpToCurrentTrack(false)
+
+	if a.tv.GetFocus() != a.library.tree {
+		t.Errorf("focus after maybeJumpToCurrentTrack(false) = %T, want it left alone (still Library)", a.tv.GetFocus())
+	}
+}
+
+func TestMaybeJumpToCurrentTrackSkipsWhenOverlayOpen(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "First"}}
+	a.queue.render(-1)
+	a.queue.setCurrent(1)
+	a.tv.SetFocus(a.library.tree)
+	a.mode = modeOverlay
+
+	a.maybeJumpToCurrentTrack(true)
+
+	if a.tv.GetFocus() != a.library.tree {
+		t.Errorf("focus while an overlay is open = %T, want it left alone (still Library)", a.tv.GetFocus())
+	}
+}
+
+func TestMaybeJumpToCurrentTrackNoOpWhenSongNotInQueue(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "First"}}
+	a.queue.render(-1)
+	a.queue.setCurrent(99) // not present in songs
+	a.tv.SetFocus(a.library.tree)
+
+	a.maybeJumpToCurrentTrack(true)
+
+	if a.tv.GetFocus() != a.library.tree {
+		t.Errorf("focus when the current id isn't in the queue = %T, want it left alone (still Library)", a.tv.GetFocus())
+	}
+}
+
 func TestLKeyWithNothingPlayingFlashesMessageWithoutChangingFocus(t *testing.T) {
 	a := newTestApp()
 	a.tv.SetFocus(a.library.tree)

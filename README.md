@@ -121,7 +121,7 @@ Press `?` inside the full UI for the in-app keybinding list.
 | `f` | Global search from any panel -- type `a`/`p`/`t` + a term, e.g. `a hello`, `p oldies`, `t help me` (album/playlist/track); stays open with "no X found" if nothing matches |
 | `i` | Track info card for the currently playing track (Track/Album/Artist/Genre/Year), anchored to the bottom-right quarter of the Queue panel |
 | `v` | Cycle Now Playing visualizations (right half of the Now Playing bar) |
-| `L` | Locate the currently playing track: selects it in the Queue and moves focus there, from any panel |
+| `L` | Locate the currently playing track: selects it in the Queue and moves focus there, from any panel. Happens automatically too, whenever the playing track actually changes (explicit play action or natural auto-advance alike) -- except while an overlay is open, or on startup |
 | `?` | Help overlay |
 | `q` | Quit |
 

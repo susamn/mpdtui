@@ -51,6 +51,14 @@ type App struct {
 	beforeOverlayFocus tview.Primitive
 	closeOverlay       func()
 
+	// startedUp is false until refreshAll's initial refreshNowPlaying call
+	// completes -- that call is the app *learning* whatever MPD was
+	// already playing before mpdtui started, not a real track change, so
+	// it must not trigger the auto-jump-to-Queue in refreshNowPlaying
+	// (which would override the deliberate default startup focus on
+	// Library before the user's done anything).
+	startedUp bool
+
 	msgSeq int
 
 	done chan struct{}
@@ -167,6 +175,7 @@ func (a *App) refreshAll() {
 	a.queue.refresh()
 	a.queue.refreshStats()
 	a.refreshNowPlaying()
+	a.startedUp = true
 }
 
 func (a *App) eventLoop() {
@@ -211,6 +220,18 @@ func (a *App) handleSubsystem(name string) {
 	}
 }
 
+// trackChangedForJump reports whether a play transition from previousID
+// to newID (MPD's current status.SongID) is one that refreshNowPlaying
+// should react to by jumping focus to the Queue panel and selecting that
+// track: true for any actual change to a real playing track -- explicit
+// play action or natural auto-advance alike -- but not for the app's own
+// startup observation of already-playing state (startedUp), not when
+// playback has stopped (newID < 0, nothing to select), and not for the
+// same track being re-confirmed on every ~500ms tick (newID == previousID).
+func trackChangedForJump(startedUp bool, previousID, newID int) bool {
+	return startedUp && newID >= 0 && newID != previousID
+}
+
 func (a *App) refreshNowPlaying() {
 	st, err := a.client.Status()
 	if err != nil {
@@ -223,10 +244,31 @@ func (a *App) refreshNowPlaying() {
 		return
 	}
 	a.renderNowPlaying(st, song)
+
+	// Computed before setCurrent overwrites queue.currentID with the new
+	// value.
+	trackChanged := trackChangedForJump(a.startedUp, a.queue.currentID, st.SongID)
+
 	a.queue.setCurrent(st.SongID)
 	a.albumArt.onTrackChanged(song.File)
 	a.trackInfo.render(song)
 	a.visualizer.tick(st)
+
+	a.maybeJumpToCurrentTrack(trackChanged)
+}
+
+// maybeJumpToCurrentTrack jumps focus to the Queue panel and selects the
+// currently playing track when trackChanged (see trackChangedForJump) --
+// split out from refreshNowPlaying so it's testable without a live MPD
+// client. Skips stealing focus while an overlay is open (e.g. mid-typing
+// in the global search popup when a track happens to auto-advance) --
+// SetFocus-ing away from the overlay's own widget without also updating
+// a.mode/closeOverlay would leave Esc restoring focus to wherever it was
+// *before* the overlay opened, not to Queue.
+func (a *App) maybeJumpToCurrentTrack(trackChanged bool) {
+	if trackChanged && a.mode == modeNormal && a.queue.jumpToCurrent() {
+		a.focusPanelPrimitive(a.queue.table)
+	}
 }
 
 func (a *App) cycleFocus(delta int) {
