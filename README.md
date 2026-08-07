@@ -35,7 +35,8 @@ single-line inline player for a shell or tmux pane.
 - **Library** — expandable directory tree (MPD's actual filesystem layout,
   lazily loaded per folder), or free-text tag search
 - **Playlists** — load, append, save, delete stored playlists
-- **Queue** — reorder, remove, clear, jump to any track
+- **Queue** — reorder, remove, clear, jump to any track; each row shows a
+  color-coded format badge (MP3/FLAC/M4A/...) next to its runtime
 - **Now Playing bar** — live progress, volume, repeat/random/single/consume
   flags, updated instantly via MPD's `idle` protocol (stays in sync even
   when playback changes from another client, e.g. `mpc`)

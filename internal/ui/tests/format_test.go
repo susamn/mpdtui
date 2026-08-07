@@ -65,3 +65,22 @@ func TestVolText(t *testing.T) {
 		t.Errorf("expected 79, got %q", ui.VolText(79))
 	}
 }
+
+func TestTrackFormat(t *testing.T) {
+	cases := map[string]string{
+		"queen/absolute-greatest/track.mp3": "MP3",
+		"track.flac":                        "FLAC",
+		"Some Album/Track.M4A":              "M4A",
+		"path/to/song.wma":                  "WMA",
+		"no-extension":                      "",
+		"trailing-dot.":                     "",
+		".hidden":                           "",
+		"":                                  "",
+		"dir.with.dots/track.ogg":           "OGG",
+	}
+	for file, want := range cases {
+		if got := ui.TrackFormat(file); got != want {
+			t.Errorf("TrackFormat(%q) = %q, want %q", file, got, want)
+		}
+	}
+}
