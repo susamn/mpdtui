@@ -12,7 +12,7 @@ import (
 // Visualization is a single Now Playing visualization. To add a new one:
 //
 //  1. Create a new file internal/ui/viz_<name>.go with a type implementing
-//     this interface (see viz_sonar.go for a worked example).
+//     this interface (see viz_equalizer.go for a worked example).
 //  2. Register an instance of it in newVisualizerPanel's vizs slice,
 //     below.
 //
@@ -78,7 +78,7 @@ func newVisualizerPanel(app *App) *visualizerPanel {
 		// New visualizations are registered here, in the order 'v'
 		// cycles through them.
 		vizs: []Visualization{
-			sonarVisualization{},
+			equalizerVisualization{},
 		},
 	}
 	p.view.SetTitle(" " + p.current().Name() + " ")
