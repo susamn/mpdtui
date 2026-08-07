@@ -23,10 +23,12 @@ type queuePanel struct {
 	search *tview.InputField
 	stats  *tview.TextView
 	songs  []mpdclient.Song
+
+	currentID int // queue id of the playing/selected track, or -1 if none (see setCurrent)
 }
 
 func newQueuePanel(app *App) *queuePanel {
-	q := &queuePanel{app: app}
+	q := &queuePanel{app: app, currentID: -1}
 
 	t := tview.NewTable()
 	t.SetBorder(true).SetTitle(" Queue ")
@@ -167,8 +169,10 @@ func formatTagCell(file string) *tview.TableCell {
 }
 
 // setCurrent repaints just the playing-track marker column, without
-// re-fetching the queue from MPD (cheap enough to call on every tick).
+// re-fetching the queue from MPD (cheap enough to call on every tick), and
+// remembers id for jumpToCurrent.
 func (q *queuePanel) setCurrent(id int) {
+	q.currentID = id
 	for i, s := range q.songs {
 		cell := q.table.GetCell(i, 0)
 		if cell == nil {
@@ -180,6 +184,24 @@ func (q *queuePanel) setCurrent(id int) {
 			cell.SetText("  ")
 		}
 	}
+}
+
+// jumpToCurrent selects the currently playing track (see setCurrent),
+// without changing focus -- callers that also want focus moved to the
+// Queue panel do that separately (see App.jumpToCurrentTrack). Returns
+// false if nothing is currently playing/selected, leaving the current
+// selection untouched.
+func (q *queuePanel) jumpToCurrent() bool {
+	if q.currentID < 0 {
+		return false
+	}
+	for i, s := range q.songs {
+		if s.ID == q.currentID {
+			q.table.Select(i, 0)
+			return true
+		}
+	}
+	return false
 }
 
 // jumpToMatch selects (but does not remove or hide) the first queued track

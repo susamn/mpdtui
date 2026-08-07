@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -277,24 +278,71 @@ func (a *App) flash(text string) {
 	})
 }
 
+// hint is a single key:action pair shown in the hint bar.
+type hint struct {
+	key    string
+	action string
+}
+
+// formatHints renders hints as "key:action  key:action  ...", each key
+// bolded so it's visually distinct from its action description -- the
+// action text stays unstyled.
+func formatHints(hints []hint) string {
+	parts := make([]string, len(hints))
+	for i, h := range hints {
+		parts[i] = fmt.Sprintf("[::b]%s[-:-:-]:%s", h.key, h.action)
+	}
+	return strings.Join(parts, "  ")
+}
+
+// globalHints work the same regardless of which panel is focused (unlike
+// e.g. 'a'/'d'/'o', which are contextual and so live in updateHintBar's
+// per-panel lists instead, even though they're dispatched through the
+// same globalInputCapture).
+var globalHints = []hint{
+	{"Space", "play/pause"},
+	{"s", "stop"},
+	{"n/p", "next/prev"},
+	{",/.", "seek"},
+	{"-/=", "vol"},
+	{"z", "shuffle"},
+	{"x", "repeat"},
+	{"c", "consume"},
+	{"Z", "single"},
+	{"D", "clear queue"},
+	{"/", "search"},
+	{"f", "find"},
+	{"i", "info"},
+	{"v", "visualizer"},
+	{"L", "locate playing"},
+	{"?", "help"},
+	{"Tab/1-3", "panels"},
+	{"q", "quit"},
+}
+
 func (a *App) updateHintBar() {
-	var panelHints string
+	var panelHints []hint
 	switch a.tv.GetFocus() {
 	case a.library.tree:
-		panelHints = "Enter:expand/play  a:add  Bksp:back"
+		panelHints = []hint{{"Enter", "expand/play"}, {"a", "add"}, {"Bksp", "back"}, {"o", "sort"}}
 		if a.library.mode == libSearch {
-			panelHints += "  Esc:clear search"
+			panelHints = append(panelHints, hint{"Esc", "clear search"})
 		}
 	case a.playlists.list:
-		panelHints = "Enter:load+play  a:append  d:delete  S:save queue"
+		panelHints = []hint{{"Enter", "load+play"}, {"a", "append"}, {"d", "delete"}, {"S", "save queue"}, {"o", "sort"}}
 		if a.playlists.filter != "" {
-			panelHints += "  Esc:clear filter"
+			panelHints = append(panelHints, hint{"Esc", "clear filter"})
 		}
 	case a.queue.table:
-		panelHints = "Enter:play  d:remove  J/K:move"
+		panelHints = []hint{{"Enter", "play"}, {"d", "remove"}, {"J/K", "move"}}
 	}
-	global := "Space:play/pause  s:stop  n/p:next/prev  ,/.:seek  -/=:vol  z:shuffle  x:repeat  D:clear queue  /:search  f:find  i:info  v:visualizer  o:sort  ?:help  Tab/1-3:panels  q:quit"
-	a.hintBar.SetText("[::b]" + panelHints + "[-:-:-]  |  " + global)
+
+	text := formatHints(panelHints)
+	if text != "" {
+		text += "   "
+	}
+	text += "[::d]Global:[-:-:-]  " + formatHints(globalHints)
+	a.hintBar.SetText(text)
 }
 
 func (a *App) addAndPlay(song mpdclient.Song) {
