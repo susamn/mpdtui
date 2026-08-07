@@ -54,8 +54,13 @@ func parseGlobalSearch(input string) (kind globalSearchKind, term string, ok boo
 // be adjusted immediately without reopening. Esc (handled globally in
 // overlay mode) cancels and restores whichever panel was focused before
 // 'f' was pressed, same as every other overlay.
+//
+// The field starts pre-filled with "t " (track search, the most common
+// case) so a plain search term can be typed immediately; the cursor lands
+// after the space since SetText places it at the end of the new text.
 func (a *App) openGlobalSearch() {
 	field := tview.NewInputField().SetLabel("Search: ").SetFieldWidth(50)
+	field.SetText("t ")
 	field.SetBorder(true).SetTitle(" a:album  p:playlist  t:track ")
 	field.SetDoneFunc(func(key tcell.Key) {
 		if key != tcell.KeyEnter {
