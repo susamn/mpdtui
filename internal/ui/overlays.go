@@ -145,6 +145,7 @@ const helpText = `[::b]Global[-:-:-]
   /              search (contextual: Library/Playlists filter, Queue jump)
   f              global search from any panel: "a/p/t <term>" for
                  album/playlist/track (e.g. "a hello", "p oldies")
+  i              track info card for the currently playing track
   ?              this help
   q              quit
 
