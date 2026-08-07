@@ -6,6 +6,8 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+
+	"mpdtui/internal/mpdclient"
 )
 
 // cellFg reports the foreground color tview will actually draw for cell,
@@ -64,6 +66,47 @@ func TestFormatTagCellTextHasNoBracket(t *testing.T) {
 		if cell := formatTagCell(file); strings.ContainsAny(cell.Text, "[]") {
 			t.Errorf("formatTagCell(%q).Text = %q contains a bracket -- tview will silently swallow it as a tag", file, cell.Text)
 		}
+	}
+}
+
+func TestQueueJumpToCurrentSelectsThePlayingRow(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{
+		{ID: 1, Title: "First"},
+		{ID: 2, Title: "Second"},
+		{ID: 3, Title: "Third"},
+	}
+	a.queue.render(-1)
+	a.queue.setCurrent(2)
+
+	if !a.queue.jumpToCurrent() {
+		t.Fatal("jumpToCurrent() = false, want true (song id 2 is in the queue)")
+	}
+	row, _ := a.queue.table.GetSelection()
+	if row != 1 {
+		t.Errorf("selected row = %d, want 1 (the row for song id 2)", row)
+	}
+}
+
+func TestQueueJumpToCurrentFalseWhenNothingPlaying(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "First"}}
+	a.queue.render(-1)
+	// currentID defaults to -1 (see newQueuePanel) -- setCurrent was never called.
+
+	if a.queue.jumpToCurrent() {
+		t.Error("jumpToCurrent() = true, want false when nothing is playing")
+	}
+}
+
+func TestQueueJumpToCurrentFalseWhenCurrentIDNoLongerInQueue(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "First"}}
+	a.queue.render(-1)
+	a.queue.setCurrent(99) // some id not present in songs
+
+	if a.queue.jumpToCurrent() {
+		t.Error("jumpToCurrent() = true, want false when the current id isn't in the queue (e.g. it was just removed)")
 	}
 }
 

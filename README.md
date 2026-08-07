@@ -121,7 +121,7 @@ Press `?` inside the full UI for the in-app keybinding list.
 | `f` | Global search from any panel -- type `a`/`p`/`t` + a term, e.g. `a hello`, `p oldies`, `t help me` (album/playlist/track); stays open with "no X found" if nothing matches |
 | `i` | Track info card for the currently playing track (Track/Album/Artist/Genre/Year), anchored to the bottom-right quarter of the Queue panel |
 | `v` | Cycle Now Playing visualizations (right half of the Now Playing bar) |
-| `o` | Cycle sort mode (Library: name/recent, Playlists: recent/name) -- current mode shown in the panel's title |
+| `L` | Locate the currently playing track: selects it in the Queue and moves focus there, from any panel. Happens automatically too, whenever the playing track actually changes (explicit play action or natural auto-advance alike) -- except while an overlay is open, or on startup |
 | `?` | Help overlay |
 | `q` | Quit |
 
@@ -133,11 +133,13 @@ Press `?` inside the full UI for the in-app keybinding list.
 | Library | `a` | Add selected folder (recursively) or track to queue (no play) |
 | Library | `Backspace` | Collapse folder, or go up to its parent |
 | Library | `j`/`k`/`g`/`G` | Native tree navigation (also `J`/`K` to jump in/out a level) |
+| Library | `o` | Cycle sort: name / most recently modified (browse mode only) |
 | Library | `Esc` | Clear active search |
 | Playlists | `Enter` | Load playlist into queue and play |
 | Playlists | `a` | Append playlist to queue |
 | Playlists | `d` | Delete playlist (confirm) |
 | Playlists | `S` | Save current queue as a new playlist |
+| Playlists | `o` | Cycle sort: most recently updated / name -- 🆕 badge on the 5 most recent regardless of which sort is showing |
 | Playlists | `Esc` | Clear active filter |
 | Queue | `Enter` | Play selected track |
 | Queue | `d` | Remove selected track |

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -49,6 +50,14 @@ type App struct {
 	mode               int
 	beforeOverlayFocus tview.Primitive
 	closeOverlay       func()
+
+	// startedUp is false until refreshAll's initial refreshNowPlaying call
+	// completes -- that call is the app *learning* whatever MPD was
+	// already playing before mpdtui started, not a real track change, so
+	// it must not trigger the auto-jump-to-Queue in refreshNowPlaying
+	// (which would override the deliberate default startup focus on
+	// Library before the user's done anything).
+	startedUp bool
 
 	msgSeq int
 
@@ -166,6 +175,7 @@ func (a *App) refreshAll() {
 	a.queue.refresh()
 	a.queue.refreshStats()
 	a.refreshNowPlaying()
+	a.startedUp = true
 }
 
 func (a *App) eventLoop() {
@@ -210,6 +220,18 @@ func (a *App) handleSubsystem(name string) {
 	}
 }
 
+// trackChangedForJump reports whether a play transition from previousID
+// to newID (MPD's current status.SongID) is one that refreshNowPlaying
+// should react to by jumping focus to the Queue panel and selecting that
+// track: true for any actual change to a real playing track -- explicit
+// play action or natural auto-advance alike -- but not for the app's own
+// startup observation of already-playing state (startedUp), not when
+// playback has stopped (newID < 0, nothing to select), and not for the
+// same track being re-confirmed on every ~500ms tick (newID == previousID).
+func trackChangedForJump(startedUp bool, previousID, newID int) bool {
+	return startedUp && newID >= 0 && newID != previousID
+}
+
 func (a *App) refreshNowPlaying() {
 	st, err := a.client.Status()
 	if err != nil {
@@ -222,10 +244,31 @@ func (a *App) refreshNowPlaying() {
 		return
 	}
 	a.renderNowPlaying(st, song)
+
+	// Computed before setCurrent overwrites queue.currentID with the new
+	// value.
+	trackChanged := trackChangedForJump(a.startedUp, a.queue.currentID, st.SongID)
+
 	a.queue.setCurrent(st.SongID)
 	a.albumArt.onTrackChanged(song.File)
 	a.trackInfo.render(song)
 	a.visualizer.tick(st)
+
+	a.maybeJumpToCurrentTrack(trackChanged)
+}
+
+// maybeJumpToCurrentTrack jumps focus to the Queue panel and selects the
+// currently playing track when trackChanged (see trackChangedForJump) --
+// split out from refreshNowPlaying so it's testable without a live MPD
+// client. Skips stealing focus while an overlay is open (e.g. mid-typing
+// in the global search popup when a track happens to auto-advance) --
+// SetFocus-ing away from the overlay's own widget without also updating
+// a.mode/closeOverlay would leave Esc restoring focus to wherever it was
+// *before* the overlay opened, not to Queue.
+func (a *App) maybeJumpToCurrentTrack(trackChanged bool) {
+	if trackChanged && a.mode == modeNormal && a.queue.jumpToCurrent() {
+		a.focusPanelPrimitive(a.queue.table)
+	}
 }
 
 func (a *App) cycleFocus(delta int) {
@@ -277,24 +320,71 @@ func (a *App) flash(text string) {
 	})
 }
 
+// hint is a single key:action pair shown in the hint bar.
+type hint struct {
+	key    string
+	action string
+}
+
+// formatHints renders hints as "key:action  key:action  ...", each key
+// bolded so it's visually distinct from its action description -- the
+// action text stays unstyled.
+func formatHints(hints []hint) string {
+	parts := make([]string, len(hints))
+	for i, h := range hints {
+		parts[i] = fmt.Sprintf("[::b]%s[-:-:-]:%s", h.key, h.action)
+	}
+	return strings.Join(parts, "  ")
+}
+
+// globalHints work the same regardless of which panel is focused (unlike
+// e.g. 'a'/'d'/'o', which are contextual and so live in updateHintBar's
+// per-panel lists instead, even though they're dispatched through the
+// same globalInputCapture).
+var globalHints = []hint{
+	{"Space", "play/pause"},
+	{"s", "stop"},
+	{"n/p", "next/prev"},
+	{",/.", "seek"},
+	{"-/=", "vol"},
+	{"z", "shuffle"},
+	{"x", "repeat"},
+	{"c", "consume"},
+	{"Z", "single"},
+	{"D", "clear queue"},
+	{"/", "search"},
+	{"f", "find"},
+	{"i", "info"},
+	{"v", "visualizer"},
+	{"L", "locate playing"},
+	{"?", "help"},
+	{"Tab/1-3", "panels"},
+	{"q", "quit"},
+}
+
 func (a *App) updateHintBar() {
-	var panelHints string
+	var panelHints []hint
 	switch a.tv.GetFocus() {
 	case a.library.tree:
-		panelHints = "Enter:expand/play  a:add  Bksp:back"
+		panelHints = []hint{{"Enter", "expand/play"}, {"a", "add"}, {"Bksp", "back"}, {"o", "sort"}}
 		if a.library.mode == libSearch {
-			panelHints += "  Esc:clear search"
+			panelHints = append(panelHints, hint{"Esc", "clear search"})
 		}
 	case a.playlists.list:
-		panelHints = "Enter:load+play  a:append  d:delete  S:save queue"
+		panelHints = []hint{{"Enter", "load+play"}, {"a", "append"}, {"d", "delete"}, {"S", "save queue"}, {"o", "sort"}}
 		if a.playlists.filter != "" {
-			panelHints += "  Esc:clear filter"
+			panelHints = append(panelHints, hint{"Esc", "clear filter"})
 		}
 	case a.queue.table:
-		panelHints = "Enter:play  d:remove  J/K:move"
+		panelHints = []hint{{"Enter", "play"}, {"d", "remove"}, {"J/K", "move"}}
 	}
-	global := "Space:play/pause  s:stop  n/p:next/prev  ,/.:seek  -/=:vol  z:shuffle  x:repeat  D:clear queue  /:search  f:find  i:info  v:visualizer  o:sort  ?:help  Tab/1-3:panels  q:quit"
-	a.hintBar.SetText("[::b]" + panelHints + "[-:-:-]  |  " + global)
+
+	text := formatHints(panelHints)
+	if text != "" {
+		text += "   "
+	}
+	text += "[::d]Global:[-:-:-]  " + formatHints(globalHints)
+	a.hintBar.SetText(text)
 }
 
 func (a *App) addAndPlay(song mpdclient.Song) {

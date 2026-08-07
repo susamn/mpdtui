@@ -93,6 +93,9 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 		case 'o':
 			a.handleCycleSort()
 			return nil
+		case 'L':
+			a.jumpToCurrentTrack()
+			return nil
 		case '?':
 			a.openHelp()
 			return nil
@@ -300,6 +303,18 @@ func (a *App) handleCycleSort() {
 	default:
 		a.invalidKey("o")
 	}
+}
+
+// jumpToCurrentTrack is 'L': selects the currently playing track in the
+// Queue panel and moves focus there, from any panel. Flashes a message
+// instead of silently doing nothing when there's no current track (queue
+// empty, or nothing playing/selected).
+func (a *App) jumpToCurrentTrack() {
+	if !a.queue.jumpToCurrent() {
+		a.showMessage("nothing playing")
+		return
+	}
+	a.focusPanelPrimitive(a.queue.table)
 }
 
 func (a *App) handleAdd() {
