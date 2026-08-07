@@ -27,6 +27,23 @@ func TestQuadrantRectBottomRight(t *testing.T) {
 	}
 }
 
+func TestCardRectFloatsAtQuadrantTopLeftHalfSized(t *testing.T) {
+	cases := []struct {
+		x, y, w, h                 int
+		wantX, wantY, wantW, wantH int
+	}{
+		{50, 30, 50, 30, 50, 30, 25, 15},
+		{0, 0, 41, 21, 0, 0, 20, 10}, // odd dimensions round the card size down
+	}
+	for _, tc := range cases {
+		gotX, gotY, gotW, gotH := cardRect(tc.x, tc.y, tc.w, tc.h)
+		if gotX != tc.wantX || gotY != tc.wantY || gotW != tc.wantW || gotH != tc.wantH {
+			t.Errorf("cardRect(%d,%d,%d,%d) = (%d,%d,%d,%d), want (%d,%d,%d,%d)",
+				tc.x, tc.y, tc.w, tc.h, gotX, gotY, gotW, gotH, tc.wantX, tc.wantY, tc.wantW, tc.wantH)
+		}
+	}
+}
+
 func TestTrackInfoCardRenderNothingPlaying(t *testing.T) {
 	a := newTestApp()
 	a.trackInfo.render(mpdclient.Song{})
@@ -85,8 +102,42 @@ func TestOpenTrackInfoTakesFocusAndPositionsInBottomRightQuadrant(t *testing.T) 
 	// than Draw itself, which needs a real tcell.Screen to paint into.
 	a.trackInfo.positionOverQueue()
 	x, y, w, h := a.trackInfo.GetRect()
-	if x != 50 || y != 30 || w != 50 || h != 30 {
-		t.Errorf("card rect after Draw = (%d,%d,%d,%d), want (50,30,50,30)", x, y, w, h)
+	if x != 50 || y != 30 || w != 25 || h != 15 {
+		t.Errorf("card rect after Draw = (%d,%d,%d,%d), want (50,30,25,15) -- half the quadrant, floating at its top-left corner", x, y, w, h)
+	}
+}
+
+func TestOpenTrackInfoTogglesClosedOnSecondIPress(t *testing.T) {
+	a := newTestApp()
+	a.tv.SetFocus(a.queue.table)
+	a.openTrackInfo()
+
+	if a.mode != modeOverlay {
+		t.Fatal("setup: mode after openTrackInfo should be modeOverlay")
+	}
+
+	iKey := tcell.NewEventKey(tcell.KeyRune, 'i', tcell.ModNone)
+	if result := a.globalInputCapture(iKey); result != nil {
+		t.Errorf("'i' while the track info card is open should be consumed, got %v", result)
+	}
+	if a.mode != modeNormal {
+		t.Error("mode after a second 'i' press should be modeNormal (card toggled closed)")
+	}
+	if a.tv.GetFocus() != a.queue.table {
+		t.Errorf("focus after toggling closed = %T, want the originally-focused Queue table", a.tv.GetFocus())
+	}
+}
+
+func TestIKeyWhileAnotherOverlayOpenDoesNotToggleTrackInfo(t *testing.T) {
+	a := newTestApp()
+	a.tv.SetFocus(a.queue.table)
+	a.openHelp()
+
+	iKey := tcell.NewEventKey(tcell.KeyRune, 'i', tcell.ModNone)
+	a.globalInputCapture(iKey)
+
+	if a.mode != modeOverlay {
+		t.Error("'i' while a different overlay (help) is open should not close it")
 	}
 }
 

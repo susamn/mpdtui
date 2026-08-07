@@ -18,6 +18,13 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			a.closeOverlay()
 			return nil
 		}
+		// 'i' toggles the track info card closed while it's the open
+		// overlay, mirroring Esc -- every other overlay only closes via
+		// Esc, but the info card's own key doubles as a close shortcut.
+		if event.Key() == tcell.KeyRune && event.Rune() == 'i' && a.tv.GetFocus() == a.trackInfo {
+			a.closeOverlay()
+			return nil
+		}
 		return event
 	}
 
