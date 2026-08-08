@@ -23,7 +23,7 @@ single-line inline player for a shell or tmux pane.
 ## Screenshot
 
 <p align="center">
-  <img src="assets/screenshot.png" width="900" alt="mpdtui full panel UI: Library tree, Album Art, Playlists, Queue with format tags, and live stats">
+  <img src="assets/screenshot.png" width="900" alt="mpdtui full panel UI: Library tree, Album Art, Playlists with recency badges, Queue with Title/Album/Artist/Type/Duration columns, live stats, and the Now Playing equalizer visualizer">
 </p>
 
 ## Demo
