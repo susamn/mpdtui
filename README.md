@@ -41,6 +41,19 @@ single-line inline player for a shell or tmux pane.
 - **Library** — expandable directory tree (MPD's actual filesystem layout,
   lazily loaded per folder), or free-text tag search; `o` cycles
   name/most-recently-modified sort
+- **Album art** — shown for the currently playing track, updated
+  automatically on track change. Renders as a crisp real image via the
+  [Kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/)
+  when the terminal supports it (detected from `$TERM` containing
+  `kitty`, or `$KITTY_WINDOW_ID` being set -- covers kitty itself and
+  kitty-compatible terminals that keep `TERM` as `xterm-kitty`, even if
+  it's been overridden to something like `xterm-256color` for remote-host
+  terminfo compatibility). Everywhere else -- including terminals that
+  *do* support the Kitty protocol but don't signal it either way, e.g.
+  some WezTerm/Konsole configurations -- falls back to a fixed 30x15
+  ASCII-art rendering; there's no capability probe, since one risks
+  hanging against a terminal that never answers it. "No Album Art" is
+  shown if MPD has none embedded or alongside the track.
 - **Playlists** — load, append, save, delete stored playlists; `o` cycles
   between most-recently-updated and alphabetical, with a 🆕 badge on the
   5 most recent regardless of which sort is showing
