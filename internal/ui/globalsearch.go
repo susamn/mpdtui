@@ -9,21 +9,24 @@ import (
 )
 
 // globalSearchKind is which section of the app a global ('f') search
-// targets, chosen by the first letter of the input's first word.
+// targets, chosen by the first word of the input.
 type globalSearchKind int
 
 const (
 	globalSearchTrack globalSearchKind = iota
+	globalSearchArtist
 	globalSearchAlbum
 	globalSearchPlaylist
 )
 
 // parseGlobalSearch splits raw input into a search kind and term. The
-// first word's first letter selects the kind ('t'=track, 'a'=album,
-// 'p'=playlist, case-insensitive) and everything after that first word is
-// the term -- so "t", "track", and "trk" are all equivalent, only the
-// leading letter matters. Returns ok=false for empty input, an empty
-// term, or an unrecognized leading letter.
+// first word selects the kind, case-insensitive: a leading "al" (e.g.
+// "al", "album") means album, any other word starting with "a" (e.g. "a",
+// "artist") means artist, "p"/"playlist" means playlist, "t"/"track" means
+// track -- only that leading prefix matters, so "t", "track", and "trk"
+// are all equivalent. Everything after the first word is the term.
+// Returns ok=false for empty input, an empty term, or an unrecognized
+// leading word.
 func parseGlobalSearch(input string) (kind globalSearchKind, term string, ok bool) {
 	input = strings.TrimSpace(input)
 	if input == "" {
@@ -34,26 +37,29 @@ func parseGlobalSearch(input string) (kind globalSearchKind, term string, ok boo
 	if firstWord == "" || rest == "" {
 		return 0, "", false
 	}
-	switch strings.ToLower(firstWord[:1]) {
-	case "a":
+	word := strings.ToLower(firstWord)
+	switch {
+	case strings.HasPrefix(word, "al"):
 		return globalSearchAlbum, rest, true
-	case "p":
+	case strings.HasPrefix(word, "a"):
+		return globalSearchArtist, rest, true
+	case strings.HasPrefix(word, "p"):
 		return globalSearchPlaylist, rest, true
-	case "t":
+	case strings.HasPrefix(word, "t"):
 		return globalSearchTrack, rest, true
 	}
 	return 0, "", false
 }
 
 // openGlobalSearch opens a "f" search reachable from any panel: type a
-// prefix letter (a/p/t) plus a search term, e.g. "a hello" for an album
-// search. Unlike the panel-local '/' searches (which always close on
-// Enter, even with no results, reporting failure via a hint-bar flash
-// after the fact), this one stays open on no results or an unrecognized
-// prefix -- the popup's own title becomes the feedback, so the query can
-// be adjusted immediately without reopening. Esc (handled globally in
-// overlay mode) cancels and restores whichever panel was focused before
-// 'f' was pressed, same as every other overlay.
+// prefix word (a/al/p/t) plus a search term, e.g. "a queen" for an artist
+// search or "al hello" for an album search. Unlike the panel-local '/'
+// searches (which always close on Enter, even with no results, reporting
+// failure via a hint-bar flash after the fact), this one stays open on no
+// results or an unrecognized prefix -- the popup's own title becomes the
+// feedback, so the query can be adjusted immediately without reopening.
+// Esc (handled globally in overlay mode) cancels and restores whichever
+// panel was focused before 'f' was pressed, same as every other overlay.
 //
 // The field starts pre-filled with "t " (track search, the most common
 // case) so a plain search term can be typed immediately; the cursor lands
@@ -61,20 +67,22 @@ func parseGlobalSearch(input string) (kind globalSearchKind, term string, ok boo
 func (a *App) openGlobalSearch() {
 	field := tview.NewInputField().SetLabel("Search: ").SetFieldWidth(50)
 	field.SetText("t ")
-	field.SetBorder(true).SetTitle(" a:album  p:playlist  t:track ")
+	field.SetBorder(true).SetTitle(" a:artist  al:album  p:playlist  t:track ")
 	field.SetDoneFunc(func(key tcell.Key) {
 		if key != tcell.KeyEnter {
 			return
 		}
 		kind, term, ok := parseGlobalSearch(field.GetText())
 		if !ok {
-			field.SetTitle(" start with a/p/t, then a search term ")
+			field.SetTitle(" start with a/al/p/t, then a search term ")
 			return
 		}
 
 		var found bool
 		var label string
 		switch kind {
+		case globalSearchArtist:
+			found, label = a.library.showArtistSearch(term) > 0, "artist"
 		case globalSearchAlbum:
 			found, label = a.library.showAlbumSearch(term) > 0, "album"
 		case globalSearchPlaylist:
@@ -90,7 +98,7 @@ func (a *App) openGlobalSearch() {
 
 		a.closeOverlay()
 		switch kind {
-		case globalSearchAlbum, globalSearchTrack:
+		case globalSearchArtist, globalSearchAlbum, globalSearchTrack:
 			a.focusPanelPrimitive(a.library.tree)
 		case globalSearchPlaylist:
 			a.focusPanelPrimitive(a.playlists.list)

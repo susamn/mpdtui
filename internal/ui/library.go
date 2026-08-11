@@ -118,14 +118,25 @@ func (p *libraryPanel) cycleSortMode() {
 	p.showRoot()
 }
 
-// showSearch full-text searches the library by tag (independent of the
-// directory tree) and shows the matches as a flat list of file nodes.
-// Returns the number of matched tracks.
+// showSearch full-text searches the library across Title/Artist/Album/
+// Genre/Date (independent of the directory tree, case- and diacritic-
+// insensitive -- see songMatchesQuery) and shows the matches as a flat
+// list of file nodes. Filters client-side over the full library rather
+// than MPD's own server-side "any" search: MPD's search is a plain
+// substring match with no notion of accent-folding, so a plain-ASCII query
+// like "buble" would never match a tag like "Bublé" through it. Returns
+// the number of matched tracks.
 func (p *libraryPanel) showSearch(query string) int {
-	songs, err := p.app.client.Search(query)
+	all, err := p.app.client.AllSongs()
 	if err != nil {
 		p.app.showError(err)
 		return 0
+	}
+	var songs []mpdclient.Song
+	for _, s := range all {
+		if songMatchesQuery(s, query) {
+			songs = append(songs, s)
+		}
 	}
 
 	p.mode = libSearch
@@ -144,26 +155,35 @@ func (p *libraryPanel) showSearch(query string) int {
 	return len(songs)
 }
 
-// albumGroup marks a TreeNode as an album-search result header rather
-// than a real MPD directory: its tracks are already fetched (the same
-// search call that found this album also returned them), so expanding it
+// albumGroup marks a TreeNode as an album- or artist-search result header
+// rather than a real MPD directory: its tracks are already fetched (the
+// same search that found this group also returned them), so expanding it
 // needs no further MPD round-trip, unlike toggleDirectory's lazy
-// real-directory case.
+// real-directory case. Shared by showAlbumSearch (grouped by Artist+Album)
+// and showArtistSearch (grouped by Artist alone) -- both just need "a
+// label plus the songs under it", so one type covers both.
 type albumGroup struct {
 	label string
 	songs []mpdclient.Song
 }
 
-// showAlbumSearch searches the library by Album tag and groups matching
+// showAlbumSearch searches the library by Album tag (case- and diacritic-
+// insensitive -- see songMatchesQuery/containsFold) and groups matching
 // tracks by (Artist, Album) into expandable headers -- unlike showSearch's
 // flat per-track results, "found an album" reads better as "here's the
 // album, browse into it" than a flat dump of its tracks. Returns the
 // number of matched albums.
 func (p *libraryPanel) showAlbumSearch(query string) int {
-	songs, err := p.app.client.SearchAlbums(query)
+	all, err := p.app.client.AllSongs()
 	if err != nil {
 		p.app.showError(err)
 		return 0
+	}
+	var songs []mpdclient.Song
+	for _, s := range all {
+		if containsFold(s.Album, query) {
+			songs = append(songs, s)
+		}
 	}
 
 	p.mode = libSearch
@@ -171,6 +191,52 @@ func (p *libraryPanel) showAlbumSearch(query string) int {
 	p.root.ClearChildren()
 
 	groups := groupByAlbum(songs)
+	p.addGroupNodes(groups)
+
+	p.tree.SetTitle(fmt.Sprintf(" Library: album search %q (%d) ", query, len(groups)))
+	p.tree.SetCurrentNode(p.root)
+	if len(groups) == 0 {
+		p.app.showMessage("no albums found for " + query)
+	}
+	return len(groups)
+}
+
+// showArtistSearch searches the library by Artist tag (case- and
+// diacritic-insensitive) and groups matching tracks by Artist into
+// expandable headers, the same presentation showAlbumSearch uses for
+// albums. Returns the number of matched artists.
+func (p *libraryPanel) showArtistSearch(query string) int {
+	all, err := p.app.client.AllSongs()
+	if err != nil {
+		p.app.showError(err)
+		return 0
+	}
+	var songs []mpdclient.Song
+	for _, s := range all {
+		if containsFold(s.Artist, query) {
+			songs = append(songs, s)
+		}
+	}
+
+	p.mode = libSearch
+	p.query = query
+	p.root.ClearChildren()
+
+	groups := groupByArtist(songs)
+	p.addGroupNodes(groups)
+
+	p.tree.SetTitle(fmt.Sprintf(" Library: artist search %q (%d) ", query, len(groups)))
+	p.tree.SetCurrentNode(p.root)
+	if len(groups) == 0 {
+		p.app.showMessage("no artists found for " + query)
+	}
+	return len(groups)
+}
+
+// addGroupNodes appends one expandable TreeNode per group to the (already
+// cleared) root, each pre-populated with its tracks -- the shared render
+// step behind showAlbumSearch and showArtistSearch.
+func (p *libraryPanel) addGroupNodes(groups []*albumGroup) {
 	for _, g := range groups {
 		g := g
 		node := tview.NewTreeNode(fmt.Sprintf("%s (%d)", g.label, len(g.songs))).
@@ -184,13 +250,6 @@ func (p *libraryPanel) showAlbumSearch(query string) int {
 		}
 		p.root.AddChild(node)
 	}
-
-	p.tree.SetTitle(fmt.Sprintf(" Library: album search %q (%d) ", query, len(groups)))
-	p.tree.SetCurrentNode(p.root)
-	if len(groups) == 0 {
-		p.app.showMessage("no albums found for " + query)
-	}
-	return len(groups)
 }
 
 // groupByAlbum groups songs by (Artist, Album), sorted alphabetically.
@@ -204,6 +263,34 @@ func groupByAlbum(songs []mpdclient.Song) []*albumGroup {
 			label := s.Album
 			if s.Artist != "" {
 				label = s.Artist + " - " + s.Album
+			}
+			g = &albumGroup{label: label}
+			index[key] = g
+			order = append(order, key)
+		}
+		g.songs = append(g.songs, s)
+	}
+	sort.Strings(order)
+	groups := make([]*albumGroup, len(order))
+	for i, key := range order {
+		groups[i] = index[key]
+	}
+	return groups
+}
+
+// groupByArtist groups songs by Artist, sorted alphabetically. Untagged
+// tracks (empty Artist) group together under "(unknown artist)" rather
+// than scattering into a blank-labeled group per file.
+func groupByArtist(songs []mpdclient.Song) []*albumGroup {
+	index := make(map[string]*albumGroup)
+	var order []string
+	for _, s := range songs {
+		key := s.Artist
+		g, ok := index[key]
+		if !ok {
+			label := s.Artist
+			if label == "" {
+				label = "(unknown artist)"
 			}
 			g = &albumGroup{label: label}
 			index[key] = g
@@ -386,7 +473,7 @@ func buildNodes(entries []mpdclient.DirEntry, mode librarySortMode) []*tview.Tre
 		// them apart into a Digits/Uppercase/lowercase clustering instead
 		// of the alphabetical order a user actually expects. Also serves
 		// as librarySortRecent's tiebreak for equal/missing timestamps.
-		return strings.ToLower(entryLabel(sorted[i])) < strings.ToLower(entryLabel(sorted[j]))
+		return strings.ToLower(entrySortKey(sorted[i])) < strings.ToLower(entrySortKey(sorted[j]))
 	})
 
 	nodes := make([]*tview.TreeNode, len(sorted))
@@ -401,12 +488,28 @@ func buildNodes(entries []mpdclient.DirEntry, mode librarySortMode) []*tview.Tre
 	return nodes
 }
 
+// entrySortKey is buildNodes' alphabetical comparison key -- deliberately
+// not entryLabel, whose decorative icon prefixes (folder icons, the
+// playlist note icon) would otherwise skew ordering between entries that
+// don't share the same icon, e.g. a file sorting against a playlist in
+// the same directory listing.
+func entrySortKey(e mpdclient.DirEntry) string {
+	switch e.Type {
+	case mpdclient.EntryDirectory:
+		return baseName(e.Path)
+	case mpdclient.EntryPlaylist:
+		return e.Path
+	default: // EntryFile
+		return trackLabel(e.Song)
+	}
+}
+
 func entryLabel(e mpdclient.DirEntry) string {
 	switch e.Type {
 	case mpdclient.EntryDirectory:
 		return folderLabel(e.Path, false) // buildNodes always starts directories collapsed
 	case mpdclient.EntryPlaylist:
-		return e.Path
+		return playlistDisplayName(e.Path)
 	default: // EntryFile
 		return trackLabel(e.Song)
 	}

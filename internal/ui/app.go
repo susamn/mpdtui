@@ -326,13 +326,17 @@ type hint struct {
 	action string
 }
 
+// hintKeyColor is the tview dynamic-color name used to set a hint's key
+// apart from its (differently-styled) action word in the hint bar.
+const hintKeyColor = "skyblue"
+
 // formatHints renders hints as "key:action  key:action  ...", each key
-// bolded so it's visually distinct from its action description -- the
-// action text stays unstyled.
+// bold and colored (hintKeyColor) so it's visually distinct from its
+// action description -- the action text stays unstyled.
 func formatHints(hints []hint) string {
 	parts := make([]string, len(hints))
 	for i, h := range hints {
-		parts[i] = fmt.Sprintf("[::b]%s[-:-:-]:%s", h.key, h.action)
+		parts[i] = fmt.Sprintf("[%s::b]%s[-:-:-]:%s", hintKeyColor, h.key, h.action)
 	}
 	return strings.Join(parts, "  ")
 }
@@ -340,23 +344,25 @@ func formatHints(hints []hint) string {
 // globalHints work the same regardless of which panel is focused (unlike
 // e.g. 'a'/'d'/'o', which are contextual and so live in updateHintBar's
 // per-panel lists instead, even though they're dispatched through the
-// same globalInputCapture).
+// same globalInputCapture). Each action is deliberately a single word --
+// the hint bar is a glance-able reminder, not documentation (that's '?').
 var globalHints = []hint{
-	{"Space", "play/pause"},
+	{"Space", "toggle"},
 	{"s", "stop"},
-	{"n/p", "next/prev"},
+	{"n/p", "skip"},
 	{",/.", "seek"},
-	{"-/=", "vol"},
+	{"-/=", "volume"},
 	{"z", "shuffle"},
 	{"x", "repeat"},
 	{"c", "consume"},
 	{"Z", "single"},
-	{"D", "clear queue"},
+	{"D", "empty"},
 	{"/", "search"},
 	{"f", "find"},
+	{"F", "reset"},
 	{"i", "info"},
 	{"v", "visualizer"},
-	{"L", "locate playing"},
+	{"L", "locate"},
 	{"?", "help"},
 	{"Tab/1-3", "panels"},
 	{"q", "quit"},
@@ -366,14 +372,14 @@ func (a *App) updateHintBar() {
 	var panelHints []hint
 	switch a.tv.GetFocus() {
 	case a.library.tree:
-		panelHints = []hint{{"Enter", "expand/play"}, {"a", "add"}, {"Bksp", "back"}, {"o", "sort"}}
+		panelHints = []hint{{"Enter", "open"}, {"a", "add"}, {"Bksp", "back"}, {"o", "sort"}}
 		if a.library.mode == libSearch {
-			panelHints = append(panelHints, hint{"Esc", "clear search"})
+			panelHints = append(panelHints, hint{"Esc", "clear"})
 		}
 	case a.playlists.list:
-		panelHints = []hint{{"Enter", "load+play"}, {"a", "append"}, {"d", "delete"}, {"S", "save queue"}, {"o", "sort"}}
+		panelHints = []hint{{"Enter", "load"}, {"a", "append"}, {"d", "delete"}, {"S", "save"}, {"o", "sort"}}
 		if a.playlists.filter != "" {
-			panelHints = append(panelHints, hint{"Esc", "clear filter"})
+			panelHints = append(panelHints, hint{"Esc", "clear"})
 		}
 	case a.queue.table:
 		panelHints = []hint{{"Enter", "play"}, {"d", "remove"}, {"J/K", "move"}}
@@ -421,6 +427,31 @@ func (a *App) appendPlaylist(name string) {
 	}
 	a.queue.refresh()
 	a.showMessage("appended playlist " + name)
+}
+
+// clearAllSearches is 'F': resets every panel's persistent search/filter
+// view back to normal (Library search results -> browse tree, Playlists
+// filter -> none), regardless of which panel currently has focus -- unlike
+// Esc, which only clears whichever single panel it's pressed in, so a
+// search left open in a panel the user has since navigated away from
+// would otherwise silently keep filtering that panel indefinitely. The
+// Queue's own '/' search has no persistent filtered view to clear (it
+// only jumps to a match), so it's untouched here.
+func (a *App) clearAllSearches() {
+	cleared := false
+	if a.library.mode == libSearch {
+		a.library.showRoot()
+		cleared = true
+	}
+	if a.playlists.filter != "" {
+		a.playlists.setFilter("")
+		cleared = true
+	}
+	if cleared {
+		a.showMessage("cleared search/filter")
+	} else {
+		a.showMessage("nothing to clear")
+	}
 }
 
 func (a *App) loadPlaylist(name string) {

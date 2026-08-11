@@ -40,7 +40,9 @@ single-line inline player for a shell or tmux pane.
 
 - **Library** — expandable directory tree (MPD's actual filesystem layout,
   lazily loaded per folder), or free-text tag search; `o` cycles
-  name/most-recently-modified sort
+  name/most-recently-modified sort. Search (`/`, and the global `f`
+  artist/album/track search) is case- and accent-insensitive, so "bruno"
+  matches "Bruno" and "buble" matches "Bublé"
 - **Album art** — shown for the currently playing track, updated
   automatically on track change. Renders as a crisp real image via the
   [Kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/)
@@ -54,9 +56,10 @@ single-line inline player for a shell or tmux pane.
   ASCII-art rendering; there's no capability probe, since one risks
   hanging against a terminal that never answers it. "No Album Art" is
   shown if MPD has none embedded or alongside the track.
-- **Playlists** — load, append, save, delete stored playlists; `o` cycles
-  between most-recently-updated and alphabetical, with a 🆕 badge on the
-  5 most recent regardless of which sort is showing
+- **Playlists** — 🎵 icon on every entry (here and wherever a playlist
+  shows up while browsing the Library); load, append, save, delete stored
+  playlists; `o` cycles between most-recently-updated and alphabetical,
+  with a 🆕 badge on the 5 most recent regardless of which sort is showing
 - **Queue** — reorder, remove, clear, jump to any track; a pinned header
   row (Title/Album/Artist/Type/Duration) stays visible while scrolling.
   Title is bold; Title/Album/Artist are truncated to 30/20/40 characters
@@ -134,7 +137,8 @@ Press `?` inside the full UI for the in-app keybinding list.
 | `D` | Clear entire queue (confirm) |
 | `Tab`, `1`/`2`/`3` | Cycle / jump focus between panels |
 | `/` | Search (contextual: filters Library/Playlists, jumps to a match in Queue) |
-| `f` | Global search from any panel -- type `a`/`p`/`t` + a term, e.g. `a hello`, `p oldies`, `t help me` (album/playlist/track); stays open with "no X found" if nothing matches |
+| `f` | Global search from any panel -- type `a`/`al`/`p`/`t` + a term, e.g. `a queen`, `al hello`, `p oldies`, `t help me` (artist/album/playlist/track); stays open with "no X found" if nothing matches |
+| `F` | Clear any active search/filter, in every panel at once (Library search, Playlists filter) -- unlike a panel's own `Esc`, works regardless of which panel is currently focused |
 | `i` | Track info card for the currently playing track (Track/Album/Artist/Genre/Year), anchored to the bottom-right quarter of the Queue panel |
 | `v` | Cycle Now Playing visualizations (right half of the Now Playing bar) |
 | `L` | Locate the currently playing track: selects it in the Queue and moves focus there, from any panel. Happens automatically too, whenever the playing track actually changes (explicit play action or natural auto-advance alike) -- except while an overlay is open, or on startup |
