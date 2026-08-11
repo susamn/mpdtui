@@ -56,9 +56,10 @@ single-line inline player for a shell or tmux pane.
   ASCII-art rendering; there's no capability probe, since one risks
   hanging against a terminal that never answers it. "No Album Art" is
   shown if MPD has none embedded or alongside the track.
-- **Playlists** — load, append, save, delete stored playlists; `o` cycles
-  between most-recently-updated and alphabetical, with a 🆕 badge on the
-  5 most recent regardless of which sort is showing
+- **Playlists** — 🎵 icon on every entry (here and wherever a playlist
+  shows up while browsing the Library); load, append, save, delete stored
+  playlists; `o` cycles between most-recently-updated and alphabetical,
+  with a 🆕 badge on the 5 most recent regardless of which sort is showing
 - **Queue** — reorder, remove, clear, jump to any track; a pinned header
   row (Title/Album/Artist/Type/Duration) stays visible while scrolling.
   Title is bold; Title/Album/Artist are truncated to 30/20/40 characters

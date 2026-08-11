@@ -22,6 +22,20 @@ const playlistRecentBadgeCount = 5
 // for its own redraw-time positioning.
 const playlistRecentIcon = "🆕"
 
+// playlistIcon prefixes every playlist's display name, in both this panel
+// and the Library tree's own playlist entries (see entryLabel), the same
+// way folderClosedIcon/folderOpenIcon mark directories -- so a playlist is
+// visually identifiable as one wherever it's shown, not just inferred
+// from position/context.
+const playlistIcon = "🎵"
+
+// playlistDisplayName is what's actually shown for a playlist (icon
+// prefix + name), as opposed to its bare Name -- selectedName/loadPlaylist
+// etc. always work with the bare name, this is display-only.
+func playlistDisplayName(name string) string {
+	return playlistIcon + " " + name
+}
+
 // playlistsSortMode controls the display order of playlistsPanel.pls.
 // Independent of the 🆕 badge, which always reflects actual recency
 // (recentPlaylistBadges from a recency-sorted copy) regardless of which
@@ -168,7 +182,7 @@ func (p *playlistsPanel) render() int {
 	p.list.Clear()
 	for _, pl := range shown {
 		name := pl.Name
-		p.list.AddItem(name, "", 0, func() { p.app.loadPlaylist(name) })
+		p.list.AddItem(playlistDisplayName(name), "", 0, func() { p.app.loadPlaylist(name) })
 	}
 	p.dirty = true
 	p.realign()
@@ -197,16 +211,17 @@ func (p *playlistsPanel) realign() {
 	p.lastWidth = width
 	p.dirty = false
 
-	iconWidth := tview.TaggedStringWidth(playlistRecentIcon)
+	badgeWidth := tview.TaggedStringWidth(playlistRecentIcon)
 	for i, pl := range p.shown {
 		if !p.badged[pl.Name] {
 			continue
 		}
-		gap := width - tview.TaggedStringWidth(pl.Name) - iconWidth
+		text := playlistDisplayName(pl.Name)
+		gap := width - tview.TaggedStringWidth(text) - badgeWidth
 		if gap < 1 {
 			gap = 1
 		}
-		p.list.SetItemText(i, pl.Name+strings.Repeat(" ", gap)+playlistRecentIcon, "")
+		p.list.SetItemText(i, text+strings.Repeat(" ", gap)+playlistRecentIcon, "")
 	}
 }
 

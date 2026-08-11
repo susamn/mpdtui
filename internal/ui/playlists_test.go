@@ -94,8 +94,8 @@ func TestPlaylistsCycleSortModeReordersWithoutChangingBadges(t *testing.T) {
 		t.Errorf("title after cycling = %q, want %q", title, " Playlists (name) ")
 	}
 	name, _ := a.playlists.list.GetItemText(0)
-	if !strings.HasPrefix(name, "Apple") {
-		t.Errorf("first item after switching to name sort = %q, want it to start with %q", name, "Apple")
+	if !strings.HasPrefix(name, playlistDisplayName("Apple")) {
+		t.Errorf("first item after switching to name sort = %q, want it to start with %q", name, playlistDisplayName("Apple"))
 	}
 	// Badge criterion is independent of display order -- still "Zebra",
 	// even though it's no longer first in the list.
@@ -140,8 +140,8 @@ func TestPlaylistsRefreshOrdersByRecencyAndBadgesTopN(t *testing.T) {
 	a.playlists.render()
 
 	name, _ := a.playlists.list.GetItemText(0)
-	if !strings.HasPrefix(name, "New One") {
-		t.Errorf("first item = %q, want it to start with %q (most recently modified)", name, "New One")
+	if !strings.HasPrefix(name, playlistDisplayName("New One")) {
+		t.Errorf("first item = %q, want it to start with %q (most recently modified)", name, playlistDisplayName("New One"))
 	}
 	if got := a.playlists.selectedName(); got != "New One" {
 		t.Errorf("selectedName() with the first item selected = %q, want %q (unaffected by any badge decoration)", got, "New One")
@@ -171,8 +171,8 @@ func TestPlaylistsRealignRightAlignsBadgeIcon(t *testing.T) {
 	}
 
 	jazzText, _ := a.playlists.list.GetItemText(1)
-	if jazzText != "Jazz" {
-		t.Errorf("unbadged item text = %q, want plain %q (no padding/icon)", jazzText, "Jazz")
+	if jazzText != playlistDisplayName("Jazz") {
+		t.Errorf("unbadged item text = %q, want %q (icon prefix, no recency padding/badge)", jazzText, playlistDisplayName("Jazz"))
 	}
 }
 

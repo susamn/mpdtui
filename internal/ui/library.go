@@ -473,7 +473,7 @@ func buildNodes(entries []mpdclient.DirEntry, mode librarySortMode) []*tview.Tre
 		// them apart into a Digits/Uppercase/lowercase clustering instead
 		// of the alphabetical order a user actually expects. Also serves
 		// as librarySortRecent's tiebreak for equal/missing timestamps.
-		return strings.ToLower(entryLabel(sorted[i])) < strings.ToLower(entryLabel(sorted[j]))
+		return strings.ToLower(entrySortKey(sorted[i])) < strings.ToLower(entrySortKey(sorted[j]))
 	})
 
 	nodes := make([]*tview.TreeNode, len(sorted))
@@ -488,12 +488,28 @@ func buildNodes(entries []mpdclient.DirEntry, mode librarySortMode) []*tview.Tre
 	return nodes
 }
 
+// entrySortKey is buildNodes' alphabetical comparison key -- deliberately
+// not entryLabel, whose decorative icon prefixes (folder icons, the
+// playlist note icon) would otherwise skew ordering between entries that
+// don't share the same icon, e.g. a file sorting against a playlist in
+// the same directory listing.
+func entrySortKey(e mpdclient.DirEntry) string {
+	switch e.Type {
+	case mpdclient.EntryDirectory:
+		return baseName(e.Path)
+	case mpdclient.EntryPlaylist:
+		return e.Path
+	default: // EntryFile
+		return trackLabel(e.Song)
+	}
+}
+
 func entryLabel(e mpdclient.DirEntry) string {
 	switch e.Type {
 	case mpdclient.EntryDirectory:
 		return folderLabel(e.Path, false) // buildNodes always starts directories collapsed
 	case mpdclient.EntryPlaylist:
-		return e.Path
+		return playlistDisplayName(e.Path)
 	default: // EntryFile
 		return trackLabel(e.Song)
 	}

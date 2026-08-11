@@ -24,7 +24,7 @@ func TestBuildNodesSortsDirectoriesFirstThenAlphabetical(t *testing.T) {
 		t.Fatalf("got %d nodes, want 4", len(nodes))
 	}
 
-	wantOrder := []string{folderClosedIcon + " abba", folderClosedIcon + " queen", "Favorite Songs", "Zzz Track  [0:00]"}
+	wantOrder := []string{folderClosedIcon + " abba", folderClosedIcon + " queen", playlistDisplayName("Favorite Songs"), "Zzz Track  [0:00]"}
 	for i, want := range wantOrder {
 		entry := nodes[i].GetReference().(mpdclient.DirEntry)
 		if got := entryLabel(entry); got != want {
