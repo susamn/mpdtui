@@ -298,12 +298,12 @@ func (q *queuePanel) jumpToCurrent() bool {
 }
 
 // jumpToMatch selects (but does not remove or hide) the first queued track
-// whose display name contains query, case-insensitive. Returns false if
-// nothing matched, leaving the current selection untouched.
+// whose display name contains query, case- and diacritic-insensitive (see
+// containsFold). Returns false if nothing matched, leaving the current
+// selection untouched.
 func (q *queuePanel) jumpToMatch(query string) bool {
-	needle := strings.ToLower(query)
 	for i, s := range q.songs {
-		if strings.Contains(strings.ToLower(s.DisplayName()), needle) {
+		if containsFold(s.DisplayName(), query) {
 			q.table.Select(i+queueHeaderRows, 0)
 			return true
 		}

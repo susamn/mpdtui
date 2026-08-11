@@ -5,13 +5,14 @@ import (
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
 )
 
 func TestFormatHintsBoldsOnlyTheKey(t *testing.T) {
 	got := formatHints([]hint{{"Enter", "play"}})
-	want := "[::b]Enter[-:-:-]:play"
+	want := "[skyblue::b]Enter[-:-:-]:play"
 	if got != want {
 		t.Errorf("formatHints = %q, want %q", got, want)
 	}
@@ -19,7 +20,7 @@ func TestFormatHintsBoldsOnlyTheKey(t *testing.T) {
 
 func TestFormatHintsJoinsMultipleWithTwoSpaces(t *testing.T) {
 	got := formatHints([]hint{{"a", "one"}, {"b", "two"}})
-	want := "[::b]a[-:-:-]:one  [::b]b[-:-:-]:two"
+	want := "[skyblue::b]a[-:-:-]:one  [skyblue::b]b[-:-:-]:two"
 	if got != want {
 		t.Errorf("formatHints = %q, want %q", got, want)
 	}
@@ -40,11 +41,11 @@ func TestUpdateHintBarShowsGlobalLabelAndBoldedKeys(t *testing.T) {
 	if !strings.Contains(text, "Global:") {
 		t.Errorf("hint bar text = %q, want it to contain a %q label", text, "Global:")
 	}
-	if !strings.Contains(text, "[::b]Space[-:-:-]:play/pause") {
-		t.Errorf("hint bar text = %q, want the Space key bolded", text)
+	if !strings.Contains(text, "[skyblue::b]Space[-:-:-]:toggle") {
+		t.Errorf("hint bar text = %q, want the Space key bolded/colored", text)
 	}
-	if !strings.Contains(text, "[::b]Enter[-:-:-]:play") {
-		t.Errorf("hint bar text = %q, want the Queue panel's Enter hint bolded", text)
+	if !strings.Contains(text, "[skyblue::b]Enter[-:-:-]:play") {
+		t.Errorf("hint bar text = %q, want the Queue panel's Enter hint bolded/colored", text)
 	}
 }
 
@@ -56,7 +57,7 @@ func TestUpdateHintBarPutsContextualSortInPanelSectionNotGlobal(t *testing.T) {
 	a.tv.SetFocus(a.library.tree)
 	a.updateHintBar()
 	libraryText := a.hintBar.GetText(false)
-	if !strings.Contains(libraryText, "[::b]o[-:-:-]:sort") {
+	if !strings.Contains(libraryText, "[skyblue::b]o[-:-:-]:sort") {
 		t.Errorf("Library hint bar text = %q, want an %q hint", libraryText, "o:sort")
 	}
 
@@ -65,6 +66,48 @@ func TestUpdateHintBarPutsContextualSortInPanelSectionNotGlobal(t *testing.T) {
 	queueText := a.hintBar.GetText(false)
 	if strings.Contains(queueText, ":sort") {
 		t.Errorf("Queue hint bar text = %q, want no sort hint (o is invalid on Queue)", queueText)
+	}
+}
+
+func TestClearAllSearchesResetsPlaylistsFilterRegardlessOfFocus(t *testing.T) {
+	a := newTestApp()
+	setPlaylistsForTest(a.playlists, []string{"Rock Anthems", "Jazz Classics", "Rock Ballads"})
+	a.playlists.setFilter("rock")
+	a.tv.SetFocus(a.queue.table) // deliberately not the Playlists panel
+
+	a.clearAllSearches()
+
+	if a.playlists.filter != "" {
+		t.Errorf("playlists.filter after clearAllSearches = %q, want empty", a.playlists.filter)
+	}
+	if got := a.playlists.list.GetItemCount(); got != 3 {
+		t.Errorf("playlists item count after clearAllSearches = %d, want 3 (filter lifted)", got)
+	}
+}
+
+func TestClearAllSearchesFlashesNothingToClearWhenAlreadyClear(t *testing.T) {
+	a := newTestApp()
+
+	a.clearAllSearches()
+
+	if !strings.Contains(a.hintBar.GetText(false), "nothing to clear") {
+		t.Errorf("hint bar after clearAllSearches with nothing active = %q, want it to mention nothing to clear", a.hintBar.GetText(false))
+	}
+}
+
+// TestClearAllSearchesResetsLibrarySearchMode exercises the actual MPD
+// fetch clearAllSearches triggers via library.showRoot(), unlike the
+// Playlists-only cases above which are pure in-memory state. Read-only.
+func TestClearAllSearchesResetsLibrarySearchMode(t *testing.T) {
+	c := dialOrSkip(t)
+	a := &App{tv: tview.NewApplication(), client: c}
+	a.build()
+	a.library.mode = libSearch // simulate a completed search without a real query round-trip
+
+	a.clearAllSearches()
+
+	if a.library.mode != libBrowse {
+		t.Errorf("library.mode after clearAllSearches = %v, want libBrowse", a.library.mode)
 	}
 }
 

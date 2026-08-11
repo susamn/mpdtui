@@ -157,9 +157,8 @@ func (p *playlistsPanel) render() int {
 	shown := p.pls
 	if p.filter != "" {
 		shown = nil
-		needle := strings.ToLower(p.filter)
 		for _, pl := range p.pls {
-			if strings.Contains(strings.ToLower(pl.Name), needle) {
+			if containsFold(pl.Name, p.filter) {
 				shown = append(shown, pl)
 			}
 		}

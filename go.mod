@@ -8,6 +8,7 @@ require (
 	github.com/qeesung/image2ascii v1.0.1
 	github.com/rivo/tview v0.42.0
 	golang.org/x/term v0.45.0
+	golang.org/x/text v0.21.0
 )
 
 require (
@@ -21,5 +22,4 @@ require (
 	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/wayneashleyberry/terminal-dimensions v1.1.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
 )

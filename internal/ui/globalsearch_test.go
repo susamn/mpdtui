@@ -16,10 +16,13 @@ func TestParseGlobalSearch(t *testing.T) {
 		wantTerm string
 		wantOK   bool
 	}{
-		{"a hello", globalSearchAlbum, "hello", true},
+		{"a hello", globalSearchArtist, "hello", true},
+		{"artist hello", globalSearchArtist, "hello", true},
+		{"A Hello World", globalSearchArtist, "Hello World", true},
+		{"al hello", globalSearchAlbum, "hello", true},
 		{"album hello", globalSearchAlbum, "hello", true},
 		{"alb hello", globalSearchAlbum, "hello", true},
-		{"A Hello World", globalSearchAlbum, "Hello World", true},
+		{"AL Hello World", globalSearchAlbum, "Hello World", true},
 		{"p Rock Oldies", globalSearchPlaylist, "Rock Oldies", true},
 		{"playlist Rock Oldies", globalSearchPlaylist, "Rock Oldies", true},
 		{"t help me", globalSearchTrack, "help me", true},
@@ -90,6 +93,39 @@ func TestGroupByAlbumNoArtistOmitsDash(t *testing.T) {
 	groups := groupByAlbum(songs)
 	if got := groups[0].label; got != "Compilation" {
 		t.Errorf("label = %q, want %q (no artist to prefix)", got, "Compilation")
+	}
+}
+
+func TestGroupByArtistGroupsByArtist(t *testing.T) {
+	songs := []mpdclient.Song{
+		{Artist: "Queen", Album: "A Night at the Opera", Title: "Bohemian Rhapsody"},
+		{Artist: "Queen", Album: "Jazz", Title: "Don't Stop Me Now"},
+		{Artist: "Abba", Album: "Gold", Title: "Dancing Queen"},
+	}
+	groups := groupByArtist(songs)
+	if len(groups) != 2 {
+		t.Fatalf("got %d groups, want 2", len(groups))
+	}
+	// Sorted alphabetically by Artist -- "Abba" < "Queen".
+	if groups[0].label != "Abba" {
+		t.Errorf("groups[0].label = %q, want %q", groups[0].label, "Abba")
+	}
+	if len(groups[0].songs) != 1 {
+		t.Errorf("groups[0] has %d songs, want 1", len(groups[0].songs))
+	}
+	if groups[1].label != "Queen" {
+		t.Errorf("groups[1].label = %q, want %q", groups[1].label, "Queen")
+	}
+	if len(groups[1].songs) != 2 {
+		t.Errorf("groups[1] has %d songs, want 2 (both by Queen, across two albums)", len(groups[1].songs))
+	}
+}
+
+func TestGroupByArtistNoArtistUsesPlaceholderLabel(t *testing.T) {
+	songs := []mpdclient.Song{{Artist: "", Album: "Compilation", Title: "Track"}}
+	groups := groupByArtist(songs)
+	if got := groups[0].label; got != "(unknown artist)" {
+		t.Errorf("label = %q, want %q", got, "(unknown artist)")
 	}
 }
 
@@ -216,6 +252,24 @@ func firstTaggedAlbum(t *testing.T, c *mpdclient.Client) string {
 	return ""
 }
 
+// firstTaggedArtist finds a real, non-empty artist name to search against
+// (see firstTaggedAlbum's doc comment on why the empty-string bucket has
+// to be skipped explicitly).
+func firstTaggedArtist(t *testing.T, c *mpdclient.Client) string {
+	t.Helper()
+	artists, err := c.Artists()
+	if err != nil {
+		t.Fatalf("Artists: %v", err)
+	}
+	for _, a := range artists {
+		if a != "" {
+			return a
+		}
+	}
+	t.Skip("library has no non-empty tagged artist to search against")
+	return ""
+}
+
 func TestOpenGlobalSearchAlbumMatchNeedsLiveMPD(t *testing.T) {
 	c := dialOrSkip(t)
 	a := &App{tv: tview.NewApplication(), client: c}
@@ -226,7 +280,7 @@ func TestOpenGlobalSearchAlbumMatchNeedsLiveMPD(t *testing.T) {
 
 	a.openGlobalSearch()
 	field := a.tv.GetFocus().(*tview.InputField)
-	field.SetText("a " + album)
+	field.SetText("al " + album)
 	handler := field.InputHandler()
 	handler(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {})
 
@@ -238,5 +292,30 @@ func TestOpenGlobalSearchAlbumMatchNeedsLiveMPD(t *testing.T) {
 	}
 	if got := len(a.library.root.GetChildren()); got == 0 {
 		t.Error("expected at least one album-group result node")
+	}
+}
+
+func TestOpenGlobalSearchArtistMatchNeedsLiveMPD(t *testing.T) {
+	c := dialOrSkip(t)
+	a := &App{tv: tview.NewApplication(), client: c}
+	a.build()
+	a.tv.SetFocus(a.queue.table)
+
+	artist := firstTaggedArtist(t, c)
+
+	a.openGlobalSearch()
+	field := a.tv.GetFocus().(*tview.InputField)
+	field.SetText("a " + artist)
+	handler := field.InputHandler()
+	handler(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {})
+
+	if a.mode != modeNormal {
+		t.Fatal("mode after a successful artist search should be modeNormal (popup closed)")
+	}
+	if a.tv.GetFocus() != a.library.tree {
+		t.Errorf("focus after an artist match = %T, want the Library tree", a.tv.GetFocus())
+	}
+	if got := len(a.library.root.GetChildren()); got == 0 {
+		t.Error("expected at least one artist-group result node")
 	}
 }

@@ -143,8 +143,10 @@ const helpText = `[::b]Global[-:-:-]
   D              clear entire queue (confirm)
   Tab, 1/2/3     cycle / jump focus between panels
   /              search (contextual: Library/Playlists filter, Queue jump)
-  f              global search from any panel: "a/p/t <term>" for
-                 album/playlist/track (e.g. "a hello", "p oldies")
+  f              global search from any panel: "a/al/p/t <term>" for
+                 artist/album/playlist/track (e.g. "a queen", "al hello")
+                 -- accent-insensitive, so "buble" matches "Bublé"
+  F              clear any active search/filter, in every panel at once
   i              track info card for the currently playing track
   v              cycle Now Playing visualizations
   L              locate the currently playing track in the Queue
