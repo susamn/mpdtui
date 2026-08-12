@@ -59,7 +59,10 @@ single-line inline player for a shell or tmux pane.
 - **Playlists** — 🎵 icon on every entry (here and wherever a playlist
   shows up while browsing the Library); load, append, save, delete stored
   playlists; `o` cycles between most-recently-updated and alphabetical,
-  with a 🆕 badge on the 5 most recent regardless of which sort is showing
+  with a 🆕 badge on the 5 most recent regardless of which sort is showing.
+  A "Recently Added" playlist (the 50 most recently added tracks
+  library-wide, shown with a distinct color) is kept up to date
+  automatically as the library changes, and can be forced with `R`
 - **Queue** — reorder, remove, clear, jump to any track; a pinned header
   row (Title/Album/Artist/Type/Duration) stays visible while scrolling.
   Title is bold; Title/Album/Artist are truncated to 30/20/40 characters
@@ -159,6 +162,7 @@ Press `?` inside the full UI for the in-app keybinding list.
 | Playlists | `a` | Append playlist to queue |
 | Playlists | `d` | Delete playlist (confirm) |
 | Playlists | `S` | Save current queue as a new playlist |
+| Playlists | `R` | Regenerate "Recently Added" (top 50 newest tracks) -- also happens automatically whenever the library changes |
 | Playlists | `o` | Cycle sort: most recently updated / name -- 🆕 badge on the 5 most recent regardless of which sort is showing |
 | Playlists | `Esc` | Clear active filter |
 | Queue | `Enter` | Play selected track |

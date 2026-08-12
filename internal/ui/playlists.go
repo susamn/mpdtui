@@ -36,6 +36,29 @@ func playlistDisplayName(name string) string {
 	return playlistIcon + " " + name
 }
 
+// recentlyAddedColor tints recentlyAddedPlaylistName's row in this panel
+// (see playlistListText) so it reads as generated/managed by mpdtui, not
+// something the user saved themselves. Only a best-effort visual cue:
+// most terminals render color emoji from their own fixed font palette,
+// so an ANSI foreground color rarely actually recolors playlistIcon
+// itself -- but it does reliably recolor the name text next to it, which
+// is enough to set the row apart at a glance.
+const recentlyAddedColor = "teal"
+
+// playlistListText is what's actually shown for a playlist in this
+// panel's List: playlistDisplayName, additionally tinted with
+// recentlyAddedColor for name == recentlyAddedPlaylistName. Distinct from
+// playlistDisplayName itself since Library's tree entries for playlists
+// (entryLabel) use that directly and never carry this tinting -- the
+// auto-generated/managed distinction is specific to this panel.
+func playlistListText(name string) string {
+	text := playlistDisplayName(name)
+	if name == recentlyAddedPlaylistName {
+		return fmt.Sprintf("[%s]%s[-]", recentlyAddedColor, text)
+	}
+	return text
+}
+
 // playlistsSortMode controls the display order of playlistsPanel.pls.
 // Independent of the 🆕 badge, which always reflects actual recency
 // (recentPlaylistBadges from a recency-sorted copy) regardless of which
@@ -182,7 +205,7 @@ func (p *playlistsPanel) render() int {
 	p.list.Clear()
 	for _, pl := range shown {
 		name := pl.Name
-		p.list.AddItem(playlistDisplayName(name), "", 0, func() { p.app.loadPlaylist(name) })
+		p.list.AddItem(playlistListText(name), "", 0, func() { p.app.loadPlaylist(name) })
 	}
 	p.dirty = true
 	p.realign()
@@ -216,7 +239,7 @@ func (p *playlistsPanel) realign() {
 		if !p.badged[pl.Name] {
 			continue
 		}
-		text := playlistDisplayName(pl.Name)
+		text := playlistListText(pl.Name)
 		gap := width - tview.TaggedStringWidth(text) - badgeWidth
 		if gap < 1 {
 			gap = 1

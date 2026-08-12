@@ -165,6 +165,8 @@ const helpText = `[::b]Global[-:-:-]
   a              append playlist to queue
   d              delete playlist (confirm)
   S              save current queue as a new playlist
+  R              regenerate "Recently Added" (top 50 newest tracks) --
+                 also happens automatically whenever the library changes
   /              filter playlists by name
   o              cycle sort: most recently updated / name
   Esc            clear active filter

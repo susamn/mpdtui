@@ -217,6 +217,7 @@ func (a *App) handleSubsystem(name string) {
 		a.queue.refreshStats()
 	case "database":
 		a.queue.refreshStats()
+		a.regenerateRecentlyAdded(true) // silent: this is a background side effect, not a keypress
 	}
 }
 
@@ -377,7 +378,7 @@ func (a *App) updateHintBar() {
 			panelHints = append(panelHints, hint{"Esc", "clear"})
 		}
 	case a.playlists.list:
-		panelHints = []hint{{"Enter", "load"}, {"a", "append"}, {"d", "delete"}, {"S", "save"}, {"o", "sort"}}
+		panelHints = []hint{{"Enter", "load"}, {"a", "append"}, {"d", "delete"}, {"S", "save"}, {"R", "regen"}, {"o", "sort"}}
 		if a.playlists.filter != "" {
 			panelHints = append(panelHints, hint{"Esc", "clear"})
 		}

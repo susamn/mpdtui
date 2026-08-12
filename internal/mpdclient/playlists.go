@@ -66,3 +66,28 @@ func (c *Client) PlaylistDelete(name string) error {
 func (c *Client) SaveQueueAsPlaylist(name string) error {
 	return callErr(c, func(conn *mpd.Client) error { return conn.PlaylistSave(name) })
 }
+
+// ReplacePlaylist overwrites the stored playlist name so it ends up
+// containing exactly uris, in order -- regardless of whether a playlist
+// by that name already existed. Used for playlists mpdtui itself
+// generates (see the "Recently Added" playlist in internal/ui), which
+// need to be fully regenerated from scratch each time rather than
+// appended to.
+//
+// Deletes any existing playlist by that name first; the delete's error is
+// deliberately ignored (MPD reports "No such playlist" the first time
+// name doesn't exist yet, which is expected, not a failure) rather than
+// distinguishing that from other failure modes -- if something's
+// genuinely wrong (e.g. a permissions issue), the PlaylistAdd calls right
+// after it will surface their own error anyway. The adds themselves run
+// as one batched command list instead of one MPD round-trip per track.
+func (c *Client) ReplacePlaylist(name string, uris []string) error {
+	return callErr(c, func(conn *mpd.Client) error {
+		_ = conn.PlaylistRemove(name)
+		cl := conn.BeginCommandList()
+		for _, uri := range uris {
+			cl.PlaylistAdd(name, uri)
+		}
+		return cl.End()
+	})
+}

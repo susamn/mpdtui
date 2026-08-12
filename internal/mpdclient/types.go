@@ -42,6 +42,13 @@ type Song struct {
 	Genre    string
 	Date     string // MPD's "Date" tag: often just a year, sometimes a full date
 	Duration time.Duration
+	// Added is when MPD's database first saw this file (MPD's "Added" tag,
+	// available since MPD 0.24) -- not to be confused with Last-Modified,
+	// which is the file's own mtime and can predate when it was actually
+	// added to this library (e.g. a file copied in with its original
+	// timestamp preserved). Zero if the server doesn't report one (older
+	// MPD versions).
+	Added time.Time
 }
 
 // DisplayName is what panels show for a song: "Artist - Title", falling
@@ -125,6 +132,7 @@ func parseSong(a mpd.Attrs) Song {
 		Genre:    a["Genre"],
 		Date:     a["Date"],
 		Duration: parseSongDuration(a),
+		Added:    parseTimestamp(a, "Added"),
 	}
 }
 
