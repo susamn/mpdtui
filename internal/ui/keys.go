@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
 )
 
 // globalInputCapture is the single place all keybindings are decided.
@@ -140,11 +139,13 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 		case 'S':
 			a.handleSavePlaylist()
 			return nil
-		case 'j', 'k', 'g', 'G':
-			return translateVimMotion(event, a.tv.GetFocus())
-		case 'h', 'l':
-			// Table (Queue) handles these natively for horizontal
-			// scroll; harmless no-op on List (Library/Playlists).
+		case 'R':
+			a.handleRefreshPlaylistCounts()
+			return nil
+		case 'j', 'k', 'g', 'G', 'h', 'l':
+			// Table (Queue, Playlists) and TreeView (Library) all handle
+			// these natively -- nothing in this app needs vim-motion
+			// translation, so these just pass through unchanged.
 			return event
 		default:
 			a.invalidKey(string(event.Rune()))
@@ -170,34 +171,13 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			a.updateHintBar()
 			return nil
 		}
-		if a.tv.GetFocus() == a.playlists.list && a.playlists.filter != "" {
+		if a.tv.GetFocus() == a.playlists.table && a.playlists.filter != "" {
 			a.playlists.setFilter("")
 			a.updateHintBar()
 			return nil
 		}
 	}
 
-	return event
-}
-
-// translateVimMotion maps j/k/g/G to Down/Up/Home/End for *tview.List
-// (Playlists), which has no built-in vim motions. Table (Queue) and
-// TreeView (Library) both already handle j/k/g/G natively, so they pass
-// the event through unchanged.
-func translateVimMotion(event *tcell.EventKey, focus tview.Primitive) *tcell.EventKey {
-	if _, ok := focus.(*tview.List); !ok {
-		return event
-	}
-	switch event.Rune() {
-	case 'j':
-		return tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone)
-	case 'k':
-		return tcell.NewEventKey(tcell.KeyUp, 0, tcell.ModNone)
-	case 'g':
-		return tcell.NewEventKey(tcell.KeyHome, 0, tcell.ModNone)
-	case 'G':
-		return tcell.NewEventKey(tcell.KeyEnd, 0, tcell.ModNone)
-	}
 	return event
 }
 
@@ -301,7 +281,7 @@ func (a *App) handleCycleSort() {
 			return
 		}
 		a.library.cycleSortMode()
-	case a.playlists.list:
+	case a.playlists.table:
 		a.playlists.cycleSortMode()
 	default:
 		a.invalidKey("o")
@@ -309,13 +289,18 @@ func (a *App) handleCycleSort() {
 }
 
 // jumpToCurrentTrack is 'L': selects the currently playing track in the
-// Queue panel and moves focus there, from any panel. Flashes a message
-// instead of silently doing nothing when there's no current track (queue
-// empty, or nothing playing/selected).
+// Queue panel and moves focus there, from any panel -- and also reveals
+// that track's location in the Library tree (expanding every directory
+// along its path and selecting it there), without moving focus away from
+// Queue. Flashes a message instead of silently doing nothing when there's
+// no current track (queue empty, or nothing playing/selected).
 func (a *App) jumpToCurrentTrack() {
 	if !a.queue.jumpToCurrent() {
 		a.showMessage("nothing playing")
 		return
+	}
+	if song, ok := a.queue.selectedSong(); ok {
+		a.library.revealInLibrary(song.File)
 	}
 	a.focusPanelPrimitive(a.queue.table)
 }
@@ -324,7 +309,7 @@ func (a *App) handleAdd() {
 	switch a.tv.GetFocus() {
 	case a.library.tree:
 		a.library.addSelected()
-	case a.playlists.list:
+	case a.playlists.table:
 		name := a.playlists.selectedName()
 		if name == "" {
 			return
@@ -337,7 +322,7 @@ func (a *App) handleAdd() {
 
 func (a *App) handleDelete() {
 	switch a.tv.GetFocus() {
-	case a.playlists.list:
+	case a.playlists.table:
 		name := a.playlists.selectedName()
 		if name == "" {
 			return

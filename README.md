@@ -23,7 +23,7 @@ single-line inline player for a shell or tmux pane.
 ## Screenshot
 
 <p align="center">
-  <img src="assets/screenshot.png" width="900" alt="mpdtui full panel UI: Library tree, Album Art, Playlists with recency badges, Queue with Title/Album/Artist/Type/Duration columns, live stats, and the Now Playing equalizer visualizer">
+  <img src="assets/screenshot.png" width="900" alt="mpdtui full panel UI: Library tree, Album Art, Playlists with Name/Count columns, Queue with Title/Album/Artist/Year/Genre/Composer/Type/Duration columns, live stats, and the Now Playing equalizer visualizer">
 </p>
 
 ## Demo
@@ -56,15 +56,19 @@ single-line inline player for a shell or tmux pane.
   ASCII-art rendering; there's no capability probe, since one risks
   hanging against a terminal that never answers it. "No Album Art" is
   shown if MPD has none embedded or alongside the track.
-- **Playlists** — 🎵 icon on every entry (here and wherever a playlist
-  shows up while browsing the Library); load, append, save, delete stored
-  playlists; `o` cycles between most-recently-updated and alphabetical,
-  with a 🆕 badge on the 5 most recent regardless of which sort is showing
+- **Playlists** — a Name/Count table, mirroring the Queue panel's own
+  column layout: a pinned header row, Name (🎵 icon prefix, truncated to
+  24 characters with "...") on the left, Count right-aligned as the last
+  column, populated once fetched and refreshed automatically every 10
+  minutes in the background or on demand with `R`. Load, append, save,
+  delete stored playlists; `o` cycles between most-recently-updated and
+  alphabetical
 - **Queue** — reorder, remove, clear, jump to any track; a pinned header
-  row (Title/Album/Artist/Type/Duration) stays visible while scrolling.
-  Title is bold; Title/Album/Artist are truncated to 30/20/40 characters
-  with "..." if longer; Type shows a color-coded format badge
-  (MP3/FLAC/M4A/...); Type and Duration are right-aligned
+  row (Title/Album/Artist/Year/Genre/Composer/Type/Duration) stays visible
+  while scrolling. Title is bold and colored WhatsApp green; Title/Album/
+  Artist/Genre/Composer are truncated (30/20/40/9/14 characters) with
+  "..." if longer; Type shows a color-coded format badge (MP3/FLAC/M4A/
+  ...); Type and Duration are right-aligned
 - **Library stats** — live total tracks/artists/playlists, shown
   alongside the Queue search box, refreshed on library/playlist changes
 - **Now Playing bar** — live progress, volume, repeat/random/single/consume
@@ -141,7 +145,7 @@ Press `?` inside the full UI for the in-app keybinding list.
 | `F` | Clear any active search/filter, in every panel at once (Library search, Playlists filter) -- unlike a panel's own `Esc`, works regardless of which panel is currently focused |
 | `i` | Track info card for the currently playing track (Track/Album/Artist/Genre/Year), anchored to the bottom-right quarter of the Queue panel |
 | `v` | Cycle Now Playing visualizations (right half of the Now Playing bar) |
-| `L` | Locate the currently playing track: selects it in the Queue and moves focus there, from any panel. Happens automatically too, whenever the playing track actually changes (explicit play action or natural auto-advance alike) -- except while an overlay is open, or on startup |
+| `L` | Locate the currently playing track: selects it in the Queue and moves focus there, from any panel, and also reveals it in the Library tree (expanding every folder along its path and selecting it there, without moving focus away from Queue). The Queue-selecting part also happens automatically, whenever the playing track actually changes (explicit play action or natural auto-advance alike) -- except while an overlay is open, or on startup; the Library reveal is only on the explicit keypress |
 | `?` | Help overlay |
 | `q` | Quit |
 
@@ -159,7 +163,8 @@ Press `?` inside the full UI for the in-app keybinding list.
 | Playlists | `a` | Append playlist to queue |
 | Playlists | `d` | Delete playlist (confirm) |
 | Playlists | `S` | Save current queue as a new playlist |
-| Playlists | `o` | Cycle sort: most recently updated / name -- 🆕 badge on the 5 most recent regardless of which sort is showing |
+| Playlists | `R` | Refresh track counts now (also happens automatically every 10 minutes in the background) |
+| Playlists | `o` | Cycle sort: most recently updated / name |
 | Playlists | `Esc` | Clear active filter |
 | Queue | `Enter` | Play selected track |
 | Queue | `d` | Remove selected track |

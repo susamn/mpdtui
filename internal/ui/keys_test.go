@@ -51,11 +51,11 @@ func TestEscapeClearsPlaylistsFilter(t *testing.T) {
 	a := newTestApp()
 	setPlaylistsForTest(a.playlists, []string{"Rock Anthems", "Jazz Classics", "Rock Ballads"})
 	a.playlists.setFilter("rock")
-	if got := a.playlists.list.GetItemCount(); got != 2 {
+	if got := len(a.playlists.shown); got != 2 {
 		t.Fatalf("setup: filtered item count = %d, want 2", got)
 	}
 
-	a.tv.SetFocus(a.playlists.list)
+	a.tv.SetFocus(a.playlists.table)
 	esc := tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone)
 	if result := a.globalInputCapture(esc); result != nil {
 		t.Errorf("Escape over an active filter should be consumed, got %v", result)
@@ -64,7 +64,7 @@ func TestEscapeClearsPlaylistsFilter(t *testing.T) {
 	if a.playlists.filter != "" {
 		t.Errorf("filter after Escape = %q, want empty", a.playlists.filter)
 	}
-	if got := a.playlists.list.GetItemCount(); got != 3 {
+	if got := len(a.playlists.shown); got != 3 {
 		t.Errorf("item count after Escape = %d, want 3 (unfiltered)", got)
 	}
 }
@@ -72,7 +72,7 @@ func TestEscapeClearsPlaylistsFilter(t *testing.T) {
 func TestEscapeIgnoredWithoutActiveFilter(t *testing.T) {
 	a := newTestApp()
 	setPlaylistsForTest(a.playlists, []string{"Rock Anthems", "Jazz Classics"})
-	a.tv.SetFocus(a.playlists.list)
+	a.tv.SetFocus(a.playlists.table)
 
 	esc := tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone)
 	if result := a.globalInputCapture(esc); result == nil {
@@ -126,7 +126,7 @@ func TestEscapeIgnoredWithoutActiveLibrarySearch(t *testing.T) {
 func TestOKeyCyclesPlaylistsSortMode(t *testing.T) {
 	a := newTestApp()
 	setPlaylistsForTest(a.playlists, []string{"Rock", "Jazz"})
-	a.tv.SetFocus(a.playlists.list)
+	a.tv.SetFocus(a.playlists.table)
 
 	oKey := tcell.NewEventKey(tcell.KeyRune, 'o', tcell.ModNone)
 	if result := a.globalInputCapture(oKey); result != nil {

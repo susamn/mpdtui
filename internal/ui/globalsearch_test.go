@@ -183,8 +183,8 @@ func TestOpenGlobalSearchPlaylistMatchClosesAndFocusesPlaylists(t *testing.T) {
 	if a.mode != modeNormal {
 		t.Error("mode after a playlist match should return to modeNormal (popup closed)")
 	}
-	if a.tv.GetFocus() != a.playlists.list {
-		t.Errorf("focus after a playlist match = %T, want the Playlists list", a.tv.GetFocus())
+	if a.tv.GetFocus() != a.playlists.table {
+		t.Errorf("focus after a playlist match = %T, want the Playlists table", a.tv.GetFocus())
 	}
 	if a.playlists.filter != "Rock" {
 		t.Errorf("playlists.filter = %q, want %q", a.playlists.filter, "Rock")

@@ -88,3 +88,16 @@ func TrackFormat(file string) string {
 	}
 	return strings.ToUpper(file[i+1:])
 }
+
+// yearFromDate extracts just the year from MPD's "Date" tag, which is
+// often already just a year ("1992") but sometimes a full date
+// ("1992-05-15") -- takes the first 4 characters either way, so a Year
+// column/field never has to show more than that. Shorter values (an
+// unusually terse or malformed Date, or "") pass through unchanged rather
+// than panicking on the slice.
+func yearFromDate(date string) string {
+	if len(date) > 4 {
+		return date[:4]
+	}
+	return date
+}

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -249,6 +250,107 @@ func TestLibraryToggleDirectoryLazyLoads(t *testing.T) {
 	a.library.toggleDirectory(dirNode, entry) // re-expand
 	if got := len(dirNode.GetChildren()); got != childrenAfterFirstExpand {
 		t.Errorf("re-expanding refetched instead of reusing cached children: child count %d, want %d", got, childrenAfterFirstExpand)
+	}
+}
+
+func TestFindChildByPathMatchesOnExactPath(t *testing.T) {
+	nodes := buildNodes(testDirEntries(), librarySortName)
+	root := tview.NewTreeNode("Library")
+	for _, n := range nodes {
+		root.AddChild(n)
+	}
+
+	got := findChildByPath(root, "queen")
+	if got == nil {
+		t.Fatal("findChildByPath(\"queen\") = nil, want the queen directory node")
+	}
+	entry := got.GetReference().(mpdclient.DirEntry)
+	if entry.Path != "queen" {
+		t.Errorf("matched node's Path = %q, want %q", entry.Path, "queen")
+	}
+}
+
+func TestFindChildByPathNoMatchReturnsNil(t *testing.T) {
+	nodes := buildNodes(testDirEntries(), librarySortName)
+	root := tview.NewTreeNode("Library")
+	for _, n := range nodes {
+		root.AddChild(n)
+	}
+
+	if got := findChildByPath(root, "does-not-exist"); got != nil {
+		t.Errorf("findChildByPath for a missing path = %v, want nil", got)
+	}
+}
+
+// TestRevealInLibraryExpandsAndSelectsRealTrack exercises the actual MPD
+// fetches revealInLibrary triggers via ensureChildrenLoaded, since that's
+// the one part that isn't pure (findChildByPath's matching logic is
+// covered above without a client). Read-only against the real library --
+// expanding tree nodes and moving the tree's current-node selection
+// doesn't touch MPD's own state at all.
+func TestRevealInLibraryExpandsAndSelectsRealTrack(t *testing.T) {
+	c := dialOrSkip(t)
+	songs, err := c.AllSongs()
+	if err != nil {
+		t.Fatalf("AllSongs: %v", err)
+	}
+	var target mpdclient.Song
+	for _, s := range songs {
+		if strings.Contains(s.File, "/") {
+			target = s
+			break
+		}
+	}
+	if target.File == "" {
+		t.Skip("library has no track nested under a directory to reveal")
+	}
+
+	a := &App{tv: tview.NewApplication(), client: c}
+	a.build()
+	a.library.showRoot()
+
+	if !a.library.revealInLibrary(target.File) {
+		t.Fatalf("revealInLibrary(%q) = false, want true", target.File)
+	}
+
+	current := a.library.tree.GetCurrentNode()
+	entry, ok := current.GetReference().(mpdclient.DirEntry)
+	if !ok || entry.Path != target.File {
+		t.Errorf("current node after reveal = %v, want the DirEntry for %q", current.GetReference(), target.File)
+	}
+
+	// Every directory in the path should now be expanded, walking down
+	// from the root the same way revealInLibrary itself does (each
+	// directory's tree node only lives as a direct child of its parent's
+	// node, not searchable from the root in one shot).
+	segments := strings.Split(target.File, "/")
+	node := a.library.root
+	path := ""
+	for _, seg := range segments[:len(segments)-1] {
+		if path == "" {
+			path = seg
+		} else {
+			path += "/" + seg
+		}
+		child := findChildByPath(node, path)
+		if child == nil {
+			t.Fatalf("no tree node found for directory %q along the revealed path", path)
+		}
+		if !child.IsExpanded() {
+			t.Errorf("directory %q should be expanded after revealInLibrary", path)
+		}
+		node = child
+	}
+}
+
+func TestRevealInLibraryUnknownFileReturnsFalse(t *testing.T) {
+	c := dialOrSkip(t)
+	a := &App{tv: tview.NewApplication(), client: c}
+	a.build()
+	a.library.showRoot()
+
+	if a.library.revealInLibrary("this-directory-should-not-exist-anywhere/track.mp3") {
+		t.Error("revealInLibrary for a nonexistent path = true, want false")
 	}
 }
 

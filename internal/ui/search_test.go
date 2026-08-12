@@ -29,14 +29,15 @@ func TestContainsFoldIsAccentInsensitive(t *testing.T) {
 
 func TestSongMatchesQueryChecksEveryTagAndFilenameFallback(t *testing.T) {
 	s := mpdclient.Song{
-		File:   "queen/night-at-the-opera/bohemian-rhapsody.mp3",
-		Artist: "Queen",
-		Album:  "A Night at the Opera",
-		Title:  "Bohemian Rhapsody",
-		Genre:  "Rock",
-		Date:   "1975",
+		File:     "queen/night-at-the-opera/bohemian-rhapsody.mp3",
+		Artist:   "Queen",
+		Album:    "A Night at the Opera",
+		Title:    "Bohemian Rhapsody",
+		Genre:    "Rock",
+		Composer: "Freddie Mercury",
+		Date:     "1975",
 	}
-	for _, query := range []string{"queen", "opera", "rhapsody", "rock", "1975", "QUEEN"} {
+	for _, query := range []string{"queen", "opera", "rhapsody", "rock", "freddie mercury", "1975", "QUEEN"} {
 		if !songMatchesQuery(s, query) {
 			t.Errorf("songMatchesQuery(%+v, %q) = false, want true", s, query)
 		}

@@ -3,24 +3,14 @@ package ui
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
 )
-
-// playlistRecentBadgeCount is how many of the most recently updated
-// playlists (by MPD's Last-Modified timestamp) get the recency badge.
-const playlistRecentBadgeCount = 5
-
-// playlistRecentIcon marks a playlist among the playlistRecentBadgeCount
-// most recently modified, right-aligned against the panel's current
-// width -- recalculated on every redraw (see realign, called from
-// App.build's SetAfterDrawFunc) so it stays pinned to the right edge
-// across terminal resizes, the same technique the album art panel uses
-// for its own redraw-time positioning.
-const playlistRecentIcon = "🆕"
 
 // playlistIcon prefixes every playlist's display name, in both this panel
 // and the Library tree's own playlist entries (see entryLabel), the same
@@ -37,16 +27,12 @@ func playlistDisplayName(name string) string {
 }
 
 // playlistsSortMode controls the display order of playlistsPanel.pls.
-// Independent of the 🆕 badge, which always reflects actual recency
-// (recentPlaylistBadges from a recency-sorted copy) regardless of which
-// mode is currently displayed -- so sorting alphabetically doesn't hide
-// which ones are actually recent, it just changes where they show up in
-// the list. Cycled with 'o' while the Playlists panel is focused (see
+// Cycled with 'o' while the Playlists panel is focused (see
 // App.handleCycleSort).
 type playlistsSortMode int
 
 const (
-	playlistsSortRecent playlistsSortMode = iota // most recently updated first (default, matches badge criterion)
+	playlistsSortRecent playlistsSortMode = iota // most recently updated first (default)
 	playlistsSortName                            // alphabetical, case-insensitive
 )
 
@@ -61,35 +47,94 @@ func (m playlistsSortMode) next() playlistsSortMode {
 	return (m + 1) % 2
 }
 
-// playlistsPanel lists stored (saved) MPD playlists, sorted by most
-// recently updated first, optionally filtered by a substring set via the
-// search overlay. The playlistRecentBadgeCount most recently updated get
-// a right-aligned 🆕 badge.
+// playlistsHeaderRows is the number of fixed rows (see Table.SetFixed)
+// taken up by the column-header row -- mirrors queueHeaderRows/queue.go's
+// exact convention: every playlist's table row is offset by this much
+// from its index in shown (row = index + playlistsHeaderRows), since row
+// 0 is the header.
+const playlistsHeaderRows = 1
+
+// playlistNameMaxLen caps the Name column's text (truncateWithEllipsis,
+// same helper Queue's Title/Album/Artist columns already use), leaving
+// Count guaranteed room. Without a cap, tview.Table sizes each column to
+// its widest cell in column order -- Name is column 0, so a long playlist
+// name (this app has real ones like "🔴 Do not belong to playlist") would
+// claim the panel's entire width before Count is even considered,
+// silently truncating Count's own digits with "…" instead (confirmed by
+// hand against the real ~215-playlist library before this cap was added:
+// "All Songs"'s count rendered as "97…" instead of "5972").
+const playlistNameMaxLen = 24
+
+// playlistsHeaderLabels are the column headers for the fixed header row,
+// in the same order render() writes data columns. Name absorbs leftover
+// width (SetExpansion(1) in render(), the same technique Queue's Artist
+// column uses to keep Type/Duration flush right) so Count sits flush
+// against the panel's right edge.
+var playlistsHeaderLabels = []struct {
+	text  string
+	align int
+}{
+	{"Name", tview.AlignLeft},
+	{"Count", tview.AlignRight},
+}
+
+// setPlaylistsHeader (re)writes the fixed header row. Table.Clear() wipes
+// every cell including row 0, so render() calls this again on every
+// refresh rather than relying on it being set once at construction time.
+// Reuses queueHeaderBg/Fg (queue.go) instead of redefining an identical
+// pair, so both panels' headers are guaranteed to look the same, not just
+// coincidentally similar.
+func setPlaylistsHeader(t *tview.Table) {
+	for col, h := range playlistsHeaderLabels {
+		t.SetCell(0, col, tview.NewTableCell(h.text).
+			SetAlign(h.align).
+			SetTextColor(queueHeaderFg).
+			SetBackgroundColor(queueHeaderBg).
+			SetSelectable(false))
+	}
+}
+
+// playlistsPanel lists stored (saved) MPD playlists as a table (Name,
+// Count columns, mirroring Queue's own table layout and header styling),
+// sorted by most recently updated first, optionally filtered by a
+// substring set via the search overlay.
 type playlistsPanel struct {
-	app  *App
-	list *tview.List
+	app   *App
+	table *tview.Table
 
 	pls    []mpdclient.Playlist // full set, ordered per sortMode
 	shown  []mpdclient.Playlist // currently displayed (post-filter), same relative order
 	filter string
 
 	sortMode playlistsSortMode
-	badged   map[string]bool // playlist names among the most recently updated, independent of sortMode
 
-	lastWidth int  // inner width last used by realign, to skip redundant work
-	dirty     bool // set by render(), forces realign to reapply regardless of lastWidth
+	// trackCounts holds each playlist's track count, keyed by name --
+	// populated by App.refreshTrackCounts (an explicit background MPD
+	// round-trip, not part of refresh/render's own data), so a name absent
+	// from this map just means "not fetched yet", not "zero tracks": its
+	// Count cell is left blank rather than showing a misleading "0".
+	trackCounts map[string]int
 }
 
 func newPlaylistsPanel(app *App) *playlistsPanel {
-	list := tview.NewList()
-	list.ShowSecondaryText(false)
-	list.SetHighlightFullLine(true)
-	list.SetSelectedFocusOnly(true)
-	list.SetSelectedTextColor(colorSelectedFg)
-	list.SetSelectedBackgroundColor(colorSelectedBg)
-	list.SetBorder(true)
-	list.SetTitle(" Playlists ")
-	return &playlistsPanel{app: app, list: list}
+	p := &playlistsPanel{app: app}
+
+	t := tview.NewTable()
+	t.SetBorder(true).SetTitle(" Playlists ")
+	t.SetSelectable(true, false)
+	t.SetFixed(playlistsHeaderRows, 0)
+	t.SetSelectedStyle(tcell.StyleDefault.Background(colorSelectedBg).Foreground(colorSelectedFg))
+	t.SetSelectedFunc(func(row, _ int) {
+		i := row - playlistsHeaderRows
+		if i < 0 || i >= len(p.shown) {
+			return
+		}
+		p.app.loadPlaylist(p.shown[i].Name)
+	})
+	p.table = t
+	setPlaylistsHeader(t)
+
+	return p
 }
 
 // sortPlaylistsByRecency sorts pls in place, most recently modified
@@ -116,18 +161,6 @@ func sortPlaylistsByName(pls []mpdclient.Playlist) {
 	})
 }
 
-// recentPlaylistBadges returns the names of the first n entries of pls as
-// a set, for O(1) badge lookup during render/realign. Assumes pls is
-// already sorted most-recent-first (sortPlaylistsByRecency); n larger
-// than len(pls) is fine, it just badges everything.
-func recentPlaylistBadges(pls []mpdclient.Playlist, n int) map[string]bool {
-	badged := make(map[string]bool, n)
-	for i := 0; i < len(pls) && i < n; i++ {
-		badged[pls[i].Name] = true
-	}
-	return badged
-}
-
 func (p *playlistsPanel) refresh() {
 	pls, err := p.app.client.Playlists()
 	if err != nil {
@@ -135,18 +168,10 @@ func (p *playlistsPanel) refresh() {
 		return
 	}
 
-	// Badges always reflect actual recency, independent of sortMode --
-	// computed from a separate sorted copy so displaying alphabetically
-	// doesn't change which playlists count as "recently updated".
-	byRecency := make([]mpdclient.Playlist, len(pls))
-	copy(byRecency, pls)
-	sortPlaylistsByRecency(byRecency)
-	p.badged = recentPlaylistBadges(byRecency, playlistRecentBadgeCount)
-
 	if p.sortMode == playlistsSortName {
 		sortPlaylistsByName(pls)
 	} else {
-		pls = byRecency
+		sortPlaylistsByRecency(pls)
 	}
 	p.pls = pls
 	p.render()
@@ -165,7 +190,7 @@ func (p *playlistsPanel) cycleSortMode() {
 	p.render()
 }
 
-// render redisplays the (optionally filtered) list and returns how many
+// render redisplays the (optionally filtered) table and returns how many
 // entries are currently shown.
 func (p *playlistsPanel) render() int {
 	shown := p.pls
@@ -179,50 +204,26 @@ func (p *playlistsPanel) render() int {
 	}
 	p.shown = shown
 
-	p.list.Clear()
-	for _, pl := range shown {
-		name := pl.Name
-		p.list.AddItem(playlistDisplayName(name), "", 0, func() { p.app.loadPlaylist(name) })
+	p.table.Clear()
+	setPlaylistsHeader(p.table)
+	for i, pl := range shown {
+		row := i + playlistsHeaderRows
+		name := playlistDisplayName(truncateWithEllipsis(pl.Name, playlistNameMaxLen))
+		p.table.SetCell(row, 0, tview.NewTableCell(name).SetExpansion(1))
+
+		count := ""
+		if n, ok := p.trackCounts[pl.Name]; ok {
+			count = strconv.Itoa(n)
+		}
+		p.table.SetCell(row, 1, tview.NewTableCell(count).SetAlign(tview.AlignRight))
 	}
-	p.dirty = true
-	p.realign()
 
 	title := fmt.Sprintf(" Playlists (%s) ", p.sortMode.label())
 	if p.filter != "" {
 		title = fmt.Sprintf(" Playlists (%s): filter %q ", p.sortMode.label(), p.filter)
 	}
-	p.list.SetTitle(title)
+	p.table.SetTitle(title)
 	return len(shown)
-}
-
-// realign right-pads each badged item's text so its 🆕 icon lands at the
-// panel's current right edge. Recomputes only when the inner width has
-// changed or render() has rebuilt the list since the last call (dirty) --
-// called every redraw from App.build's SetAfterDrawFunc, mirroring how
-// the album art panel repositions itself on redraw.
-func (p *playlistsPanel) realign() {
-	_, _, width, _ := p.list.GetInnerRect()
-	if width <= 0 {
-		return
-	}
-	if width == p.lastWidth && !p.dirty {
-		return
-	}
-	p.lastWidth = width
-	p.dirty = false
-
-	badgeWidth := tview.TaggedStringWidth(playlistRecentIcon)
-	for i, pl := range p.shown {
-		if !p.badged[pl.Name] {
-			continue
-		}
-		text := playlistDisplayName(pl.Name)
-		gap := width - tview.TaggedStringWidth(text) - badgeWidth
-		if gap < 1 {
-			gap = 1
-		}
-		p.list.SetItemText(i, text+strings.Repeat(" ", gap)+playlistRecentIcon, "")
-	}
 }
 
 // setFilter applies f and returns how many playlists matched.
@@ -232,9 +233,10 @@ func (p *playlistsPanel) setFilter(f string) int {
 }
 
 func (p *playlistsPanel) selectedName() string {
-	idx := p.list.GetCurrentItem()
-	if idx < 0 || idx >= len(p.shown) {
+	row, _ := p.table.GetSelection()
+	i := row - playlistsHeaderRows
+	if i < 0 || i >= len(p.shown) {
 		return ""
 	}
-	return p.shown[idx].Name
+	return p.shown[i].Name
 }

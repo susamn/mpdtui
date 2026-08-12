@@ -5,10 +5,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
 )
+
+func TestHandleRefreshPlaylistCountsInvalidFromOtherPanel(t *testing.T) {
+	a := newTestApp()
+	a.tv.SetFocus(a.library.tree) // deliberately not Playlists, and no client -- would panic if this reached refreshTrackCounts
+
+	rKey := tcell.NewEventKey(tcell.KeyRune, 'R', tcell.ModNone)
+	if result := a.globalInputCapture(rKey); result != nil {
+		t.Errorf("'R' should be consumed, got %v", result)
+	}
+	if !strings.Contains(a.hintBar.GetText(false), "'R' has no action here") {
+		t.Errorf("hint bar after 'R' from a non-Playlists panel = %q, want an invalid-key flash", a.hintBar.GetText(false))
+	}
+}
 
 func TestSortPlaylistsByRecencyMostRecentFirst(t *testing.T) {
 	old := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -69,7 +83,7 @@ func TestPlaylistsSortModeNextTogglesBetweenRecentAndName(t *testing.T) {
 	}
 }
 
-func TestPlaylistsCycleSortModeReordersWithoutChangingBadges(t *testing.T) {
+func TestPlaylistsCycleSortModeReorders(t *testing.T) {
 	a := newTestApp()
 	old := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	newest := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
@@ -78,10 +92,9 @@ func TestPlaylistsCycleSortModeReordersWithoutChangingBadges(t *testing.T) {
 		{Name: "Apple", LastModified: old},
 	}
 	sortPlaylistsByRecency(a.playlists.pls)
-	a.playlists.badged = recentPlaylistBadges(a.playlists.pls, 1) // "Zebra" (the recent one)
 	a.playlists.render()
 
-	if title := a.playlists.list.GetTitle(); title != " Playlists (recent) " {
+	if title := a.playlists.table.GetTitle(); title != " Playlists (recent) " {
 		t.Fatalf("setup: title = %q, want %q", title, " Playlists (recent) ")
 	}
 
@@ -90,44 +103,16 @@ func TestPlaylistsCycleSortModeReordersWithoutChangingBadges(t *testing.T) {
 	if a.playlists.sortMode != playlistsSortName {
 		t.Errorf("sortMode after cycleSortMode() = %v, want playlistsSortName", a.playlists.sortMode)
 	}
-	if title := a.playlists.list.GetTitle(); title != " Playlists (name) " {
+	if title := a.playlists.table.GetTitle(); title != " Playlists (name) " {
 		t.Errorf("title after cycling = %q, want %q", title, " Playlists (name) ")
 	}
-	name, _ := a.playlists.list.GetItemText(0)
-	if !strings.HasPrefix(name, playlistDisplayName("Apple")) {
-		t.Errorf("first item after switching to name sort = %q, want it to start with %q", name, playlistDisplayName("Apple"))
-	}
-	// Badge criterion is independent of display order -- still "Zebra",
-	// even though it's no longer first in the list.
-	if !a.playlists.badged["Zebra"] || a.playlists.badged["Apple"] {
-		t.Errorf("badged = %v, want only Zebra (unaffected by the sort mode change)", a.playlists.badged)
+	name := a.playlists.table.GetCell(playlistsHeaderRows, 0).Text
+	if name != playlistDisplayName("Apple") {
+		t.Errorf("first row's Name cell after switching to name sort = %q, want %q", name, playlistDisplayName("Apple"))
 	}
 }
 
-func TestRecentPlaylistBadgesTakesFirstN(t *testing.T) {
-	pls := []mpdclient.Playlist{{Name: "A"}, {Name: "B"}, {Name: "C"}, {Name: "D"}}
-	badged := recentPlaylistBadges(pls, 2)
-
-	if len(badged) != 2 {
-		t.Fatalf("got %d badged, want 2", len(badged))
-	}
-	if !badged["A"] || !badged["B"] {
-		t.Errorf("badged = %v, want A and B (the first two)", badged)
-	}
-	if badged["C"] || badged["D"] {
-		t.Errorf("badged = %v, want C and D excluded", badged)
-	}
-}
-
-func TestRecentPlaylistBadgesNLargerThanSliceBadgesEverything(t *testing.T) {
-	pls := []mpdclient.Playlist{{Name: "A"}, {Name: "B"}}
-	badged := recentPlaylistBadges(pls, playlistRecentBadgeCount)
-	if len(badged) != 2 {
-		t.Errorf("got %d badged, want 2 (n larger than the slice)", len(badged))
-	}
-}
-
-func TestPlaylistsRefreshOrdersByRecencyAndBadgesTopN(t *testing.T) {
+func TestPlaylistsRefreshOrdersByRecency(t *testing.T) {
 	a := newTestApp()
 	old := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	newest := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
@@ -136,62 +121,105 @@ func TestPlaylistsRefreshOrdersByRecencyAndBadgesTopN(t *testing.T) {
 		{Name: "New One", LastModified: newest},
 	}
 	sortPlaylistsByRecency(a.playlists.pls)
-	a.playlists.badged = recentPlaylistBadges(a.playlists.pls, 1)
 	a.playlists.render()
 
-	name, _ := a.playlists.list.GetItemText(0)
-	if !strings.HasPrefix(name, playlistDisplayName("New One")) {
-		t.Errorf("first item = %q, want it to start with %q (most recently modified)", name, playlistDisplayName("New One"))
+	name := a.playlists.table.GetCell(playlistsHeaderRows, 0).Text
+	if name != playlistDisplayName("New One") {
+		t.Errorf("first row's Name cell = %q, want %q (most recently modified)", name, playlistDisplayName("New One"))
 	}
+
+	// selectedName() reads back whatever's actually selected -- render()
+	// alone never selects a row (the table starts on its header row,
+	// which is NotSelectable but that only affects arrow-key navigation,
+	// not the initial cursor), so explicitly select the first data row
+	// first, the same way real navigation would.
+	a.playlists.table.Select(playlistsHeaderRows, 0)
 	if got := a.playlists.selectedName(); got != "New One" {
-		t.Errorf("selectedName() with the first item selected = %q, want %q (unaffected by any badge decoration)", got, "New One")
+		t.Errorf("selectedName() with the first row selected = %q, want %q", got, "New One")
 	}
 }
 
-func TestPlaylistsRealignRightAlignsBadgeIcon(t *testing.T) {
+func TestPlaylistsHeaderRowLabelsAndAlignment(t *testing.T) {
 	a := newTestApp()
-	a.playlists.pls = []mpdclient.Playlist{{Name: "Rock"}, {Name: "Jazz"}}
-	a.playlists.badged = map[string]bool{"Rock": true}
-	a.playlists.render()
+	a.playlists.render() // no playlists -- header should still be there
 
-	a.playlists.list.SetRect(0, 0, 30, 10) // border=true, so inner width = 28
-	a.playlists.realign()
-
-	rockText, _ := a.playlists.list.GetItemText(0)
-	if !strings.HasSuffix(rockText, playlistRecentIcon) {
-		t.Fatalf("badged item text = %q, want it to end with the badge icon %q", rockText, playlistRecentIcon)
+	wantHeaders := []struct {
+		col   int
+		text  string
+		align int
+	}{
+		{0, "Name", tview.AlignLeft},
+		{1, "Count", tview.AlignRight},
 	}
-	// Use tview's own display-width function, not a rune count -- the
-	// icon is a wide (2-column) glyph, same as what realign uses to
-	// compute the padding in the first place.
-	gotWidth := tview.TaggedStringWidth(rockText)
-	_, _, innerWidth, _ := a.playlists.list.GetInnerRect()
-	if gotWidth != innerWidth {
-		t.Errorf("badged item text display width = %d, want it to exactly fill the inner width %d (right-aligned to the edge)", gotWidth, innerWidth)
-	}
-
-	jazzText, _ := a.playlists.list.GetItemText(1)
-	if jazzText != playlistDisplayName("Jazz") {
-		t.Errorf("unbadged item text = %q, want %q (icon prefix, no recency padding/badge)", jazzText, playlistDisplayName("Jazz"))
+	for _, w := range wantHeaders {
+		cell := a.playlists.table.GetCell(0, w.col)
+		if cell.Text != w.text {
+			t.Errorf("header col %d text = %q, want %q", w.col, cell.Text, w.text)
+		}
+		if cell.Align != w.align {
+			t.Errorf("header col %d align = %d, want %d", w.col, cell.Align, w.align)
+		}
 	}
 }
 
-func TestPlaylistsRealignSkipsWorkWhenWidthUnchangedAndNotDirty(t *testing.T) {
+func TestPlaylistsHeaderRowStyledAndNotSelectable(t *testing.T) {
 	a := newTestApp()
-	a.playlists.pls = []mpdclient.Playlist{{Name: "Rock"}}
-	a.playlists.badged = map[string]bool{"Rock": true}
 	a.playlists.render()
-	a.playlists.list.SetRect(0, 0, 30, 10)
-	a.playlists.realign() // first call: computes and pads
 
-	// Manually revert the item text, then call realign again at the same
-	// width -- if it's correctly skipping redundant work (not dirty, same
-	// width), the manual revert should stick.
-	a.playlists.list.SetItemText(0, "Rock", "")
-	a.playlists.realign()
+	cell := a.playlists.table.GetCell(0, 0)
+	if got := cellFg(cell); got != queueHeaderFg {
+		t.Errorf("header foreground = %v, want %v (shared with Queue's header)", got, queueHeaderFg)
+	}
+	if got := cellBg(cell); got != queueHeaderBg {
+		t.Errorf("header background = %v, want %v (shared with Queue's header)", got, queueHeaderBg)
+	}
+	if !cell.NotSelectable {
+		t.Error("header cell should not be selectable")
+	}
+}
 
-	got, _ := a.playlists.list.GetItemText(0)
-	if got != "Rock" {
-		t.Errorf("realign recomputed despite unchanged width and no new render(): got %q, want the manually reverted %q", got, "Rock")
+func TestPlaylistsHeaderSurvivesRerender(t *testing.T) {
+	a := newTestApp()
+	setPlaylistsForTest(a.playlists, []string{"Rock"})
+	a.playlists.render() // Table.Clear() wipes row 0 too -- header must be rewritten each time
+
+	if got := a.playlists.table.GetCell(0, 0).Text; got != "Name" {
+		t.Errorf("header after re-render = %q, want %q", got, "Name")
+	}
+}
+
+func TestPlaylistsRenderNameColumnExpands(t *testing.T) {
+	a := newTestApp()
+	setPlaylistsForTest(a.playlists, []string{"Rock"})
+
+	if got := a.playlists.table.GetCell(playlistsHeaderRows, 0).Expansion; got != 1 {
+		t.Errorf("Name cell Expansion = %d, want 1 (absorbs leftover width so Count sits flush right)", got)
+	}
+}
+
+func TestPlaylistsRenderCountBlankUntilFetched(t *testing.T) {
+	a := newTestApp()
+	setPlaylistsForTest(a.playlists, []string{"Rock"})
+
+	cell := a.playlists.table.GetCell(playlistsHeaderRows, 1)
+	if cell.Text != "" {
+		t.Errorf("Count cell before any fetch = %q, want empty (not a misleading 0)", cell.Text)
+	}
+	if cell.Align != tview.AlignRight {
+		t.Errorf("Count cell Align = %d, want AlignRight", cell.Align)
+	}
+}
+
+func TestPlaylistsRenderCountShowsFetchedValue(t *testing.T) {
+	a := newTestApp()
+	setPlaylistsForTest(a.playlists, []string{"Rock", "Jazz"})
+	a.playlists.trackCounts = map[string]int{"Rock": 42}
+	a.playlists.render()
+
+	if got := a.playlists.table.GetCell(playlistsHeaderRows, 1).Text; got != "42" {
+		t.Errorf("Rock's Count cell = %q, want %q", got, "42")
+	}
+	if got := a.playlists.table.GetCell(playlistsHeaderRows+1, 1).Text; got != "" {
+		t.Errorf("Jazz's Count cell (no known count) = %q, want empty", got)
 	}
 }

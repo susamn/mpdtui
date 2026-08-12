@@ -377,33 +377,108 @@ func (p *libraryPanel) onSelect(node *tview.TreeNode) {
 }
 
 // toggleDirectory expands or collapses node, fetching its children from
-// MPD the first time it's expanded (detected via the unloaded placeholder
-// child every directory node starts with -- see buildNodes).
+// MPD the first time it's expanded (see ensureChildrenLoaded).
 func (p *libraryPanel) toggleDirectory(node *tview.TreeNode, entry mpdclient.DirEntry) {
 	if node.IsExpanded() {
 		setDirExpanded(node, entry.Path, false)
 		return
 	}
-
-	children := node.GetChildren()
-	if len(children) == 1 {
-		if kind, ok := children[0].GetReference().(placeholderKind); ok && kind == placeholderUnloaded {
-			fetched, err := p.app.client.ListDirectory(entry.Path)
-			if err != nil {
-				p.app.showError(err)
-				return
-			}
-			node.ClearChildren()
-			if len(fetched) == 0 {
-				node.AddChild(tview.NewTreeNode("[::d](empty)[-:-:-]").SetSelectable(false).SetReference(placeholderEmpty))
-			} else {
-				for _, n := range buildNodes(fetched, p.sortMode) {
-					node.AddChild(n)
-				}
-			}
-		}
+	if err := p.ensureChildrenLoaded(node, entry.Path); err != nil {
+		p.app.showError(err)
+		return
 	}
 	setDirExpanded(node, entry.Path, true)
+}
+
+// ensureChildrenLoaded fetches node's children from MPD if they haven't
+// been yet (detected via the unloaded placeholder every directory node
+// starts with -- see buildNodes), replacing it with the real listing (or
+// an "(empty)" placeholder if MPD reports none). No-op if node is already
+// loaded (0 children, or already-real ones). Shared by toggleDirectory
+// (expanding one level interactively) and revealInLibrary (walking every
+// level down to a specific track's location) so the lazy-load logic only
+// lives in one place.
+func (p *libraryPanel) ensureChildrenLoaded(node *tview.TreeNode, path string) error {
+	children := node.GetChildren()
+	if len(children) != 1 {
+		return nil
+	}
+	kind, ok := children[0].GetReference().(placeholderKind)
+	if !ok || kind != placeholderUnloaded {
+		return nil
+	}
+
+	fetched, err := p.app.client.ListDirectory(path)
+	if err != nil {
+		return err
+	}
+	node.ClearChildren()
+	if len(fetched) == 0 {
+		node.AddChild(tview.NewTreeNode("[::d](empty)[-:-:-]").SetSelectable(false).SetReference(placeholderEmpty))
+	} else {
+		for _, n := range buildNodes(fetched, p.sortMode) {
+			node.AddChild(n)
+		}
+	}
+	return nil
+}
+
+// revealInLibrary expands the Library tree down to file's location --
+// every directory along its path, fetching each level from MPD only if
+// it isn't already loaded (ensureChildrenLoaded, the same lazy per-level
+// fetch a manual expand uses) -- and selects the file itself. Bounded by
+// file's path depth (typically 2-3 levels for an artist/album/track
+// layout), not library size: no full-library scan, just a directed walk
+// with an MPD round-trip only for levels not already cached. Switches out
+// of search mode back to the real browse tree first, since search
+// results replace the tree entirely and have no directory structure of
+// their own to walk. Returns false, leaving the tree unchanged past
+// whatever point it reached, if file isn't found along the way -- e.g. a
+// queued track whose file has since been removed from the library.
+func (p *libraryPanel) revealInLibrary(file string) bool {
+	if p.mode != libBrowse {
+		p.showRoot()
+	}
+
+	segments := strings.Split(file, "/")
+	node := p.root
+	path := ""
+	for _, seg := range segments[:len(segments)-1] {
+		if path == "" {
+			path = seg
+		} else {
+			path += "/" + seg
+		}
+		child := findChildByPath(node, path)
+		if child == nil {
+			return false
+		}
+		if err := p.ensureChildrenLoaded(child, path); err != nil {
+			p.app.showError(err)
+			return false
+		}
+		setDirExpanded(child, path, true)
+		node = child
+	}
+
+	fileNode := findChildByPath(node, file)
+	if fileNode == nil {
+		return false
+	}
+	p.tree.SetCurrentNode(fileNode)
+	return true
+}
+
+// findChildByPath returns node's direct child whose DirEntry.Path equals
+// path, or nil if there's no such child (e.g. an album-search group, or a
+// placeholder with no DirEntry reference at all).
+func findChildByPath(node *tview.TreeNode, path string) *tview.TreeNode {
+	for _, c := range node.GetChildren() {
+		if e, ok := c.GetReference().(mpdclient.DirEntry); ok && e.Path == path {
+			return c
+		}
+	}
+	return nil
 }
 
 // addSelected implements 'a' (add to queue, no play): the whole subtree
