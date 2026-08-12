@@ -309,13 +309,18 @@ func (a *App) handleCycleSort() {
 }
 
 // jumpToCurrentTrack is 'L': selects the currently playing track in the
-// Queue panel and moves focus there, from any panel. Flashes a message
-// instead of silently doing nothing when there's no current track (queue
-// empty, or nothing playing/selected).
+// Queue panel and moves focus there, from any panel -- and also reveals
+// that track's location in the Library tree (expanding every directory
+// along its path and selecting it there), without moving focus away from
+// Queue. Flashes a message instead of silently doing nothing when there's
+// no current track (queue empty, or nothing playing/selected).
 func (a *App) jumpToCurrentTrack() {
 	if !a.queue.jumpToCurrent() {
 		a.showMessage("nothing playing")
 		return
+	}
+	if song, ok := a.queue.selectedSong(); ok {
+		a.library.revealInLibrary(song.File)
 	}
 	a.focusPanelPrimitive(a.queue.table)
 }

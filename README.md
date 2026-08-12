@@ -141,7 +141,7 @@ Press `?` inside the full UI for the in-app keybinding list.
 | `F` | Clear any active search/filter, in every panel at once (Library search, Playlists filter) -- unlike a panel's own `Esc`, works regardless of which panel is currently focused |
 | `i` | Track info card for the currently playing track (Track/Album/Artist/Genre/Year), anchored to the bottom-right quarter of the Queue panel |
 | `v` | Cycle Now Playing visualizations (right half of the Now Playing bar) |
-| `L` | Locate the currently playing track: selects it in the Queue and moves focus there, from any panel. Happens automatically too, whenever the playing track actually changes (explicit play action or natural auto-advance alike) -- except while an overlay is open, or on startup |
+| `L` | Locate the currently playing track: selects it in the Queue and moves focus there, from any panel, and also reveals it in the Library tree (expanding every folder along its path and selecting it there, without moving focus away from Queue). The Queue-selecting part also happens automatically, whenever the playing track actually changes (explicit play action or natural auto-advance alike) -- except while an overlay is open, or on startup; the Library reveal is only on the explicit keypress |
 | `?` | Help overlay |
 | `q` | Quit |
 
