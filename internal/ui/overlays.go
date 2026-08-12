@@ -165,6 +165,8 @@ const helpText = `[::b]Global[-:-:-]
   a              append playlist to queue
   d              delete playlist (confirm)
   S              save current queue as a new playlist
+  R              refresh track counts now (also happens automatically
+                 every 10 minutes in the background)
   /              filter playlists by name
   o              cycle sort: most recently updated / name
   Esc            clear active filter

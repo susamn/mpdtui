@@ -5,10 +5,49 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
 )
+
+func TestPlaylistListTextOmitsCountUntilFetched(t *testing.T) {
+	a := newTestApp()
+	got := a.playlists.playlistListText("Rock Anthems")
+	want := playlistDisplayName("Rock Anthems")
+	if got != want {
+		t.Errorf("playlistListText before any count fetch = %q, want plain %q (no misleading count)", got, want)
+	}
+}
+
+func TestPlaylistListTextIncludesFetchedCount(t *testing.T) {
+	a := newTestApp()
+	a.playlists.trackCounts = map[string]int{"Rock Anthems": 42}
+
+	got := a.playlists.playlistListText("Rock Anthems")
+	want := playlistDisplayName("Rock Anthems") + " (42)"
+	if got != want {
+		t.Errorf("playlistListText with a known count = %q, want %q", got, want)
+	}
+
+	// A different playlist with no known count stays uncounted.
+	if got := a.playlists.playlistListText("Jazz Classics"); got != playlistDisplayName("Jazz Classics") {
+		t.Errorf("playlistListText for an unfetched playlist = %q, want plain %q", got, playlistDisplayName("Jazz Classics"))
+	}
+}
+
+func TestHandleRefreshPlaylistCountsInvalidFromOtherPanel(t *testing.T) {
+	a := newTestApp()
+	a.tv.SetFocus(a.library.tree) // deliberately not Playlists, and no client -- would panic if this reached refreshTrackCounts
+
+	rKey := tcell.NewEventKey(tcell.KeyRune, 'R', tcell.ModNone)
+	if result := a.globalInputCapture(rKey); result != nil {
+		t.Errorf("'R' should be consumed, got %v", result)
+	}
+	if !strings.Contains(a.hintBar.GetText(false), "'R' has no action here") {
+		t.Errorf("hint bar after 'R' from a non-Playlists panel = %q, want an invalid-key flash", a.hintBar.GetText(false))
+	}
+}
 
 func TestSortPlaylistsByRecencyMostRecentFirst(t *testing.T) {
 	old := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)

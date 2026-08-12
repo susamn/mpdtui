@@ -140,6 +140,9 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 		case 'S':
 			a.handleSavePlaylist()
 			return nil
+		case 'R':
+			a.handleRefreshPlaylistCounts()
+			return nil
 		case 'j', 'k', 'g', 'G':
 			return translateVimMotion(event, a.tv.GetFocus())
 		case 'h', 'l':

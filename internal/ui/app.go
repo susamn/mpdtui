@@ -176,11 +176,22 @@ func (a *App) refreshAll() {
 	a.queue.refreshStats()
 	a.refreshNowPlaying()
 	a.startedUp = true
+	a.refreshTrackCounts(true) // silent: this is a startup side effect, not a keypress
 }
+
+// playlistCountRefreshInterval is how often eventLoop's countTicker
+// re-fetches every playlist's track count in the background (see
+// refreshTrackCounts) -- MPD has no idle event for "a playlist's track
+// count might be stale" (stored_playlist only fires for playlists
+// created/renamed/deleted, not edited-in-place by some other client), so
+// this is a plain timer rather than something event-driven.
+const playlistCountRefreshInterval = 10 * time.Minute
 
 func (a *App) eventLoop() {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
+	countTicker := time.NewTicker(playlistCountRefreshInterval)
+	defer countTicker.Stop()
 
 	for {
 		select {
@@ -200,10 +211,53 @@ func (a *App) eventLoop() {
 			return
 		case <-ticker.C:
 			a.tv.QueueUpdateDraw(func() { a.refreshNowPlaying() })
+		case <-countTicker.C:
+			a.refreshTrackCounts(true) // silent: automatic background refresh
 		case <-a.done:
 			return
 		}
 	}
+}
+
+// refreshTrackCounts fetches every playlist's track count
+// (mpdclient.Client.PlaylistTrackCounts) in the background and applies it
+// once done -- one MPD round-trip per playlist, which stays well under a
+// second even for a few hundred playlists but is still real enough that
+// it must never block the single UI goroutine, whether triggered by
+// countTicker's automatic cadence or the 'R' key (handleRefreshPlaylistCounts).
+// Mirrors albumArtPanel.fetch's own background-MPD-round-trip-then-
+// QueueUpdateDraw pattern; unlike that one, there's no sequence-number
+// guard needed here since every call fetches the same thing (a full
+// snapshot of current counts) rather than a call being superseded by a
+// differently-targeted newer one. silent suppresses the confirmation
+// flash: an automatic background refresh shouldn't announce itself, but a
+// deliberate keypress should.
+func (a *App) refreshTrackCounts(silent bool) {
+	go func() {
+		counts, err := a.client.PlaylistTrackCounts()
+		a.tv.QueueUpdateDraw(func() {
+			if err != nil {
+				a.showError(err)
+				return
+			}
+			a.playlists.trackCounts = counts
+			a.playlists.render()
+			if !silent {
+				a.showMessage(fmt.Sprintf("refreshed track counts for %d playlists", len(counts)))
+			}
+		})
+	}()
+}
+
+// handleRefreshPlaylistCounts is 'R': manually forces refreshTrackCounts,
+// gated to the Playlists panel the same way handleSavePlaylist gates 'S'
+// -- invalid (flashed, not silently ignored) from any other panel.
+func (a *App) handleRefreshPlaylistCounts() {
+	if a.tv.GetFocus() != a.playlists.list {
+		a.invalidKey("R")
+		return
+	}
+	a.refreshTrackCounts(false)
 }
 
 func (a *App) handleSubsystem(name string) {
@@ -377,7 +431,7 @@ func (a *App) updateHintBar() {
 			panelHints = append(panelHints, hint{"Esc", "clear"})
 		}
 	case a.playlists.list:
-		panelHints = []hint{{"Enter", "load"}, {"a", "append"}, {"d", "delete"}, {"S", "save"}, {"o", "sort"}}
+		panelHints = []hint{{"Enter", "load"}, {"a", "append"}, {"d", "delete"}, {"S", "save"}, {"R", "counts"}, {"o", "sort"}}
 		if a.playlists.filter != "" {
 			panelHints = append(panelHints, hint{"Esc", "clear"})
 		}

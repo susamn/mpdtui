@@ -121,6 +121,41 @@ func TestPlaylistsListing(t *testing.T) {
 	}
 }
 
+// TestPlaylistTrackCounts is read-only (listplaylist, not a mutation), so
+// safe against a live server -- cross-checks its result against
+// Playlists()/PlaylistTracks() (the heavier, already-existing wrapper)
+// rather than assuming its own count is correct.
+func TestPlaylistTrackCounts(t *testing.T) {
+	c := dialOrSkip(t)
+
+	pls, err := c.Playlists()
+	if err != nil {
+		t.Fatalf("Playlists: %v", err)
+	}
+	if len(pls) == 0 {
+		t.Skip("no playlists to count")
+	}
+
+	counts, err := c.PlaylistTrackCounts()
+	if err != nil {
+		t.Fatalf("PlaylistTrackCounts: %v", err)
+	}
+	if len(counts) != len(pls) {
+		t.Errorf("got %d counts, want one per playlist (%d)", len(counts), len(pls))
+	}
+
+	// Spot-check one playlist's count against the heavier, already-tested
+	// PlaylistTracks (listplaylistinfo) -- must agree exactly.
+	name := pls[0].Name
+	tracks, err := c.PlaylistTracks(name)
+	if err != nil {
+		t.Fatalf("PlaylistTracks(%q): %v", name, err)
+	}
+	if got, want := counts[name], len(tracks); got != want {
+		t.Errorf("PlaylistTrackCounts()[%q] = %d, want %d (PlaylistTracks' actual length)", name, got, want)
+	}
+}
+
 func TestWatcherReceivesMixerEvent(t *testing.T) {
 	c := dialOrSkip(t)
 

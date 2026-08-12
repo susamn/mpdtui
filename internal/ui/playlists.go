@@ -36,6 +36,21 @@ func playlistDisplayName(name string) string {
 	return playlistIcon + " " + name
 }
 
+// playlistListText is what's actually shown for a playlist in this
+// panel's List: playlistDisplayName, plus its track count if known (see
+// trackCounts/App.refreshTrackCounts) -- distinct from playlistDisplayName
+// itself, which Library's tree entries for playlists (entryLabel) use
+// directly and never carry a count. Omitted (not "(0)") until the first
+// refresh actually completes, so an unfetched count doesn't misreport as
+// an empty playlist.
+func (p *playlistsPanel) playlistListText(name string) string {
+	text := playlistDisplayName(name)
+	if n, ok := p.trackCounts[name]; ok {
+		text = fmt.Sprintf("%s (%d)", text, n)
+	}
+	return text
+}
+
 // playlistsSortMode controls the display order of playlistsPanel.pls.
 // Independent of the 🆕 badge, which always reflects actual recency
 // (recentPlaylistBadges from a recency-sorted copy) regardless of which
@@ -75,6 +90,13 @@ type playlistsPanel struct {
 
 	sortMode playlistsSortMode
 	badged   map[string]bool // playlist names among the most recently updated, independent of sortMode
+
+	// trackCounts holds each playlist's track count, keyed by name --
+	// populated by App.refreshTrackCounts (an explicit background MPD
+	// round-trip, not part of refresh/render's own data), so a name absent
+	// from this map just means "not fetched yet", not "zero tracks". See
+	// playlistListText.
+	trackCounts map[string]int
 
 	lastWidth int  // inner width last used by realign, to skip redundant work
 	dirty     bool // set by render(), forces realign to reapply regardless of lastWidth
@@ -182,7 +204,7 @@ func (p *playlistsPanel) render() int {
 	p.list.Clear()
 	for _, pl := range shown {
 		name := pl.Name
-		p.list.AddItem(playlistDisplayName(name), "", 0, func() { p.app.loadPlaylist(name) })
+		p.list.AddItem(p.playlistListText(name), "", 0, func() { p.app.loadPlaylist(name) })
 	}
 	p.dirty = true
 	p.realign()
@@ -216,7 +238,7 @@ func (p *playlistsPanel) realign() {
 		if !p.badged[pl.Name] {
 			continue
 		}
-		text := playlistDisplayName(pl.Name)
+		text := p.playlistListText(pl.Name)
 		gap := width - tview.TaggedStringWidth(text) - badgeWidth
 		if gap < 1 {
 			gap = 1
