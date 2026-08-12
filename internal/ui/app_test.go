@@ -80,7 +80,7 @@ func TestClearAllSearchesResetsPlaylistsFilterRegardlessOfFocus(t *testing.T) {
 	if a.playlists.filter != "" {
 		t.Errorf("playlists.filter after clearAllSearches = %q, want empty", a.playlists.filter)
 	}
-	if got := a.playlists.list.GetItemCount(); got != 3 {
+	if got := len(a.playlists.shown); got != 3 {
 		t.Errorf("playlists item count after clearAllSearches = %d, want 3 (filter lifted)", got)
 	}
 }

@@ -54,7 +54,7 @@ func (a *App) openInput(label, initial string, onSubmit func(string)) {
 // (see openQueueSearch and queuePanel.search).
 func (a *App) openSearch() {
 	switch a.tv.GetFocus() {
-	case a.playlists.list:
+	case a.playlists.table:
 		a.openInput("Filter playlists: ", a.playlists.filter, func(text string) {
 			a.playlists.setFilter(strings.TrimSpace(text))
 		})
@@ -93,7 +93,7 @@ func (a *App) openQueueSearch() {
 }
 
 func (a *App) handleSavePlaylist() {
-	if a.tv.GetFocus() != a.playlists.list {
+	if a.tv.GetFocus() != a.playlists.table {
 		a.invalidKey("S")
 		return
 	}

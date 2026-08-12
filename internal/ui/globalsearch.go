@@ -101,7 +101,7 @@ func (a *App) openGlobalSearch() {
 		case globalSearchArtist, globalSearchAlbum, globalSearchTrack:
 			a.focusPanelPrimitive(a.library.tree)
 		case globalSearchPlaylist:
-			a.focusPanelPrimitive(a.playlists.list)
+			a.focusPanelPrimitive(a.playlists.table)
 		}
 	})
 

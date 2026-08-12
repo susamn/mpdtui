@@ -23,7 +23,7 @@ single-line inline player for a shell or tmux pane.
 ## Screenshot
 
 <p align="center">
-  <img src="assets/screenshot.png" width="900" alt="mpdtui full panel UI: Library tree, Album Art, Playlists with recency badges, Queue with Title/Album/Artist/Type/Duration columns, live stats, and the Now Playing equalizer visualizer">
+  <img src="assets/screenshot.png" width="900" alt="mpdtui full panel UI: Library tree, Album Art, Playlists with Name/Count columns, Queue with Title/Album/Artist/Type/Duration columns, live stats, and the Now Playing equalizer visualizer">
 </p>
 
 ## Demo
@@ -56,12 +56,13 @@ single-line inline player for a shell or tmux pane.
   ASCII-art rendering; there's no capability probe, since one risks
   hanging against a terminal that never answers it. "No Album Art" is
   shown if MPD has none embedded or alongside the track.
-- **Playlists** — 🎵 icon on every entry (here and wherever a playlist
-  shows up while browsing the Library); load, append, save, delete stored
-  playlists; `o` cycles between most-recently-updated and alphabetical,
-  with a 🆕 badge on the 5 most recent regardless of which sort is showing.
-  Each entry also shows its track count once fetched, refreshed
-  automatically every 10 minutes in the background or on demand with `R`
+- **Playlists** — a Name/Count table, mirroring the Queue panel's own
+  column layout: a pinned header row, Name (🎵 icon prefix, truncated to
+  24 characters with "...") on the left, Count right-aligned as the last
+  column, populated once fetched and refreshed automatically every 10
+  minutes in the background or on demand with `R`. Load, append, save,
+  delete stored playlists; `o` cycles between most-recently-updated and
+  alphabetical
 - **Queue** — reorder, remove, clear, jump to any track; a pinned header
   row (Title/Album/Artist/Type/Duration) stays visible while scrolling.
   Title is bold; Title/Album/Artist are truncated to 30/20/40 characters
@@ -162,7 +163,7 @@ Press `?` inside the full UI for the in-app keybinding list.
 | Playlists | `d` | Delete playlist (confirm) |
 | Playlists | `S` | Save current queue as a new playlist |
 | Playlists | `R` | Refresh track counts now (also happens automatically every 10 minutes in the background) |
-| Playlists | `o` | Cycle sort: most recently updated / name -- 🆕 badge on the 5 most recent regardless of which sort is showing |
+| Playlists | `o` | Cycle sort: most recently updated / name |
 | Playlists | `Esc` | Clear active filter |
 | Queue | `Enter` | Play selected track |
 | Queue | `d` | Remove selected track |

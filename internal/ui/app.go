@@ -109,7 +109,7 @@ func (a *App) build() {
 	a.queue = newQueuePanel(a)
 
 	wireFocusColors(a.library.tree)
-	wireFocusColors(a.playlists.list)
+	wireFocusColors(a.playlists.table)
 	wireFocusColors(a.queue.table)
 	wireFocusColors(a.queue.search)
 
@@ -125,7 +125,7 @@ func (a *App) build() {
 
 	bottomLeft := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(a.albumArt.view, 0, 1, false).
-		AddItem(a.playlists.list, 0, 1, false)
+		AddItem(a.playlists.table, 0, 1, false)
 
 	left := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(a.library.tree, 0, 2, true).
@@ -155,7 +155,7 @@ func (a *App) build() {
 		AddItem(nowPlayingRow, 4, 0, false).
 		AddItem(a.hintBar, 1, 0, false)
 
-	a.panels = []tview.Primitive{a.library.tree, a.playlists.list, a.queue.table}
+	a.panels = []tview.Primitive{a.library.tree, a.playlists.table, a.queue.table}
 
 	a.pages = tview.NewPages().AddPage("main", a.root, true, true)
 
@@ -165,7 +165,6 @@ func (a *App) build() {
 
 	a.tv.SetAfterDrawFunc(func(tcell.Screen) {
 		a.albumArt.draw()
-		a.playlists.realign()
 	})
 }
 
@@ -253,7 +252,7 @@ func (a *App) refreshTrackCounts(silent bool) {
 // gated to the Playlists panel the same way handleSavePlaylist gates 'S'
 // -- invalid (flashed, not silently ignored) from any other panel.
 func (a *App) handleRefreshPlaylistCounts() {
-	if a.tv.GetFocus() != a.playlists.list {
+	if a.tv.GetFocus() != a.playlists.table {
 		a.invalidKey("R")
 		return
 	}
@@ -430,7 +429,7 @@ func (a *App) updateHintBar() {
 		if a.library.mode == libSearch {
 			panelHints = append(panelHints, hint{"Esc", "clear"})
 		}
-	case a.playlists.list:
+	case a.playlists.table:
 		panelHints = []hint{{"Enter", "load"}, {"a", "append"}, {"d", "delete"}, {"S", "save"}, {"R", "counts"}, {"o", "sort"}}
 		if a.playlists.filter != "" {
 			panelHints = append(panelHints, hint{"Esc", "clear"})
