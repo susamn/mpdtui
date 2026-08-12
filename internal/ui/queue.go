@@ -107,18 +107,27 @@ func (q *queuePanel) refresh() {
 	q.render(curID)
 }
 
-// Queue table column max lengths (runes), title/album/artist -- the order
-// they're shown in. Longer values are truncated with a trailing "..." (see
-// truncateWithEllipsis); a small trailing gap (queueColumnGap) is appended
-// after each so adjacent columns don't run together, matching the same
-// manual-padding convention formatGap already uses between the format tag
-// and duration columns (tview's Table has no automatic column spacing).
+// Queue table column max lengths (runes), title/album/artist/genre/
+// composer -- the order they're shown in. Longer values are truncated
+// with a trailing "..." (see truncateWithEllipsis); a small trailing gap
+// (queueColumnGap) is appended after each so adjacent columns don't run
+// together, matching the same manual-padding convention formatGap already
+// uses between the format tag and duration columns (tview's Table has no
+// automatic column spacing). Year has no max of its own: yearFromDate
+// already caps it to at most 4 characters.
 const (
-	queueTitleMaxLen  = 30
-	queueAlbumMaxLen  = 20
-	queueArtistMaxLen = 40
-	queueColumnGap    = "  "
+	queueTitleMaxLen    = 30
+	queueAlbumMaxLen    = 20
+	queueArtistMaxLen   = 40
+	queueGenreMaxLen    = 9
+	queueComposerMaxLen = 14
+	queueColumnGap      = "  "
 )
+
+// queueTitleColor tints the Title cell WhatsApp's brand green (#25D366),
+// on top of its existing bold weight, so the track title reads as the
+// row's primary/most prominent field at a glance.
+var queueTitleColor = tcell.NewRGBColor(0x25, 0xD3, 0x66)
 
 // queueHeaderBg/Fg give the header row an inverted look (filled
 // background, dark text) to set it apart from the data rows below.
@@ -152,8 +161,11 @@ var queueHeaderLabels = []struct {
 	{"Title", tview.AlignLeft},             // 2
 	{"Album", tview.AlignLeft},             // 3
 	{"Artist", tview.AlignLeft},            // 4
-	{"Type" + formatGap, tview.AlignRight}, // 5
-	{"Duration", tview.AlignRight},         // 6
+	{"Year", tview.AlignLeft},              // 5
+	{"Genre", tview.AlignLeft},             // 6
+	{"Composer", tview.AlignLeft},          // 7
+	{"Type" + formatGap, tview.AlignRight}, // 8
+	{"Duration", tview.AlignRight},         // 9
 }
 
 // setQueueHeader (re)writes the fixed header row. Table.Clear() wipes
@@ -185,12 +197,16 @@ func (q *queuePanel) render(curID int) {
 		q.table.SetCell(row, 0, tview.NewTableCell(marker))
 		q.table.SetCell(row, 1, tview.NewTableCell(fmt.Sprintf("%3d", i+1)))
 		q.table.SetCell(row, 2, tview.NewTableCell(truncateWithEllipsis(title, queueTitleMaxLen)+queueColumnGap).
-			SetAttributes(tcell.AttrBold))
+			SetAttributes(tcell.AttrBold).
+			SetTextColor(queueTitleColor))
 		q.table.SetCell(row, 3, tview.NewTableCell(truncateWithEllipsis(s.Album, queueAlbumMaxLen)+queueColumnGap))
-		q.table.SetCell(row, 4, tview.NewTableCell(truncateWithEllipsis(s.Artist, queueArtistMaxLen)+queueColumnGap).
+		q.table.SetCell(row, 4, tview.NewTableCell(truncateWithEllipsis(s.Artist, queueArtistMaxLen)+queueColumnGap))
+		q.table.SetCell(row, 5, tview.NewTableCell(yearFromDate(s.Date)+queueColumnGap))
+		q.table.SetCell(row, 6, tview.NewTableCell(truncateWithEllipsis(s.Genre, queueGenreMaxLen)+queueColumnGap))
+		q.table.SetCell(row, 7, tview.NewTableCell(truncateWithEllipsis(s.Composer, queueComposerMaxLen)+queueColumnGap).
 			SetExpansion(1))
-		q.table.SetCell(row, 5, formatTagCell(s.File))
-		q.table.SetCell(row, 6, tview.NewTableCell(FormatDuration(s.Duration)).SetAlign(tview.AlignRight))
+		q.table.SetCell(row, 8, formatTagCell(s.File))
+		q.table.SetCell(row, 9, tview.NewTableCell(FormatDuration(s.Duration)).SetAlign(tview.AlignRight))
 	}
 	q.table.SetTitle(fmt.Sprintf(" Queue (%d) ", len(q.songs)))
 }

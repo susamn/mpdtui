@@ -37,13 +37,15 @@ func containsFold(haystack, needle string) bool {
 
 // songMatchesQuery approximates MPD's "any" tag search across the tags
 // this app actually keeps (see mpdclient.Song): Title, Artist, Album,
-// Genre, Date, falling back to the bare filename so untagged tracks stay
-// findable. Case- and diacritic-insensitive throughout (see containsFold).
+// Genre, Composer, Date, falling back to the bare filename so untagged
+// tracks stay findable. Case- and diacritic-insensitive throughout (see
+// containsFold).
 func songMatchesQuery(s mpdclient.Song, query string) bool {
 	return containsFold(s.Title, query) ||
 		containsFold(s.Artist, query) ||
 		containsFold(s.Album, query) ||
 		containsFold(s.Genre, query) ||
+		containsFold(s.Composer, query) ||
 		containsFold(s.Date, query) ||
 		containsFold(baseName(s.File), query)
 }

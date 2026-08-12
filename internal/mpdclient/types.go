@@ -40,6 +40,7 @@ type Song struct {
 	Album    string
 	Title    string
 	Genre    string
+	Composer string
 	Date     string // MPD's "Date" tag: often just a year, sometimes a full date
 	Duration time.Duration
 }
@@ -123,6 +124,7 @@ func parseSong(a mpd.Attrs) Song {
 		Album:    a["Album"],
 		Title:    a["Title"],
 		Genre:    a["Genre"],
+		Composer: a["Composer"],
 		Date:     a["Date"],
 		Duration: parseSongDuration(a),
 	}

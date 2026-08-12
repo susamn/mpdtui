@@ -23,7 +23,7 @@ single-line inline player for a shell or tmux pane.
 ## Screenshot
 
 <p align="center">
-  <img src="assets/screenshot.png" width="900" alt="mpdtui full panel UI: Library tree, Album Art, Playlists with Name/Count columns, Queue with Title/Album/Artist/Type/Duration columns, live stats, and the Now Playing equalizer visualizer">
+  <img src="assets/screenshot.png" width="900" alt="mpdtui full panel UI: Library tree, Album Art, Playlists with Name/Count columns, Queue with Title/Album/Artist/Year/Genre/Composer/Type/Duration columns, live stats, and the Now Playing equalizer visualizer">
 </p>
 
 ## Demo
@@ -64,10 +64,11 @@ single-line inline player for a shell or tmux pane.
   delete stored playlists; `o` cycles between most-recently-updated and
   alphabetical
 - **Queue** — reorder, remove, clear, jump to any track; a pinned header
-  row (Title/Album/Artist/Type/Duration) stays visible while scrolling.
-  Title is bold; Title/Album/Artist are truncated to 30/20/40 characters
-  with "..." if longer; Type shows a color-coded format badge
-  (MP3/FLAC/M4A/...); Type and Duration are right-aligned
+  row (Title/Album/Artist/Year/Genre/Composer/Type/Duration) stays visible
+  while scrolling. Title is bold and colored WhatsApp green; Title/Album/
+  Artist/Genre/Composer are truncated (30/20/40/9/14 characters) with
+  "..." if longer; Type shows a color-coded format badge (MP3/FLAC/M4A/
+  ...); Type and Duration are right-aligned
 - **Library stats** — live total tracks/artists/playlists, shown
   alongside the Queue search box, refreshed on library/playlist changes
 - **Now Playing bar** — live progress, volume, repeat/random/single/consume

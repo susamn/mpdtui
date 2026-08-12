@@ -78,10 +78,7 @@ func (c *trackInfoCard) render(song mpdclient.Song) {
 	if track == "" {
 		track = baseName(song.File)
 	}
-	year := song.Date
-	if len(year) > 4 {
-		year = year[:4]
-	}
+	year := yearFromDate(song.Date)
 
 	lines := []string{
 		fmt.Sprintf("🎵 %s", track),
