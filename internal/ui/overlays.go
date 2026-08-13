@@ -144,8 +144,12 @@ const helpText = `[::b]Global[-:-:-]
   Tab, 1/2/3     cycle / jump focus between panels
   /              search (contextual: Library/Playlists filter, Queue jump)
   f              global search from any panel: "a/al/p/t <term>" for
-                 artist/album/playlist/track (e.g. "a queen", "al hello")
-                 -- accent-insensitive, so "buble" matches "Bublé"
+                 artist/album/playlist/track (e.g. "a queen", "al hello"),
+                 with live fzf-style hints as you type -- Up/Down (or
+                 Ctrl-P/Ctrl-N) move the highlight, Enter acts on it
+                 directly: track adds+plays, playlist loads+plays, artist/
+                 album jump into that group in the Library -- accent-
+                 insensitive, so "buble" matches "Bublé"
   F              clear any active search/filter, in every panel at once
   i              track info card for the currently playing track
   v              cycle Now Playing visualizations

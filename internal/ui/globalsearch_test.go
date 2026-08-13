@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
@@ -9,7 +10,7 @@ import (
 	"mpdtui/internal/mpdclient"
 )
 
-func TestParseGlobalSearch(t *testing.T) {
+func TestParseGlobalSearchKind(t *testing.T) {
 	cases := []struct {
 		input    string
 		wantKind globalSearchKind
@@ -28,27 +29,333 @@ func TestParseGlobalSearch(t *testing.T) {
 		{"t help me", globalSearchTrack, "help me", true},
 		{"track help me", globalSearchTrack, "help me", true},
 		{"  t   spaced term  ", globalSearchTrack, "spaced term", true},
-		{"x hello", 0, "", false}, // unrecognized prefix
-		{"a", 0, "", false},       // no term
-		{"a   ", 0, "", false},    // no term after trimming
-		{"", 0, "", false},        // empty input
-		{"   ", 0, "", false},     // whitespace-only input
+		{"a", globalSearchArtist, "", true},    // kind selected, no term yet -- still valid, live hints show unfiltered
+		{"a   ", globalSearchArtist, "", true}, // trailing space, still no term
+		{"x hello", 0, "", false},              // unrecognized prefix
+		{"", 0, "", false},                     // empty input
+		{"   ", 0, "", false},                  // whitespace-only input
 	}
 	for _, tc := range cases {
-		kind, term, ok := parseGlobalSearch(tc.input)
+		kind, term, ok := parseGlobalSearchKind(tc.input)
 		if ok != tc.wantOK {
-			t.Errorf("parseGlobalSearch(%q) ok = %v, want %v", tc.input, ok, tc.wantOK)
+			t.Errorf("parseGlobalSearchKind(%q) ok = %v, want %v", tc.input, ok, tc.wantOK)
 			continue
 		}
 		if !ok {
 			continue
 		}
 		if kind != tc.wantKind {
-			t.Errorf("parseGlobalSearch(%q) kind = %v, want %v", tc.input, kind, tc.wantKind)
+			t.Errorf("parseGlobalSearchKind(%q) kind = %v, want %v", tc.input, kind, tc.wantKind)
 		}
 		if term != tc.wantTerm {
-			t.Errorf("parseGlobalSearch(%q) term = %q, want %q", tc.input, term, tc.wantTerm)
+			t.Errorf("parseGlobalSearchKind(%q) term = %q, want %q", tc.input, term, tc.wantTerm)
 		}
+	}
+}
+
+func TestFuzzyScoreMatches(t *testing.T) {
+	if _, ok := fuzzyScore("", "anything"); !ok {
+		t.Fatal("empty query should match everything")
+	}
+	if _, ok := fuzzyScore("mkn", "Mark Knopfler"); !ok {
+		t.Fatal("expected subsequence match")
+	}
+	if _, ok := fuzzyScore("xyz", "Mark Knopfler"); ok {
+		t.Fatal("expected no match")
+	}
+	if _, ok := fuzzyScore("knm", "Mark Knopfler"); ok {
+		t.Fatal("out-of-order subsequence should not match")
+	}
+}
+
+func TestFuzzyScoreIsAccentInsensitive(t *testing.T) {
+	if _, ok := fuzzyScore("buble", "Bublé"); !ok {
+		t.Fatal("expected an unaccented query to match an accented candidate, matching every other search path in this app")
+	}
+}
+
+func TestFuzzyFilterSortIndexRanksAndFilters(t *testing.T) {
+	labels := []string{"Hotel California", "Mark Knopfler - In the Sky", "Bang Bang", "Mark Knopfler - Secondary Waltz"}
+
+	got := fuzzyFilterSortIndex("knopfler", labels)
+	want := []int{1, 3}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("fuzzyFilterSortIndex(%q) = %v, want %v", "knopfler", got, want)
+	}
+
+	if got := fuzzyFilterSortIndex("", labels); len(got) != len(labels) {
+		t.Fatalf("empty query should return all %d labels, got %d", len(labels), len(got))
+	}
+
+	if got := fuzzyFilterSortIndex("zzz", labels); len(got) != 0 {
+		t.Fatalf("expected no matches, got %v", got)
+	}
+}
+
+func indexLabels(order []int, labels []string) []string {
+	out := make([]string, len(order))
+	for i, idx := range order {
+		out[i] = labels[idx]
+	}
+	return out
+}
+
+// TestRankGlobalSearchHintsPrefersTightMatchOverEarlyLooseMatch is a
+// regression test for a real bug caught during manual verification (tmux
+// against a live library): querying "chappa" ranked "Carolina Chocolate
+// Drops - Political World" -- a loose, scattered subsequence match that
+// merely happens to start at index 0 -- above "Hariharan - Chappa
+// Chappa", which contains the literal, contiguous substring "Chappa
+// Chappa". The original scoring (first*1000 + spread, copied from
+// internal/picker) let position dominate over tightness; fuzzyScore now
+// weights spread first specifically to fix this.
+func TestRankGlobalSearchHintsPrefersTightMatchOverEarlyLooseMatch(t *testing.T) {
+	labels := []string{
+		"Carolina Chocolate Drops - Political World",
+		"Hariharan - Chappa Chappa",
+	}
+	shown, total := rankGlobalSearchHints("chappa", labels)
+	if total != 2 {
+		t.Fatalf("total = %d, want 2 (both are valid subsequence matches)", total)
+	}
+	if len(shown) == 0 || labels[shown[0]] != "Hariharan - Chappa Chappa" {
+		t.Fatalf("top hint = %v, want the exact substring match (%q) first", indexLabels(shown, labels), "Hariharan - Chappa Chappa")
+	}
+}
+
+func TestRankGlobalSearchHintsTruncatesButReportsTrueTotal(t *testing.T) {
+	labels := make([]string, maxGlobalSearchHints+5)
+	for i := range labels {
+		labels[i] = fmt.Sprintf("Track %d", i)
+	}
+	shown, total := rankGlobalSearchHints("", labels) // empty query matches everything
+	if total != len(labels) {
+		t.Fatalf("total = %d, want %d (the true match count, before truncation)", total, len(labels))
+	}
+	if len(shown) != maxGlobalSearchHints {
+		t.Fatalf("len(shown) = %d, want %d (capped)", len(shown), maxGlobalSearchHints)
+	}
+}
+
+func TestFuzzyScoreExactAndImpossibleMatches(t *testing.T) {
+	// An exact (case-insensitive) full-string match is the tightest and
+	// earliest possible match for that query: spread is exactly
+	// len(query)-1 (every rune contiguous) and first is 0, so its score is
+	// the theoretical minimum for a query of that length -- no other
+	// candidate could score better against the same query.
+	query := "mark knopfler"
+	wantScore := (len([]rune(query)) - 1) * 1000
+	if score, ok := fuzzyScore(query, "Mark Knopfler"); !ok || score != wantScore {
+		t.Errorf("exact (case-insensitive) match: score=%d ok=%v, want score=%d ok=true", score, ok, wantScore)
+	}
+	if _, ok := fuzzyScore("a very long query nobody has", "short"); ok {
+		t.Error("a query longer than the candidate should never match")
+	}
+	if _, ok := fuzzyScore("x", ""); ok {
+		t.Error("a non-empty query should never match an empty candidate")
+	}
+}
+
+func TestMoveHintHighlight(t *testing.T) {
+	cases := []struct {
+		name              string
+		current, n, delta int
+		want              int
+	}{
+		{"empty list always -1", 0, 0, 1, -1},
+		{"empty list ignores current/delta", 5, 0, -1, -1},
+		{"single item, forward, stays put", 0, 1, 1, 0},
+		{"single item, backward, stays put", 0, 1, -1, 0},
+		{"forward within bounds", 0, 3, 1, 1},
+		{"forward wraps past the end", 2, 3, 1, 0},
+		{"backward within bounds", 1, 3, -1, 0},
+		{"backward wraps past the start", 0, 3, -1, 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := moveHintHighlight(tc.current, tc.n, tc.delta); got != tc.want {
+				t.Errorf("moveHintHighlight(%d, %d, %d) = %d, want %d", tc.current, tc.n, tc.delta, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNonEmptyStrings(t *testing.T) {
+	got := nonEmptyStrings([]string{"a", "", "b", "", "", "c"})
+	want := []string{"a", "b", "c"}
+	if len(got) != len(want) {
+		t.Fatalf("nonEmptyStrings = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("nonEmptyStrings[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	if got := nonEmptyStrings(nil); len(got) != 0 {
+		t.Errorf("nonEmptyStrings(nil) = %v, want empty", got)
+	}
+	if got := nonEmptyStrings([]string{"", ""}); len(got) != 0 {
+		t.Errorf("nonEmptyStrings(all empty) = %v, want empty", got)
+	}
+}
+
+func TestPlaylistLabels(t *testing.T) {
+	pls := []mpdclient.Playlist{{Name: "Rock Anthems"}, {Name: "Jazz Classics"}}
+	got := playlistLabels(pls)
+	want := []string{"Rock Anthems", "Jazz Classics"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("playlistLabels = %v, want %v", got, want)
+	}
+	if got := playlistLabels(nil); len(got) != 0 {
+		t.Errorf("playlistLabels(nil) = %v, want empty", got)
+	}
+}
+
+// --- globalSearchHints: the MPD-free bookkeeping behind the hint list ---
+
+func TestGlobalSearchHintsRebuildSkipsLabelsForOnInvalidPrefix(t *testing.T) {
+	cases := []string{"xyz nonsense", "", "   "}
+	for _, text := range cases {
+		var calls int
+		labelsFor := func(globalSearchKind) []string { calls++; return nil }
+		h := &globalSearchHints{}
+		h.rebuild(text, labelsFor)
+
+		if calls != 0 {
+			t.Errorf("rebuild(%q): labelsFor called %d time(s), want 0 (an unrecognized/empty prefix should never touch MPD)", text, calls)
+		}
+		if h.kindValid {
+			t.Errorf("rebuild(%q): kindValid = true, want false", text)
+		}
+		if _, idx := h.current(); idx != -1 {
+			t.Errorf("rebuild(%q): current() idx = %d, want -1 (nothing to highlight)", text, idx)
+		}
+	}
+}
+
+func TestGlobalSearchHintsRebuildCallsLabelsForOnceForValidPrefix(t *testing.T) {
+	var calls int
+	var gotKind globalSearchKind
+	labelsFor := func(k globalSearchKind) []string {
+		calls++
+		gotKind = k
+		return []string{"Foo Bar", "Baz Qux"}
+	}
+	h := &globalSearchHints{}
+	h.rebuild("al foo", labelsFor)
+
+	if calls != 1 {
+		t.Fatalf("labelsFor called %d time(s), want exactly 1", calls)
+	}
+	if gotKind != globalSearchAlbum {
+		t.Errorf("labelsFor was called with kind %v, want globalSearchAlbum", gotKind)
+	}
+	if !h.kindValid {
+		t.Error("kindValid = false, want true")
+	}
+	if label, idx := h.current(); idx != 0 || label != "Foo Bar" {
+		t.Errorf("current() = (%q, %d), want (%q, 0)", label, idx, "Foo Bar")
+	}
+}
+
+func TestGlobalSearchHintsEmptyTermShowsUnfilteredTopMatches(t *testing.T) {
+	labelsFor := func(globalSearchKind) []string { return []string{"Alpha", "Beta", "Gamma"} }
+	h := &globalSearchHints{}
+	h.rebuild("t", labelsFor) // kind selected, no term typed yet
+
+	if h.total != 3 {
+		t.Errorf("total = %d, want 3 (empty query matches everything)", h.total)
+	}
+	if label, idx := h.current(); idx != 0 || label != "Alpha" {
+		t.Errorf("current() = (%q, %d), want (%q, 0) -- first candidate highlighted by default", label, idx, "Alpha")
+	}
+}
+
+func TestGlobalSearchHintsZeroMatchesLeavesNothingHighlighted(t *testing.T) {
+	labelsFor := func(globalSearchKind) []string { return []string{"Rock Anthems", "Jazz Classics"} }
+	h := &globalSearchHints{}
+	h.rebuild("p nonexistent-xyz", labelsFor)
+
+	if !h.kindValid {
+		t.Error("kindValid = false, want true (playlist is a recognized kind, it just has no matches)")
+	}
+	if h.total != 0 {
+		t.Errorf("total = %d, want 0", h.total)
+	}
+	if _, idx := h.current(); idx != -1 {
+		t.Errorf("current() idx = %d, want -1", idx)
+	}
+	h.move(1) // must not panic or produce a valid-looking index on an empty list
+	if _, idx := h.current(); idx != -1 {
+		t.Errorf("after move() on zero matches, current() idx = %d, want -1", idx)
+	}
+}
+
+func TestGlobalSearchHintsNavigationWrapsAndConfirmsHighlighted(t *testing.T) {
+	labelsFor := func(globalSearchKind) []string { return []string{"Rock Anthems", "Jazz Classics", "Rock Ballads"} }
+	h := &globalSearchHints{}
+	h.rebuild("p rock", labelsFor) // matches "Rock Anthems" and "Rock Ballads", not "Jazz Classics"
+
+	if h.total != 2 {
+		t.Fatalf("total = %d, want 2", h.total)
+	}
+	label, _ := h.current()
+	if label != "Rock Anthems" {
+		t.Fatalf("initial highlight = %q, want %q", label, "Rock Anthems")
+	}
+
+	h.move(1)
+	if label, _ := h.current(); label != "Rock Ballads" {
+		t.Errorf("after move(1), highlight = %q, want %q", label, "Rock Ballads")
+	}
+
+	h.move(1) // past the end of 2 matches -- should wrap back to the first
+	if label, _ := h.current(); label != "Rock Anthems" {
+		t.Errorf("after wrapping move(1), highlight = %q, want %q", label, "Rock Anthems")
+	}
+
+	h.move(-1) // backward from the first -- should wrap to the last
+	if label, _ := h.current(); label != "Rock Ballads" {
+		t.Errorf("after wrapping move(-1), highlight = %q, want %q", label, "Rock Ballads")
+	}
+}
+
+func TestGlobalSearchHintsKindSwitchResetsHighlightAndRefetches(t *testing.T) {
+	calls := map[globalSearchKind]int{}
+	labelsFor := func(k globalSearchKind) []string {
+		calls[k]++
+		switch k {
+		case globalSearchArtist:
+			return []string{"Queen", "Quicksilver"}
+		case globalSearchAlbum:
+			return []string{"Greatest Hits"}
+		}
+		return nil
+	}
+	h := &globalSearchHints{}
+
+	h.rebuild("a qu", labelsFor) // matches both "Queen" and "Quicksilver"
+	if h.total != 2 {
+		t.Fatalf("setup: total = %d, want 2", h.total)
+	}
+	h.move(1) // highlight "Quicksilver"
+	if label, _ := h.current(); label != "Quicksilver" {
+		t.Fatalf("setup: highlight = %q, want %q", label, "Quicksilver")
+	}
+
+	// Switching kind mid-session (typing "al" over "a") must re-resolve
+	// against the album candidates, not silently keep pointing at index 1
+	// of a completely different label slice.
+	h.rebuild("al greatest", labelsFor)
+	if h.kind != globalSearchAlbum {
+		t.Fatalf("kind after switch = %v, want globalSearchAlbum", h.kind)
+	}
+	label, idx := h.current()
+	if idx != 0 || label != "Greatest Hits" {
+		t.Errorf("current() after kind switch = (%q, %d), want (%q, 0)", label, idx, "Greatest Hits")
+	}
+	if calls[globalSearchArtist] != 1 || calls[globalSearchAlbum] != 1 {
+		t.Errorf("labelsFor call counts = %v, want exactly one call per kind actually selected", calls)
 	}
 }
 
@@ -169,25 +476,25 @@ func TestOpenGlobalSearchPlaylistNoMatchKeepsPopupOpen(t *testing.T) {
 	}
 }
 
-func TestOpenGlobalSearchPlaylistMatchClosesAndFocusesPlaylists(t *testing.T) {
-	a := newTestApp()
-	setPlaylistsForTest(a.playlists, []string{"Rock Anthems", "Jazz Classics"})
-	a.tv.SetFocus(a.queue.table)
-	a.openGlobalSearch()
-
-	field := a.tv.GetFocus().(*tview.InputField)
-	field.SetText("p Rock")
-	handler := field.InputHandler()
-	handler(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {})
-
-	if a.mode != modeNormal {
-		t.Error("mode after a playlist match should return to modeNormal (popup closed)")
+// TestRankGlobalSearchHintsPicksBestPlaylistMatch covers what used to be
+// exercised end-to-end (type "p Rock", press Enter, land on the matched
+// playlist) back when Enter ran a broader search. Now Enter on a playlist
+// hint directly loads and plays it (PlaylistLoad clears the queue) --
+// genuinely mutating state, so unlike the read-only Album/Artist live
+// tests below, it can't safely run against a live MPD server the way
+// internal/mpdclient/tests' own convention avoids destructive round-trips
+// (see TestQueueRoundTrip's no-op move). rankGlobalSearchHints is the
+// exact ranking logic confirm() would act on, so this covers the same
+// "does typing 'Rock' surface the right playlist first" question without
+// ever touching MPD.
+func TestRankGlobalSearchHintsPicksBestPlaylistMatch(t *testing.T) {
+	labels := []string{"Rock Anthems", "Jazz Classics", "Rock Ballads"}
+	shown, total := rankGlobalSearchHints("Rock", labels)
+	if total != 2 {
+		t.Fatalf("total = %d, want 2 (Rock Anthems, Rock Ballads)", total)
 	}
-	if a.tv.GetFocus() != a.playlists.table {
-		t.Errorf("focus after a playlist match = %T, want the Playlists table", a.tv.GetFocus())
-	}
-	if a.playlists.filter != "Rock" {
-		t.Errorf("playlists.filter = %q, want %q", a.playlists.filter, "Rock")
+	if len(shown) == 0 || labels[shown[0]] != "Rock Anthems" {
+		t.Fatalf("top hint = %v, want %q first", indexLabels(shown, labels), "Rock Anthems")
 	}
 }
 
