@@ -320,6 +320,48 @@ func TestGlobalSearchHintsNavigationWrapsAndConfirmsHighlighted(t *testing.T) {
 	}
 }
 
+func TestGlobalSearchHintsJumpFirstAndLast(t *testing.T) {
+	labelsFor := func(globalSearchKind) []string { return []string{"Alpha", "Beta", "Gamma"} }
+	h := &globalSearchHints{}
+	h.rebuild("t", labelsFor)
+	if h.total != 3 {
+		t.Fatalf("setup: total = %d, want 3", h.total)
+	}
+
+	h.move(1) // sit on "Beta" before jumping, so jumpFirst/jumpLast are visibly not no-ops
+	if label, _ := h.current(); label != "Beta" {
+		t.Fatalf("setup: highlight = %q, want %q", label, "Beta")
+	}
+
+	h.jumpLast()
+	if label, _ := h.current(); label != "Gamma" {
+		t.Errorf("after jumpLast(), highlight = %q, want %q", label, "Gamma")
+	}
+
+	h.jumpFirst()
+	if label, _ := h.current(); label != "Alpha" {
+		t.Errorf("after jumpFirst(), highlight = %q, want %q", label, "Alpha")
+	}
+}
+
+func TestGlobalSearchHintsJumpFirstAndLastNoopOnEmptyOrder(t *testing.T) {
+	labelsFor := func(globalSearchKind) []string { return []string{"Rock Anthems"} }
+	h := &globalSearchHints{}
+	h.rebuild("p nonexistent-xyz", labelsFor)
+	if h.total != 0 {
+		t.Fatalf("setup: total = %d, want 0", h.total)
+	}
+
+	h.jumpFirst()
+	if _, idx := h.current(); idx != -1 {
+		t.Errorf("jumpFirst() on zero matches: current() idx = %d, want -1", idx)
+	}
+	h.jumpLast()
+	if _, idx := h.current(); idx != -1 {
+		t.Errorf("jumpLast() on zero matches: current() idx = %d, want -1", idx)
+	}
+}
+
 func TestGlobalSearchHintsKindSwitchResetsHighlightAndRefetches(t *testing.T) {
 	calls := map[globalSearchKind]int{}
 	labelsFor := func(k globalSearchKind) []string {
@@ -624,5 +666,198 @@ func TestOpenGlobalSearchArtistMatchNeedsLiveMPD(t *testing.T) {
 	}
 	if got := len(a.library.root.GetChildren()); got == 0 {
 		t.Error("expected at least one artist-group result node")
+	}
+}
+
+// --- Tab-toggled hint-list navigation (Tab/'f'/j/k/g/G/'a') ---
+
+func TestOpenGlobalSearchTabTogglesFocusBetweenFieldAndList(t *testing.T) {
+	a := newTestApp()
+	setPlaylistsForTest(a.playlists, []string{"Rock Anthems"})
+	a.tv.SetFocus(a.queue.table)
+	a.openGlobalSearch()
+
+	field, ok := a.tv.GetFocus().(*tview.InputField)
+	if !ok {
+		t.Fatalf("focus after openGlobalSearch = %T, want *tview.InputField", a.tv.GetFocus())
+	}
+
+	tab := tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone)
+	field.InputHandler()(tab, func(tview.Primitive) {})
+
+	list, ok := a.tv.GetFocus().(*tview.List)
+	if !ok {
+		t.Fatalf("focus after Tab from field = %T, want *tview.List", a.tv.GetFocus())
+	}
+	if a.mode != modeOverlay {
+		t.Error("mode after Tab within the popup should stay modeOverlay")
+	}
+
+	list.InputHandler()(tab, func(tview.Primitive) {})
+	if a.tv.GetFocus() != field {
+		t.Errorf("focus after Tab from list = %T, want the original field back", a.tv.GetFocus())
+	}
+}
+
+func TestOpenGlobalSearchFKeyReturnsFocusFromListToField(t *testing.T) {
+	a := newTestApp()
+	setPlaylistsForTest(a.playlists, []string{"Rock Anthems"})
+	a.tv.SetFocus(a.queue.table)
+	a.openGlobalSearch()
+	field := a.tv.GetFocus().(*tview.InputField)
+
+	field.InputHandler()(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone), func(tview.Primitive) {})
+	list, ok := a.tv.GetFocus().(*tview.List)
+	if !ok {
+		t.Fatalf("setup: focus = %T, want *tview.List", a.tv.GetFocus())
+	}
+
+	list.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'f', tcell.ModNone), func(tview.Primitive) {})
+	if a.tv.GetFocus() != field {
+		t.Errorf("focus after 'f' from list = %T, want the field back", a.tv.GetFocus())
+	}
+}
+
+// TestOpenGlobalSearchLettersUsedForNavigationStayTypeableInField guards
+// against the navigation keys added for the hint list (j/k/g/G/a) ever
+// leaking into the field's own typing -- they must only mean
+// "navigate"/"add" once the list actually has focus, exactly like 'a' is
+// a normal letter everywhere else in this app except when a non-text
+// panel (Library, Playlists) is focused.
+func TestOpenGlobalSearchLettersUsedForNavigationStayTypeableInField(t *testing.T) {
+	a := newTestApp()
+	a.tv.SetFocus(a.queue.table)
+	a.openGlobalSearch()
+	field := a.tv.GetFocus().(*tview.InputField)
+
+	// SetText replaces the default "t " outright (typing 'p' instead would
+	// only append after it -- the cursor sits at the end -- leaving "t "
+	// as the first word and the kind still track) but bypasses
+	// SetChangedFunc, so nothing has actually rebuilt yet. Completing the
+	// text with one real keystroke does both: switches to the playlist
+	// prefix (offline-safe, no MPD fetch -- playlist candidates come from
+	// playlistsPanel.pls) and fires the one rebuild() that would
+	// otherwise never happen. j/k/a/g then get typed as part of the
+	// playlist search term itself, doubling as proof they work as
+	// ordinary text there too.
+	field.SetText("p jkag")
+	field.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'G', tcell.ModNone), func(tview.Primitive) {})
+	if got, want := field.GetText(), "p jkagG"; got != want {
+		t.Errorf("field text after typing j/k/a/g/G = %q, want %q (must stay normal typing while the field is focused)", got, want)
+	}
+}
+
+func TestOpenGlobalSearchListJKGNavigateHighlight(t *testing.T) {
+	a := newTestApp()
+	setPlaylistsForTest(a.playlists, []string{"Rock Anthems", "Rock Ballads", "Rock Classics"})
+	a.tv.SetFocus(a.queue.table)
+	a.openGlobalSearch()
+	field := a.tv.GetFocus().(*tview.InputField)
+
+	// SetText bypasses SetChangedFunc (same as this file's other
+	// non-live tests), so a real keystroke is needed to actually trigger
+	// rebuild() and populate the hint list -- completing the text with a
+	// real typed 'k' does both at once (SetText leaves the cursor at the
+	// end of the new text, so 'k' lands after "p roc").
+	field.SetText("p roc")
+	field.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'k', tcell.ModNone), func(tview.Primitive) {})
+
+	field.InputHandler()(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone), func(tview.Primitive) {})
+	list, ok := a.tv.GetFocus().(*tview.List)
+	if !ok {
+		t.Fatalf("focus after Tab = %T, want *tview.List", a.tv.GetFocus())
+	}
+	if list.GetItemCount() != 3 {
+		t.Fatalf("hint count = %d, want 3 (Rock Anthems, Rock Ballads, Rock Classics)", list.GetItemCount())
+	}
+	if list.GetCurrentItem() != 0 {
+		t.Fatalf("initial highlight = %d, want 0", list.GetCurrentItem())
+	}
+
+	list.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'j', tcell.ModNone), func(tview.Primitive) {})
+	if list.GetCurrentItem() != 1 {
+		t.Errorf("highlight after 'j' = %d, want 1", list.GetCurrentItem())
+	}
+
+	list.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'G', tcell.ModNone), func(tview.Primitive) {})
+	if list.GetCurrentItem() != 2 {
+		t.Errorf("highlight after 'G' = %d, want 2 (last)", list.GetCurrentItem())
+	}
+
+	list.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'g', tcell.ModNone), func(tview.Primitive) {})
+	if list.GetCurrentItem() != 0 {
+		t.Errorf("highlight after 'g' = %d, want 0 (first)", list.GetCurrentItem())
+	}
+
+	list.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'k', tcell.ModNone), func(tview.Primitive) {})
+	if list.GetCurrentItem() != 2 {
+		t.Errorf("highlight after 'k' from the first item = %d, want 2 (wraps to the last)", list.GetCurrentItem())
+	}
+}
+
+// TestOpenGlobalSearchAddToQueueNoopWhenNothingHighlighted also proves
+// 'a' never reaches appendPlaylist/QueueAdd when there's nothing to act
+// on -- both would panic against this test's nil MPD client if reached,
+// so a passing test here is itself evidence the guard in addToQueue
+// works, not just that the popup stays open.
+func TestOpenGlobalSearchAddToQueueNoopWhenNothingHighlighted(t *testing.T) {
+	a := newTestApp()
+	setPlaylistsForTest(a.playlists, []string{"Rock Anthems"})
+	a.tv.SetFocus(a.queue.table)
+	a.openGlobalSearch()
+	field := a.tv.GetFocus().(*tview.InputField)
+
+	field.SetText("p nonexistent-x")
+	field.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'z', tcell.ModNone), func(tview.Primitive) {})
+
+	field.InputHandler()(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone), func(tview.Primitive) {})
+	list, ok := a.tv.GetFocus().(*tview.List)
+	if !ok {
+		t.Fatalf("focus after Tab = %T, want *tview.List", a.tv.GetFocus())
+	}
+	if list.GetItemCount() != 0 {
+		t.Fatalf("setup: hint count = %d, want 0", list.GetItemCount())
+	}
+
+	list.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'a', tcell.ModNone), func(tview.Primitive) {})
+	if a.mode != modeOverlay {
+		t.Error("mode after a no-op 'a' should stay modeOverlay (popup stays open)")
+	}
+}
+
+// TestOpenGlobalSearchAddToQueueInvalidForArtistKindNeedsLiveMPD is a
+// live-MPD test (needs a real Artists() call to populate a hint) but a
+// safe, read-only one -- 'a' on an artist/album hint must flash invalid
+// rather than attempt an undefined "add this artist's whole catalog"
+// action, so nothing here ever reaches a mutating MPD call either.
+func TestOpenGlobalSearchAddToQueueInvalidForArtistKindNeedsLiveMPD(t *testing.T) {
+	c := dialOrSkip(t)
+	a := &App{tv: tview.NewApplication(), client: c}
+	a.build()
+	a.tv.SetFocus(a.queue.table)
+
+	artist := firstTaggedArtist(t, c)
+	runes := []rune(artist)
+
+	a.openGlobalSearch()
+	field := a.tv.GetFocus().(*tview.InputField)
+	field.SetText("a " + string(runes[:len(runes)-1]))
+	field.InputHandler()(tcell.NewEventKey(tcell.KeyRune, runes[len(runes)-1], tcell.ModNone), func(tview.Primitive) {})
+
+	field.InputHandler()(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone), func(tview.Primitive) {})
+	list, ok := a.tv.GetFocus().(*tview.List)
+	if !ok {
+		t.Fatalf("focus after Tab = %T, want *tview.List", a.tv.GetFocus())
+	}
+	if list.GetItemCount() == 0 {
+		t.Fatalf("setup: expected at least one artist hint for %q", artist)
+	}
+
+	list.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'a', tcell.ModNone), func(tview.Primitive) {})
+	if a.mode != modeOverlay {
+		t.Error("'a' on an artist hint should be invalid (flashed), not close the popup")
+	}
+	if a.tv.GetFocus() != list {
+		t.Errorf("focus after an invalid 'a' = %T, want to stay on the hint list", a.tv.GetFocus())
 	}
 }

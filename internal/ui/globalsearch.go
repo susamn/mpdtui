@@ -244,6 +244,21 @@ func (h *globalSearchHints) move(delta int) {
 	h.highlight = moveHintHighlight(h.highlight, len(h.order), delta)
 }
 
+// jumpFirst/jumpLast move the highlight straight to either end of the
+// hint list ('g'/'G', matching Library/Queue's own native vim bindings).
+// A no-op on an empty list.
+func (h *globalSearchHints) jumpFirst() {
+	if len(h.order) > 0 {
+		h.highlight = 0
+	}
+}
+
+func (h *globalSearchHints) jumpLast() {
+	if len(h.order) > 0 {
+		h.highlight = len(h.order) - 1
+	}
+}
+
 // current returns the currently highlighted hint's label and its index
 // into h.labels (the same index confirm needs to look up the underlying
 // Song/artist/album/playlist), or ("", -1) if there's nothing highlighted
@@ -261,18 +276,41 @@ func (h *globalSearchHints) current() (label string, idx int) {
 // prefix word (a/al/p/t) plus a search term, e.g. "a queen" for artists
 // or "al hello" for albums. Matching candidates for the active kind
 // appear live, fzf-style, in a hint list below the input as each
-// character is typed, ranked by fuzzyScore; Up/Down (or Ctrl-P/Ctrl-N)
-// move the highlight, Enter acts on whichever hint is currently
+// character is typed, ranked by fuzzyScore.
+//
+// The popup has two focus states, toggled with Tab/Backtab (from the hint
+// list, 'f' also returns to typing -- the same muscle memory that opened
+// the popup in the first place):
+//   - field focused (typing): Up/Down or Ctrl-P/Ctrl-N still move the
+//     highlight without leaving typing mode, for quickly skimming a
+//     couple of results; Enter confirms the highlighted hint and closes
+//     the popup.
+//   - list focused (navigating): Up/Down/Ctrl-P/Ctrl-N/j/k move the
+//     highlight, g/G jump to the first/last hint (matching Library/Queue's
+//     own vim bindings), Enter confirms and closes same as above, and 'a'
+//     adds the highlighted hint to the queue WITHOUT playing it and
+//     WITHOUT closing the popup -- so several tracks can be queued
+//     back-to-back: type a term, j/k to the one you want, 'a', 'f' back to
+//     the field, type the next term, repeat.
+//
+// Enter (from either focus state) acts on whichever hint is currently
 // highlighted:
 //   - track: added to the queue and played immediately (mirrors Library's
-//     Enter-on-a-file, and the `-t` CLI picker)
+//     Enter-on-a-file, and the `-t` CLI picker); 'a' instead only adds it
+//     (mirrors Library/Playlists' own Enter-vs-'a' convention)
 //   - artist/album: scopes the Library panel to that exact group, the same
 //     presentation showArtistSearch/showAlbumSearch already give a typed
 //     substring search, just landing on it directly instead of requiring
-//     the term to already narrow it to one match
+//     the term to already narrow it to one match; 'a' is invalid for these
+//     two kinds -- there's no defined "add without navigating" behavior,
+//     and queueing an entire artist's or album's catalog from a stray
+//     keypress is a much bigger, easier-to-regret action than a single
+//     track or playlist
 //   - playlist: loaded and played immediately (mirrors the `-p` CLI
 //     picker), rather than the old behavior of just filtering the
-//     Playlists panel and leaving Enter-to-load as a second step
+//     Playlists panel and leaving Enter-to-load as a second step; 'a'
+//     appends it to the queue instead (mirrors appendPlaylist, used
+//     identically by Library/Playlists' own 'a' key)
 //
 // An unrecognized prefix, or a kind with zero matches, keeps the popup
 // open with feedback in its own title so the query can be adjusted
@@ -438,6 +476,53 @@ func (a *App) openGlobalSearch() {
 		}
 	}
 
+	// addToQueue is 'a', reachable only while list has focus (see list's
+	// own InputCapture below) -- 'a' stays a plain typeable letter while
+	// field is focused, exactly like the rest of this app only treats 'a'
+	// as the add-without-play key while a non-text panel (Library,
+	// Playlists) has focus. Unlike confirm, this deliberately does NOT
+	// close the popup: the whole point is letting several tracks get
+	// queued back-to-back -- type a term, arrow/j-k to the one you want,
+	// 'a', 'f' or Tab back to the field, type the next term, repeat --
+	// instead of the popup closing after every single add. Mirrors
+	// appendPlaylist/queueAddPath's own "add without playing" semantics
+	// already used by Library/Playlists' 'a' key. Artist/album have no
+	// defined "add without navigating to Library" behavior -- queueing an
+	// entire artist's or album's catalog from a stray keypress is a much
+	// bigger, easier-to-regret action than a single track or playlist, so
+	// 'a' is simply invalid for those two kinds rather than guessing at
+	// one.
+	addToQueue := func() {
+		label, idx := hints.current()
+		if idx < 0 {
+			return
+		}
+		switch hints.kind {
+		case globalSearchTrack:
+			song := trackSongs[idx]
+			if err := a.client.QueueAdd(song.File); err != nil {
+				a.showError(err)
+				return
+			}
+			a.queue.refresh()
+			a.showMessage("added to queue: " + song.DisplayName())
+		case globalSearchPlaylist:
+			a.appendPlaylist(label)
+		default:
+			a.invalidKey("a")
+		}
+	}
+
+	// focusList/focusField toggle between typing (field) and navigating
+	// the hint list (list has no text input of its own, so Down/Up/j/k/
+	// g/G/Enter/a only make sense once it actually holds keyboard focus).
+	// Bound to Tab/Backtab in both directions (either key toggles,
+	// forgiving of however a given terminal reports Shift-Tab) and to 'f'
+	// from list back to field specifically -- 'f' is already the muscle
+	// memory for "start searching" everywhere else in this app.
+	focusList := func() { a.tv.SetFocus(list) }
+	focusField := func() { a.tv.SetFocus(field) }
+
 	field.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
 		case tcell.KeyDown, tcell.KeyCtrlN:
@@ -448,10 +533,58 @@ func (a *App) openGlobalSearch() {
 			hints.move(-1)
 			syncHighlight()
 			return nil
+		case tcell.KeyTab, tcell.KeyBacktab:
+			focusList()
+			return nil
 		case tcell.KeyEnter:
 			rebuild()
 			confirm()
 			return nil
+		}
+		return event
+	})
+
+	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyDown, tcell.KeyCtrlN:
+			hints.move(1)
+			syncHighlight()
+			return nil
+		case tcell.KeyUp, tcell.KeyCtrlP:
+			hints.move(-1)
+			syncHighlight()
+			return nil
+		case tcell.KeyTab, tcell.KeyBacktab:
+			focusField()
+			return nil
+		case tcell.KeyEnter:
+			confirm()
+			return nil
+		case tcell.KeyRune:
+			switch event.Rune() {
+			case 'j':
+				hints.move(1)
+				syncHighlight()
+				return nil
+			case 'k':
+				hints.move(-1)
+				syncHighlight()
+				return nil
+			case 'g':
+				hints.jumpFirst()
+				syncHighlight()
+				return nil
+			case 'G':
+				hints.jumpLast()
+				syncHighlight()
+				return nil
+			case 'a':
+				addToQueue()
+				return nil
+			case 'f':
+				focusField()
+				return nil
+			}
 		}
 		return event
 	})

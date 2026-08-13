@@ -145,11 +145,16 @@ const helpText = `[::b]Global[-:-:-]
   /              search (contextual: Library/Playlists filter, Queue jump)
   f              global search from any panel: "a/al/p/t <term>" for
                  artist/album/playlist/track (e.g. "a queen", "al hello"),
-                 with live fzf-style hints as you type -- Up/Down (or
-                 Ctrl-P/Ctrl-N) move the highlight, Enter acts on it
-                 directly: track adds+plays, playlist loads+plays, artist/
-                 album jump into that group in the Library -- accent-
-                 insensitive, so "buble" matches "Bublé"
+                 with live fzf-style hints as you type. Up/Down
+                 (Ctrl-P/Ctrl-N) move the highlight while typing; Tab (or
+                 'f' to come back) switches to the hint list for j/k/g/G
+                 navigation. Enter acts on the highlight and closes the
+                 popup: track adds+plays, playlist loads+plays, artist/
+                 album jump into that group in the Library. From the hint
+                 list, 'a' instead adds without playing (track) or appends
+                 (playlist) and leaves the popup open, so several tracks
+                 can be queued back-to-back -- accent-insensitive, so
+                 "buble" matches "Bublé"
   F              clear any active search/filter, in every panel at once
   i              track info card for the currently playing track
   v              cycle Now Playing visualizations
