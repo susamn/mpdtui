@@ -5,8 +5,8 @@
 class Mpdtui < Formula
   desc "Lazygit-style terminal UI for MPD (Music Player Daemon)"
   homepage "https://github.com/susamn/mpdtui"
-  url "https://github.com/susamn/mpdtui/archive/refs/tags/v1.3.0.tar.gz"
-  sha256 "5ddd7a5d1424b10f3cdec9e901eac6c053760895fbdeaecbcc5fb8816881a882"
+  url "https://github.com/susamn/mpdtui/archive/refs/tags/v1.4.0.tar.gz"
+  sha256 "113eda0e3ffd346309245aa609433ba330e6d30d00368771472b089b7eaf91f8"
   license "MIT"
   head "https://github.com/susamn/mpdtui.git", branch: "main"
 
