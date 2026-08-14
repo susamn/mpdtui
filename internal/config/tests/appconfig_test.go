@@ -34,22 +34,59 @@ func TestLoadMusicDirMissingFileReturnsEmpty(t *testing.T) {
 }
 
 func TestLoadMusicDirReadsKey(t *testing.T) {
-	dir := t.TempDir()
-	withEnv(t, "XDG_CONFIG_HOME", dir)
-	writeConfigFile(t, dir, "music_dir = /mnt/music\n")
+	xdgHome := t.TempDir()
+	withEnv(t, "XDG_CONFIG_HOME", xdgHome)
+	musicDir := t.TempDir() // must actually exist -- LoadMusicDir now verifies that
+	writeConfigFile(t, xdgHome, "music_dir = "+musicDir+"\n")
 
-	if got, want := config.LoadMusicDir(), "/mnt/music"; got != want {
+	if got, want := config.LoadMusicDir(), musicDir; got != want {
 		t.Errorf("LoadMusicDir() = %q, want %q", got, want)
 	}
 }
 
 func TestLoadMusicDirIgnoresCommentsAndBlankLines(t *testing.T) {
+	xdgHome := t.TempDir()
+	withEnv(t, "XDG_CONFIG_HOME", xdgHome)
+	musicDir := t.TempDir()
+	writeConfigFile(t, xdgHome, "# a comment\n\n  music_dir   =   "+musicDir+"  \n")
+
+	if got, want := config.LoadMusicDir(), musicDir; got != want {
+		t.Errorf("LoadMusicDir() = %q, want %q", got, want)
+	}
+}
+
+// TestLoadMusicDirNonexistentPathReturnsEmpty covers a configured but
+// broken setup -- a stale path, a typo, an unmounted drive -- which must
+// behave exactly like "not configured at all" (see LoadMusicDir's own
+// doc comment): every consumer of this value only ever checks for "",
+// so a real-but-unreadable path leaking through here would otherwise
+// show up as confusing, half-working behavior instead of the feature
+// just staying cleanly inactive.
+func TestLoadMusicDirNonexistentPathReturnsEmpty(t *testing.T) {
 	dir := t.TempDir()
 	withEnv(t, "XDG_CONFIG_HOME", dir)
-	writeConfigFile(t, dir, "# a comment\n\n  music_dir   =   /mnt/music  \n")
+	writeConfigFile(t, dir, "music_dir = "+filepath.Join(dir, "does-not-exist")+"\n")
 
-	if got, want := config.LoadMusicDir(), "/mnt/music"; got != want {
-		t.Errorf("LoadMusicDir() = %q, want %q", got, want)
+	if got := config.LoadMusicDir(); got != "" {
+		t.Errorf("LoadMusicDir() with a nonexistent music_dir = %q, want empty", got)
+	}
+}
+
+// TestLoadMusicDirPathIsAFileReturnsEmpty covers music_dir pointing at an
+// existing file rather than a directory -- also a broken configuration
+// that must resolve to "", not a path lyrics.Candidates would fail to
+// os.ReadDir on later.
+func TestLoadMusicDirPathIsAFileReturnsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	withEnv(t, "XDG_CONFIG_HOME", dir)
+	filePath := filepath.Join(dir, "not-a-directory")
+	if err := os.WriteFile(filePath, []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	writeConfigFile(t, dir, "music_dir = "+filePath+"\n")
+
+	if got := config.LoadMusicDir(); got != "" {
+		t.Errorf("LoadMusicDir() with music_dir pointing at a file = %q, want empty", got)
 	}
 }
 
@@ -63,16 +100,25 @@ func TestLoadMusicDirNoMatchingKeyReturnsEmpty(t *testing.T) {
 	}
 }
 
+// TestLoadMusicDirExpandsLeadingTilde points $HOME at a temp dir (rather
+// than relying on the real environment's actual home directory, or a
+// subdirectory under it, existing) so the test is self-contained and
+// still exercises the real existence check: fakeHome/Music is created for
+// real, so tilde-expansion has to land on exactly that path for the
+// directory to be found.
 func TestLoadMusicDirExpandsLeadingTilde(t *testing.T) {
-	dir := t.TempDir()
-	withEnv(t, "XDG_CONFIG_HOME", dir)
-	writeConfigFile(t, dir, "music_dir = ~/Music\n")
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Skip("no home directory available in this environment")
+	fakeHome := t.TempDir()
+	withEnv(t, "HOME", fakeHome)
+	musicDir := filepath.Join(fakeHome, "Music")
+	if err := os.Mkdir(musicDir, 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
 	}
-	if got, want := config.LoadMusicDir(), filepath.Join(home, "Music"); got != want {
+
+	xdgHome := t.TempDir()
+	withEnv(t, "XDG_CONFIG_HOME", xdgHome)
+	writeConfigFile(t, xdgHome, "music_dir = ~/Music\n")
+
+	if got, want := config.LoadMusicDir(), musicDir; got != want {
 		t.Errorf("LoadMusicDir() = %q, want %q", got, want)
 	}
 }

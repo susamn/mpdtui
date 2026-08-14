@@ -64,12 +64,15 @@ single-line inline player for a shell or tmux pane.
   delete stored playlists; `o` cycles between most-recently-updated and
   alphabetical
 - **Queue** — reorder, remove, clear, jump to any track; a pinned header
-  row (Title/Lyr/Album/Artist/Year/Genre/Composer/Type/Duration) stays
-  visible while scrolling. Title is bold and colored WhatsApp green;
-  Title/Album/Artist/Genre/Composer are truncated (30/20/40/9/14
-  characters) with "..." if longer; Type shows a color-coded format badge
-  (MP3/FLAC/M4A/...); Type and Duration are right-aligned. The narrow Lyr
-  column shows a 📝 for any track with a matching lyrics file -- see
+  row (Title/Album/Artist/Year/Genre/Composer/Type/Duration -- plus Lyr,
+  see below) stays visible while scrolling. Title is bold and colored
+  WhatsApp green; Title/Album/Artist/Genre/Composer are truncated
+  (30/20/40/9/14 characters) with "..." if longer; Type shows a
+  color-coded format badge (MP3/FLAC/M4A/...); Type and Duration are
+  right-aligned. A narrow Lyr column, right after Title, shows a 📝 for
+  any track with a matching lyrics file -- only present at all when
+  `music_dir` is configured and actually exists; otherwise the Queue
+  looks exactly as it would without the lyrics feature -- see
   [Lyrics](#lyrics)
 - **Lyrics** (`y`) — a teal-bordered viewer, positioned over the Queue's
   own Year-through-Type columns, for the currently playing track's
@@ -202,8 +205,12 @@ with:
 music_dir = /path/to/your/music
 ```
 
-(`~/` is expanded.) Without this file, the lyrics feature just stays
-inactive -- no badges, and `y` explains what's missing.
+(`~/` is expanded.) If the config file doesn't exist, has no `music_dir`
+line, or `music_dir` names a path that doesn't actually exist (a typo, a
+stale setting, an unmounted drive), the lyrics feature stays inactive:
+no Lyr column in the Queue at all (not even an empty one -- the table
+looks exactly as it would without this feature), and `y` still opens the
+viewer but explains what's missing rather than erroring.
 
 Lyrics availability is rechecked live every time the Queue repopulates
 (adding a track, loading/appending a playlist, even another client like

@@ -66,15 +66,16 @@ func TestQueueRenderShowsLyricsIconInLyrColumnOnlyWhenAvailable(t *testing.T) {
 		{ID: 2, Title: "Without Lyrics", File: "artist/Without Lyrics.mp3"},
 	}
 	a.queue.render(-1)
+	lyrCol := newQueueColumns(true).lyr
 
-	if got := a.queue.table.GetCell(queueHeaderRows, queueLyrCol).Text; got != lyricsIcon {
+	if got := a.queue.table.GetCell(queueHeaderRows, lyrCol).Text; got != lyricsIcon {
 		t.Errorf("Lyr cell for the track with lyrics = %q, want %q", got, lyricsIcon)
 	}
 	if got := a.queue.table.GetCell(queueHeaderRows, 2).Text; got != "With Lyrics"+queueColumnGap {
 		t.Errorf("title cell for the track with lyrics = %q, want it unprefixed (icon lives in its own column now)", got)
 	}
 
-	if got := a.queue.table.GetCell(queueHeaderRows+1, queueLyrCol).Text; got != "" {
+	if got := a.queue.table.GetCell(queueHeaderRows+1, lyrCol).Text; got != "" {
 		t.Errorf("Lyr cell for the track without lyrics = %q, want empty", got)
 	}
 	if got := a.queue.table.GetCell(queueHeaderRows+1, 2).Text; got != "Without Lyrics"+queueColumnGap {
@@ -97,8 +98,9 @@ func TestQueueRenderRechecksLyricsOnEveryRender(t *testing.T) {
 	a := newTestAppWithMusicDir(dir)
 	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track", File: "artist/Track.mp3"}}
 	a.queue.render(-1)
+	lyrCol := newQueueColumns(true).lyr
 
-	if got := a.queue.table.GetCell(queueHeaderRows, queueLyrCol).Text; got != "" {
+	if got := a.queue.table.GetCell(queueHeaderRows, lyrCol).Text; got != "" {
 		t.Fatalf("setup: Lyr cell = %q, want empty (no lyrics file yet)", got)
 	}
 
@@ -107,7 +109,7 @@ func TestQueueRenderRechecksLyricsOnEveryRender(t *testing.T) {
 	}
 	a.queue.render(-1)
 
-	if got := a.queue.table.GetCell(queueHeaderRows, queueLyrCol).Text; got != lyricsIcon {
+	if got := a.queue.table.GetCell(queueHeaderRows, lyrCol).Text; got != lyricsIcon {
 		t.Errorf("Lyr cell after adding the lyrics file = %q, want %q", got, lyricsIcon)
 	}
 }

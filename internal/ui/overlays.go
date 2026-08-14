@@ -193,5 +193,7 @@ const helpText = `[::b]Global[-:-:-]
   J / K          move selected track down / up
   /              search: jump to first match (Esc cancels)
   📝 in the narrow "Lyr" column means that track has a matching
-  lyrics file (see 'y'); rechecked live every time the Queue repopulates
+  lyrics file (see 'y'); rechecked live every time the Queue repopulates.
+  The Lyr column itself is only shown when music_dir is configured and
+  exists -- otherwise the Queue looks the same as without this feature
 `

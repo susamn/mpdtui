@@ -55,17 +55,6 @@ func newLyricsViewer(app *App) *lyricsViewer {
 	return &lyricsViewer{TextView: v, app: app}
 }
 
-// queueYearCol/queueDurationCol are the Queue table's column indices for
-// Year and Duration (see queue.go's queueHeaderLabels: 0 marker, 1
-// position, 2 Title, 3 Lyr, 4 Album, 5 Artist, 6 Year, 7 Genre, 8
-// Composer, 9 Type, 10 Duration) -- positionOverQueueColumns reads real
-// screen positions bracketing that Year-through-Type band from the
-// header row's own already-drawn cells.
-const (
-	queueYearCol     = 6
-	queueDurationCol = 10
-)
-
 // lyricsViewerBottomMargin is how many of the Queue table's own data rows
 // stay visible below the viewer (in addition to the table's own bottom
 // border row, which is never covered either way) -- so it visibly floats
@@ -113,6 +102,13 @@ func lyricsViewerRect(queueY, queueHeight, yearX, durationX int) (x, y, width, h
 // actually in the queue and shrinks below the cap for shorter content --
 // an estimate would drift out of sync with the real layout.
 //
+// The column indices themselves come from queue.go's newQueueColumns,
+// the same function render() uses to lay out the table in the first
+// place -- Year/Duration's positions shift by one when the Lyr column
+// isn't there (musicDir unset or invalid), and reading from a single
+// shared source of truth is what keeps this from silently drifting out
+// of sync with whatever render() actually drew.
+//
 // Relies on the Queue table having already been drawn at least once this
 // frame -- true in practice from shortly after startup onward (it's
 // always visible, part of the "main" page), and specifically guaranteed
@@ -123,8 +119,9 @@ func lyricsViewerRect(queueY, queueHeight, yearX, durationX int) (x, y, width, h
 // layout, not a stale one.
 func (v *lyricsViewer) positionOverQueueColumns() {
 	_, qy, _, qh := v.app.queue.table.GetRect()
-	yearX, _, _ := v.app.queue.table.GetCell(0, queueYearCol).GetLastPosition()
-	durationX, _, _ := v.app.queue.table.GetCell(0, queueDurationCol).GetLastPosition()
+	cols := newQueueColumns(v.app.musicDir != "")
+	yearX, _, _ := v.app.queue.table.GetCell(0, cols.year).GetLastPosition()
+	durationX, _, _ := v.app.queue.table.GetCell(0, cols.duration).GetLastPosition()
 	v.SetRect(lyricsViewerRect(qy, qh, yearX, durationX))
 }
 

@@ -146,7 +146,7 @@ func TestYearFromDate(t *testing.T) {
 }
 
 func TestQueueHeaderRowLabelsAndAlignment(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp()  // musicDir == "" -- no Lyr column
 	a.queue.render(-1) // no songs -- header should still be there
 
 	wantHeaders := []struct {
@@ -157,14 +157,13 @@ func TestQueueHeaderRowLabelsAndAlignment(t *testing.T) {
 		{0, "", tview.AlignLeft},
 		{1, "", tview.AlignLeft},
 		{2, "Title", tview.AlignLeft},
-		{3, "Lyr", tview.AlignLeft},
-		{4, "Album", tview.AlignLeft},
-		{5, "Artist", tview.AlignLeft},
-		{6, "Year", tview.AlignLeft},
-		{7, "Genre", tview.AlignLeft},
-		{8, "Composer", tview.AlignLeft},
-		{9, "Type" + formatGap, tview.AlignRight}, // formatGap matches formatTagCell's data-cell padding, see queueHeaderLabels' comment
-		{10, "Duration", tview.AlignRight},
+		{3, "Album", tview.AlignLeft},
+		{4, "Artist", tview.AlignLeft},
+		{5, "Year", tview.AlignLeft},
+		{6, "Genre", tview.AlignLeft},
+		{7, "Composer", tview.AlignLeft},
+		{8, "Type" + formatGap, tview.AlignRight}, // formatGap matches formatTagCell's data-cell padding, see setQueueHeader's comment
+		{9, "Duration", tview.AlignRight},
 	}
 	for _, w := range wantHeaders {
 		cell := a.queue.table.GetCell(0, w.col)
@@ -174,6 +173,57 @@ func TestQueueHeaderRowLabelsAndAlignment(t *testing.T) {
 		if cell.Align != w.align {
 			t.Errorf("header col %d align = %d, want %d", w.col, cell.Align, w.align)
 		}
+	}
+}
+
+// TestQueueHeaderRowIncludesLyrColumnWhenLyricsActive is the counterpart
+// to the test above: with a valid musicDir configured, Lyr appears right
+// after Title and everything else shifts one column right.
+func TestQueueHeaderRowIncludesLyrColumnWhenLyricsActive(t *testing.T) {
+	a := newTestAppWithMusicDir(t.TempDir())
+	a.queue.render(-1)
+
+	wantHeaders := []struct {
+		col  int
+		text string
+	}{
+		{2, "Title"},
+		{3, "Lyr"},
+		{4, "Album"},
+		{5, "Artist"},
+		{6, "Year"},
+		{7, "Genre"},
+		{8, "Composer"},
+		{10, "Duration"},
+	}
+	for _, w := range wantHeaders {
+		if got := a.queue.table.GetCell(0, w.col).Text; got != w.text {
+			t.Errorf("header col %d text = %q, want %q", w.col, got, w.text)
+		}
+	}
+}
+
+// TestNewQueueColumnsOmitsLyrWhenInactive is a pure unit test of the
+// column-layout logic underlying both TestQueueHeaderRowLabelsAndAlignment
+// and TestQueueHeaderRowIncludesLyrColumnWhenLyricsActive above --
+// lyr == -1 is the "no such column" sentinel render()/setQueueHeader
+// check before ever touching that index.
+func TestNewQueueColumnsOmitsLyrWhenInactive(t *testing.T) {
+	cols := newQueueColumns(false)
+	if cols.lyr != -1 {
+		t.Errorf("lyr = %d, want -1 (no Lyr column when lyrics is inactive)", cols.lyr)
+	}
+	want := queueColumns{lyr: -1, title: 2, album: 3, artist: 4, year: 5, genre: 6, composer: 7, typ: 8, duration: 9}
+	if cols != want {
+		t.Errorf("newQueueColumns(false) = %+v, want %+v", cols, want)
+	}
+}
+
+func TestNewQueueColumnsIncludesLyrWhenActive(t *testing.T) {
+	cols := newQueueColumns(true)
+	want := queueColumns{lyr: 3, title: 2, album: 4, artist: 5, year: 6, genre: 7, composer: 8, typ: 9, duration: 10}
+	if cols != want {
+		t.Errorf("newQueueColumns(true) = %+v, want %+v", cols, want)
 	}
 }
 
@@ -219,7 +269,7 @@ func TestQueueRenderTitleCellIsBold(t *testing.T) {
 	if got := cellFg(titleCell); got != queueTitleColor {
 		t.Errorf("track title cell color = %v, want queueTitleColor %v", got, queueTitleColor)
 	}
-	albumCell := a.queue.table.GetCell(queueHeaderRows, 4)
+	albumCell := a.queue.table.GetCell(queueHeaderRows, 3)
 	if cellBold(albumCell) {
 		t.Error("album cell should not be bold")
 	}
@@ -230,7 +280,7 @@ func TestQueueRenderDurationCellRightAligned(t *testing.T) {
 	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track"}}
 	a.queue.render(-1)
 
-	if got := a.queue.table.GetCell(queueHeaderRows, 10).Align; got != tview.AlignRight {
+	if got := a.queue.table.GetCell(queueHeaderRows, 9).Align; got != tview.AlignRight {
 		t.Errorf("duration cell align = %d, want AlignRight", got)
 	}
 }
@@ -245,10 +295,10 @@ func TestQueueRenderShowsTitleAlbumArtistInOrder(t *testing.T) {
 	if got := a.queue.table.GetCell(queueHeaderRows, 2).Text; got != "Bohemian Rhapsody"+queueColumnGap {
 		t.Errorf("title cell = %q, want %q", got, "Bohemian Rhapsody"+queueColumnGap)
 	}
-	if got := a.queue.table.GetCell(queueHeaderRows, 4).Text; got != "A Night at the Opera"+queueColumnGap {
+	if got := a.queue.table.GetCell(queueHeaderRows, 3).Text; got != "A Night at the Opera"+queueColumnGap {
 		t.Errorf("album cell = %q, want %q", got, "A Night at the Opera"+queueColumnGap)
 	}
-	if got := a.queue.table.GetCell(queueHeaderRows, 5).Text; got != "Queen"+queueColumnGap {
+	if got := a.queue.table.GetCell(queueHeaderRows, 4).Text; got != "Queen"+queueColumnGap {
 		t.Errorf("artist cell = %q, want %q", got, "Queen"+queueColumnGap)
 	}
 }
@@ -265,10 +315,10 @@ func TestQueueRenderComposerColumnExpands(t *testing.T) {
 	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track", Artist: "Artist", Composer: "Composer"}}
 	a.queue.render(-1)
 
-	if got := a.queue.table.GetCell(queueHeaderRows, 8).Expansion; got != 1 {
+	if got := a.queue.table.GetCell(queueHeaderRows, 7).Expansion; got != 1 {
 		t.Errorf("composer cell Expansion = %d, want 1", got)
 	}
-	if got := a.queue.table.GetCell(queueHeaderRows, 5).Expansion; got != 0 {
+	if got := a.queue.table.GetCell(queueHeaderRows, 4).Expansion; got != 0 {
 		t.Errorf("artist cell Expansion = %d, want 0 (Composer carries it now, not Artist)", got)
 	}
 }
@@ -303,16 +353,16 @@ func TestQueueRenderTruncatesEachColumnToItsOwnMax(t *testing.T) {
 	if got := a.queue.table.GetCell(queueHeaderRows, 2).Text; got != wantTitle {
 		t.Errorf("title cell = %q, want %q", got, wantTitle)
 	}
-	if got := a.queue.table.GetCell(queueHeaderRows, 4).Text; got != wantAlbum {
+	if got := a.queue.table.GetCell(queueHeaderRows, 3).Text; got != wantAlbum {
 		t.Errorf("album cell = %q, want %q", got, wantAlbum)
 	}
-	if got := a.queue.table.GetCell(queueHeaderRows, 5).Text; got != wantArtist {
+	if got := a.queue.table.GetCell(queueHeaderRows, 4).Text; got != wantArtist {
 		t.Errorf("artist cell = %q, want %q", got, wantArtist)
 	}
-	if got := a.queue.table.GetCell(queueHeaderRows, 7).Text; got != wantGenre {
+	if got := a.queue.table.GetCell(queueHeaderRows, 6).Text; got != wantGenre {
 		t.Errorf("genre cell = %q, want %q", got, wantGenre)
 	}
-	if got := a.queue.table.GetCell(queueHeaderRows, 8).Text; got != wantComposer {
+	if got := a.queue.table.GetCell(queueHeaderRows, 7).Text; got != wantComposer {
 		t.Errorf("composer cell = %q, want %q", got, wantComposer)
 	}
 }
@@ -324,13 +374,13 @@ func TestQueueRenderShowsYearGenreComposer(t *testing.T) {
 	}
 	a.queue.render(-1)
 
-	if got := a.queue.table.GetCell(queueHeaderRows, 6).Text; got != "1975"+queueColumnGap {
+	if got := a.queue.table.GetCell(queueHeaderRows, 5).Text; got != "1975"+queueColumnGap {
 		t.Errorf("year cell = %q, want %q", got, "1975"+queueColumnGap)
 	}
-	if got := a.queue.table.GetCell(queueHeaderRows, 7).Text; got != "Rock"+queueColumnGap {
+	if got := a.queue.table.GetCell(queueHeaderRows, 6).Text; got != "Rock"+queueColumnGap {
 		t.Errorf("genre cell = %q, want %q", got, "Rock"+queueColumnGap)
 	}
-	if got := a.queue.table.GetCell(queueHeaderRows, 8).Text; got != "F. Mercury"+queueColumnGap {
+	if got := a.queue.table.GetCell(queueHeaderRows, 7).Text; got != "F. Mercury"+queueColumnGap {
 		t.Errorf("composer cell = %q, want %q", got, "F. Mercury"+queueColumnGap)
 	}
 }
@@ -343,10 +393,10 @@ func TestQueueRenderYearHandlesPlainYearAndEmptyDate(t *testing.T) {
 	}
 	a.queue.render(-1)
 
-	if got := a.queue.table.GetCell(queueHeaderRows, 6).Text; got != "1992"+queueColumnGap {
+	if got := a.queue.table.GetCell(queueHeaderRows, 5).Text; got != "1992"+queueColumnGap {
 		t.Errorf("year cell for a plain-year Date = %q, want %q", got, "1992"+queueColumnGap)
 	}
-	if got := a.queue.table.GetCell(queueHeaderRows+1, 6).Text; got != ""+queueColumnGap {
+	if got := a.queue.table.GetCell(queueHeaderRows+1, 5).Text; got != ""+queueColumnGap {
 		t.Errorf("year cell for an empty Date = %q, want just the gap %q", got, queueColumnGap)
 	}
 }

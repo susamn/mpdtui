@@ -35,10 +35,16 @@ func ConfigFile() string {
 // LoadMusicDir reads music_dir from ConfigFile -- the local filesystem
 // path that mirrors MPD's own music_directory, needed by internal/lyrics
 // to find lyrics files (MPD's protocol has no command to serve an
-// arbitrary sidecar file's content, unlike album art). Returns "" if the
-// file doesn't exist, can't be read, or has no music_dir line -- the
-// lyrics feature just stays inactive in that case, not an error, since
-// most users won't have this set up.
+// arbitrary sidecar file's content, unlike album art). Returns "" --
+// meaning the lyrics feature stays inactive, not an error -- for any of:
+// the config file doesn't exist or can't be read, it has no music_dir
+// line, or music_dir names a path that doesn't exist or isn't a
+// directory (a stale config, a typo, an unmounted drive). That last check
+// is deliberate: every other consumer of this value (the Queue's Lyr
+// column, the lyrics viewer) treats "" as the single source of truth for
+// "inactive", so a configured-but-broken path has to resolve to "" here
+// rather than leaking a path nothing can actually read into the rest of
+// the app.
 //
 // The file format is deliberately minimal ("key = value" lines, "#"
 // comments, blank lines ignored) rather than TOML/YAML/JSON: this is a
@@ -65,7 +71,12 @@ func LoadMusicDir() string {
 		if !ok || strings.TrimSpace(key) != "music_dir" {
 			continue
 		}
-		return expandHome(strings.TrimSpace(value))
+		dir := expandHome(strings.TrimSpace(value))
+		info, err := os.Stat(dir)
+		if err != nil || !info.IsDir() {
+			return ""
+		}
+		return dir
 	}
 	return ""
 }
