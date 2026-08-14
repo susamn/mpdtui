@@ -83,7 +83,8 @@ single-line inline player for a shell or tmux pane.
   SQLite database separate from MPD's own library; see
   [Track metadata](#track-metadata) for setup
 - **Library stats** — live total tracks/artists/playlists, shown
-  alongside the Queue search box, refreshed on library/playlist changes
+  alongside the Queue search box, refreshed on library/playlist changes;
+  its own border shows the running mpdtui version, right-aligned
 - **Now Playing bar** — live progress, volume, repeat/random/single/consume
   flags, updated instantly via MPD's `idle` protocol (stays in sync even
   when playback changes from another client, e.g. `mpc`); its right half

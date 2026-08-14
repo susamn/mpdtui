@@ -1,7 +1,10 @@
 # Reference copy -- the live formula Homebrew actually installs from
 # lives in the susamn/homebrew-mpdtui tap (github.com/susamn/homebrew-mpdtui).
 # Keep the two in sync by hand: bump `url`/`sha256` here on every
-# release, then copy this file to that repo's Formula/mpdtui.rb.
+# release, then copy this file to that repo's Formula/mpdtui.rb. Also
+# bump internal/version/VERSION to match (shown in the app's own Stats
+# box border) -- unrelated to Homebrew, but the same by-hand release
+# step is a natural place not to forget it.
 class Mpdtui < Formula
   desc "Lazygit-style terminal UI for MPD (Music Player Daemon)"
   homepage "https://github.com/susamn/mpdtui"

@@ -10,6 +10,7 @@ import (
 	"mpdtui/internal/lyrics"
 	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/version"
 )
 
 // queuePanel shows the current playback queue as a table, with the
@@ -96,6 +97,21 @@ func newQueuePanel(app *App) *queuePanel {
 
 	stats := tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter)
 	stats.SetBorder(true).SetTitle(" Stats ")
+	// tview.Box only supports one title string (one alignment for the
+	// whole thing), so the version can't just be a second SetTitle --
+	// SetDrawFunc runs after Box.Draw has already painted the border and
+	// the "Stats" title, letting this stamp version.String directly onto
+	// the same top border line, right-aligned, without disturbing
+	// "Stats". Must still return the correct inner content rect itself
+	// (replacing Box.Draw's own default calculation): border but no
+	// custom padding, so it's just (x+1, y+1, width-2, height-2).
+	stats.SetDrawFunc(func(screen tcell.Screen, x, y, width, height int) (int, int, int, int) {
+		labelX := x + width - 2 - len(version.String)
+		if labelX > x {
+			tview.Print(screen, version.String, labelX, y, len(version.String), tview.AlignLeft, tview.Styles.BorderColor)
+		}
+		return x + 1, y + 1, width - 2, height - 2
+	})
 	q.stats = stats
 
 	return q
