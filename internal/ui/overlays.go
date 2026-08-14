@@ -157,6 +157,11 @@ const helpText = `[::b]Global[-:-:-]
                  "buble" matches "Bublé"
   F              clear any active search/filter, in every panel at once
   i              track info card for the currently playing track
+  y              lyrics viewer for the currently playing track (needs
+                 music_dir set in ~/.config/mpdtui/config); j/k/g/G/
+                 Ctrl-F/Ctrl-B to scroll, 'y' or Esc to close --
+                 transport controls (Space/s/n/p/,/./-/=/z/x/c/Z) still
+                 work while it's open
   v              cycle Now Playing visualizations
   L              locate the currently playing track in the Queue
   ?              this help
@@ -187,4 +192,8 @@ const helpText = `[::b]Global[-:-:-]
   d              remove selected track
   J / K          move selected track down / up
   /              search: jump to first match (Esc cancels)
+  📝 in the narrow "Lyr" column means that track has a matching
+  lyrics file (see 'y'); rechecked live every time the Queue repopulates.
+  The Lyr column itself is only shown when music_dir is configured and
+  exists -- otherwise the Queue looks the same as without this feature
 `

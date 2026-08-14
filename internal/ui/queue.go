@@ -7,6 +7,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
+	"mpdtui/internal/lyrics"
 	"mpdtui/internal/mpdclient"
 )
 
@@ -54,7 +55,7 @@ func newQueuePanel(app *App) *queuePanel {
 		q.app.refreshNowPlaying()
 	})
 	q.table = t
-	setQueueHeader(t)
+	setQueueHeader(t, newQueueColumns(app.musicDir != ""))
 
 	search := tview.NewInputField().SetLabel("Search track: ")
 	search.SetBorder(true)
@@ -142,48 +143,94 @@ var (
 	queueHeaderFg = tcell.ColorBlack
 )
 
-// queueHeaderLabels are the column headers for the fixed header row, in
-// the same order render() writes data columns -- marker and position get
-// no label (blank), Type/Duration are right-aligned to match their data
-// columns (see formatTagCell and the Duration cell in render()). Type's
-// label carries the same trailing formatGap its data cells do (see
-// formatTagCell) -- without it, the right-aligned header text would sit
-// flush at the column's edge while the data (padded by formatGap to
-// separate it from the Duration column) sits formatGap-width to the left
-// of that same edge, visibly misaligning the two. Duration needs no such
-// adjustment: neither its header nor its data carry any padding.
-var queueHeaderLabels = []struct {
-	text  string
-	align int
-}{
-	{"", tview.AlignLeft},                  // marker
-	{"", tview.AlignLeft},                  // position
-	{"Title", tview.AlignLeft},             // 2
-	{"Album", tview.AlignLeft},             // 3
-	{"Artist", tview.AlignLeft},            // 4
-	{"Year", tview.AlignLeft},              // 5
-	{"Genre", tview.AlignLeft},             // 6
-	{"Composer", tview.AlignLeft},          // 7
-	{"Type" + formatGap, tview.AlignRight}, // 8
-	{"Duration", tview.AlignRight},         // 9
+// queueColumns holds the Queue table's column indices for one header/
+// render pass. Lyr only exists as a column when the lyrics feature is
+// actually active -- a music_dir that config.LoadMusicDir has already
+// confirmed both exists and is a real directory, not just configured --
+// so an install without it (or with a broken/stale setting) looks
+// exactly like it did before this feature existed, rather than always
+// reserving space for a column that will never show anything. Every
+// other column shifts left by one to fill that gap when Lyr is absent
+// (lyr == -1).
+type queueColumns struct {
+	lyr, title, album, artist, year, genre, composer, typ, duration int
 }
 
-// setQueueHeader (re)writes the fixed header row. Table.Clear() wipes
-// every cell including row 0, so render() calls this again on every
-// refresh rather than relying on it being set once at construction time.
-func setQueueHeader(t *tview.Table) {
-	for col, h := range queueHeaderLabels {
-		t.SetCell(0, col, tview.NewTableCell(h.text).
-			SetAlign(h.align).
+// newQueueColumns computes the column layout for one header/render pass.
+// Marker (0) and position (1) are always fixed; Title always follows at
+// 2; everything from there on is assigned sequentially, with Lyr
+// included only when lyricsActive.
+func newQueueColumns(lyricsActive bool) queueColumns {
+	var c queueColumns
+	c.title = 2
+	next := 3
+	if lyricsActive {
+		c.lyr = next
+		next++
+	} else {
+		c.lyr = -1
+	}
+	c.album = next
+	next++
+	c.artist = next
+	next++
+	c.year = next
+	next++
+	c.genre = next
+	next++
+	c.composer = next
+	next++
+	c.typ = next
+	next++
+	c.duration = next
+	return c
+}
+
+// setQueueHeader (re)writes the fixed header row for the given column
+// layout. Table.Clear() wipes every cell including row 0, so render()
+// calls this again on every refresh rather than relying on it being set
+// once at construction time. Type/Duration are right-aligned to match
+// their data columns (see formatTagCell and the Duration cell in
+// render()). Type's label carries the same trailing formatGap its data
+// cells do (see formatTagCell) -- without it, the right-aligned header
+// text would sit flush at the column's edge while the data (padded by
+// formatGap to separate it from the Duration column) sits
+// formatGap-width to the left of that same edge, visibly misaligning the
+// two. Duration needs no such adjustment: neither its header nor its
+// data carry any padding.
+func setQueueHeader(t *tview.Table, cols queueColumns) {
+	set := func(col int, text string, align int) {
+		t.SetCell(0, col, tview.NewTableCell(text).
+			SetAlign(align).
 			SetTextColor(queueHeaderFg).
 			SetBackgroundColor(queueHeaderBg).
 			SetSelectable(false))
 	}
+	set(0, "", tview.AlignLeft)
+	set(1, "", tview.AlignLeft)
+	if cols.lyr >= 0 {
+		set(cols.lyr, "Lyr", tview.AlignLeft)
+	}
+	set(cols.title, "Title", tview.AlignLeft)
+	set(cols.album, "Album", tview.AlignLeft)
+	set(cols.artist, "Artist", tview.AlignLeft)
+	set(cols.year, "Year", tview.AlignLeft)
+	set(cols.genre, "Genre", tview.AlignLeft)
+	set(cols.composer, "Composer", tview.AlignLeft)
+	set(cols.typ, "Type"+formatGap, tview.AlignRight)
+	set(cols.duration, "Duration", tview.AlignRight)
 }
 
 func (q *queuePanel) render(curID int) {
 	q.table.Clear()
-	setQueueHeader(q.table)
+	lyricsActive := q.app.musicDir != ""
+	cols := newQueueColumns(lyricsActive)
+	setQueueHeader(q.table, cols)
+	// lyricsDirs caches internal/lyrics.Candidates per directory for the
+	// duration of this one render pass only (no caching across renders,
+	// see hasLyrics) -- multiple queued tracks from the same album share
+	// a directory, so this avoids re-listing it once per track.
+	lyricsDirs := map[string]map[string]string{}
 	for i, s := range q.songs {
 		row := i + queueHeaderRows
 		marker := "  "
@@ -194,21 +241,58 @@ func (q *queuePanel) render(curID int) {
 		if title == "" {
 			title = baseName(s.File)
 		}
+		titleText := truncateWithEllipsis(title, queueTitleMaxLen)
 		q.table.SetCell(row, 0, tview.NewTableCell(marker))
 		q.table.SetCell(row, 1, tview.NewTableCell(fmt.Sprintf("%3d", i+1)))
-		q.table.SetCell(row, 2, tview.NewTableCell(truncateWithEllipsis(title, queueTitleMaxLen)+queueColumnGap).
+		q.table.SetCell(row, cols.title, tview.NewTableCell(titleText+queueColumnGap).
 			SetAttributes(tcell.AttrBold).
 			SetTextColor(queueTitleColor))
-		q.table.SetCell(row, 3, tview.NewTableCell(truncateWithEllipsis(s.Album, queueAlbumMaxLen)+queueColumnGap))
-		q.table.SetCell(row, 4, tview.NewTableCell(truncateWithEllipsis(s.Artist, queueArtistMaxLen)+queueColumnGap))
-		q.table.SetCell(row, 5, tview.NewTableCell(yearFromDate(s.Date)+queueColumnGap))
-		q.table.SetCell(row, 6, tview.NewTableCell(truncateWithEllipsis(s.Genre, queueGenreMaxLen)+queueColumnGap))
-		q.table.SetCell(row, 7, tview.NewTableCell(truncateWithEllipsis(s.Composer, queueComposerMaxLen)+queueColumnGap).
+		if cols.lyr >= 0 {
+			// lyrCell carries no queueColumnGap padding, unlike every
+			// other column here -- its only content is ever lyricsIcon or
+			// "", so tview.Table's own auto-sizing-to-content already
+			// makes the column exactly as wide as the icon and no wider
+			// (the explicit ask: "the column width should only take to
+			// contain the icon").
+			lyrCell := ""
+			if q.hasLyrics(s.File, lyricsDirs) {
+				lyrCell = lyricsIcon
+			}
+			q.table.SetCell(row, cols.lyr, tview.NewTableCell(lyrCell))
+		}
+		q.table.SetCell(row, cols.album, tview.NewTableCell(truncateWithEllipsis(s.Album, queueAlbumMaxLen)+queueColumnGap))
+		q.table.SetCell(row, cols.artist, tview.NewTableCell(truncateWithEllipsis(s.Artist, queueArtistMaxLen)+queueColumnGap))
+		q.table.SetCell(row, cols.year, tview.NewTableCell(yearFromDate(s.Date)+queueColumnGap))
+		q.table.SetCell(row, cols.genre, tview.NewTableCell(truncateWithEllipsis(s.Genre, queueGenreMaxLen)+queueColumnGap))
+		q.table.SetCell(row, cols.composer, tview.NewTableCell(truncateWithEllipsis(s.Composer, queueComposerMaxLen)+queueColumnGap).
 			SetExpansion(1))
-		q.table.SetCell(row, 8, formatTagCell(s.File))
-		q.table.SetCell(row, 9, tview.NewTableCell(FormatDuration(s.Duration)).SetAlign(tview.AlignRight))
+		q.table.SetCell(row, cols.typ, formatTagCell(s.File))
+		q.table.SetCell(row, cols.duration, tview.NewTableCell(FormatDuration(s.Duration)).SetAlign(tview.AlignRight))
 	}
 	q.table.SetTitle(fmt.Sprintf(" Queue (%d) ", len(q.songs)))
+}
+
+// hasLyrics reports whether file has a matching lyrics sidecar (see
+// internal/lyrics), rechecked live against the real directory contents on
+// every render -- there's no caching across render() calls, only within
+// this one pass (dirCache), so a lyrics file added after a track was
+// already queued shows up as soon as the Queue next repopulates (adding/
+// removing/moving a track, or another client's own change via MPD's
+// "playlist" idle event), without needing a special "recheck" code path
+// of its own. Always false if musicDir is unset (the feature is
+// inactive).
+func (q *queuePanel) hasLyrics(file string, dirCache map[string]map[string]string) bool {
+	if q.app.musicDir == "" {
+		return false
+	}
+	dir := lyrics.Dir(q.app.musicDir, file)
+	candidates, cached := dirCache[dir]
+	if !cached {
+		candidates = lyrics.Candidates(dir)
+		dirCache[dir] = candidates
+	}
+	_, ok := lyrics.Match(file, candidates)
+	return ok
 }
 
 // truncateWithEllipsis returns s unchanged if it's at most max runes,

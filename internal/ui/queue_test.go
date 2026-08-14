@@ -146,7 +146,7 @@ func TestYearFromDate(t *testing.T) {
 }
 
 func TestQueueHeaderRowLabelsAndAlignment(t *testing.T) {
-	a := newTestApp()
+	a := newTestApp()  // musicDir == "" -- no Lyr column
 	a.queue.render(-1) // no songs -- header should still be there
 
 	wantHeaders := []struct {
@@ -162,7 +162,7 @@ func TestQueueHeaderRowLabelsAndAlignment(t *testing.T) {
 		{5, "Year", tview.AlignLeft},
 		{6, "Genre", tview.AlignLeft},
 		{7, "Composer", tview.AlignLeft},
-		{8, "Type" + formatGap, tview.AlignRight}, // formatGap matches formatTagCell's data-cell padding, see queueHeaderLabels' comment
+		{8, "Type" + formatGap, tview.AlignRight}, // formatGap matches formatTagCell's data-cell padding, see setQueueHeader's comment
 		{9, "Duration", tview.AlignRight},
 	}
 	for _, w := range wantHeaders {
@@ -173,6 +173,57 @@ func TestQueueHeaderRowLabelsAndAlignment(t *testing.T) {
 		if cell.Align != w.align {
 			t.Errorf("header col %d align = %d, want %d", w.col, cell.Align, w.align)
 		}
+	}
+}
+
+// TestQueueHeaderRowIncludesLyrColumnWhenLyricsActive is the counterpart
+// to the test above: with a valid musicDir configured, Lyr appears right
+// after Title and everything else shifts one column right.
+func TestQueueHeaderRowIncludesLyrColumnWhenLyricsActive(t *testing.T) {
+	a := newTestAppWithMusicDir(t.TempDir())
+	a.queue.render(-1)
+
+	wantHeaders := []struct {
+		col  int
+		text string
+	}{
+		{2, "Title"},
+		{3, "Lyr"},
+		{4, "Album"},
+		{5, "Artist"},
+		{6, "Year"},
+		{7, "Genre"},
+		{8, "Composer"},
+		{10, "Duration"},
+	}
+	for _, w := range wantHeaders {
+		if got := a.queue.table.GetCell(0, w.col).Text; got != w.text {
+			t.Errorf("header col %d text = %q, want %q", w.col, got, w.text)
+		}
+	}
+}
+
+// TestNewQueueColumnsOmitsLyrWhenInactive is a pure unit test of the
+// column-layout logic underlying both TestQueueHeaderRowLabelsAndAlignment
+// and TestQueueHeaderRowIncludesLyrColumnWhenLyricsActive above --
+// lyr == -1 is the "no such column" sentinel render()/setQueueHeader
+// check before ever touching that index.
+func TestNewQueueColumnsOmitsLyrWhenInactive(t *testing.T) {
+	cols := newQueueColumns(false)
+	if cols.lyr != -1 {
+		t.Errorf("lyr = %d, want -1 (no Lyr column when lyrics is inactive)", cols.lyr)
+	}
+	want := queueColumns{lyr: -1, title: 2, album: 3, artist: 4, year: 5, genre: 6, composer: 7, typ: 8, duration: 9}
+	if cols != want {
+		t.Errorf("newQueueColumns(false) = %+v, want %+v", cols, want)
+	}
+}
+
+func TestNewQueueColumnsIncludesLyrWhenActive(t *testing.T) {
+	cols := newQueueColumns(true)
+	want := queueColumns{lyr: 3, title: 2, album: 4, artist: 5, year: 6, genre: 7, composer: 8, typ: 9, duration: 10}
+	if cols != want {
+		t.Errorf("newQueueColumns(true) = %+v, want %+v", cols, want)
 	}
 }
 
