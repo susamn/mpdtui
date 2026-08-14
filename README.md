@@ -69,8 +69,8 @@ single-line inline player for a shell or tmux pane.
   WhatsApp green; Title/Album/Artist/Genre/Composer are truncated
   (30/20/40/9/14 characters) with "..." if longer; Type shows a
   color-coded format badge (MP3/FLAC/M4A/...); Type and Duration are
-  right-aligned. A narrow Lyr column, right after Title, shows a 📝 for
-  any track with a matching lyrics file -- only present at all when
+  right-aligned. A narrow Lyr column, right after Title, shows a sky-blue
+  tick for any track with a matching lyrics file -- only present at all when
   `music_dir` is configured and actually exists; otherwise the Queue
   looks exactly as it would without the lyrics feature -- see
   [Lyrics](#lyrics)
@@ -243,21 +243,21 @@ The database itself lives at `~/.config/mpdtui/mpdtui.db` (next to
 `config`, nowhere else) and is created automatically the first time it's
 needed.
 
-When active, the Queue table gains two right-aligned columns right
-before Type: **Mark** (a colored tick, blank if unmarked -- different
-mark reasons get different tick colors) and **Rating** (gold stars,
-filled/unfilled). All database reads/writes happen in the background --
-rating or marking a track flashes its confirmation immediately, and the
-column repaints as soon as the write lands, without ever blocking a
-keypress on disk I/O.
+When active, the Queue table gains three right-aligned columns right
+before Type, in this order: **Plays**, **Mark** (a colored tick, blank if
+unmarked -- different mark reasons get different tick colors), and
+**Rating** (gold stars, filled/unfilled). All database reads/writes
+happen in the background -- rating or marking a track flashes its
+confirmation immediately, and the relevant column repaints as soon as
+the write lands, without ever blocking a keypress on disk I/O.
 
 - **Rating** (`1`-`5`, Queue panel): rates whichever track is currently
   *selected* in the Queue -- not necessarily the one playing.
-- **Play count**: tracked automatically, no keybinding. A track counts as
-  played once you've listened to at least 50% of it (by elapsed/duration,
-  not just "it started"), counted once per queue song id so ticking past
-  the halfway point on every refresh, or seeking back across it, doesn't
-  inflate the count.
+- **Play count** (**Plays** column): tracked automatically, no
+  keybinding. A track counts as played once you've listened to at least
+  50% of it (by elapsed/duration, not just "it started"), counted once
+  per queue song id so ticking past the halfway point on every refresh,
+  or seeking back across it, doesn't inflate the count.
 - **Mark** (`m`, Queue panel): opens a small popup listing mark reasons
   (e.g. "mark for deletion") for the selected track, plus a "(clear
   mark)" entry to unmark it. This is bookkeeping only -- mpdtui never

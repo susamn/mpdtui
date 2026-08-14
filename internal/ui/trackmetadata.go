@@ -64,6 +64,8 @@ func (a *App) handleRateSelectedTrack(rating int) {
 // halfway point). playCountedSongID is set immediately (before the
 // database write, which runs in the background -- see App.runAsync) so
 // a second refresh landing before that write finishes can't double-count.
+// The Queue panel's Plays cell is repainted once the write lands, same
+// as the Rating/Mark cells after a rate/mark action.
 func (a *App) maybeTrackPlayCount(st mpdclient.Status, song mpdclient.Song) {
 	if a.metaDB == nil || st.SongID < 0 || song.File == "" {
 		return
@@ -79,7 +81,11 @@ func (a *App) maybeTrackPlayCount(st mpdclient.Status, song mpdclient.Song) {
 	file := song.File
 	a.runAsync(func() error {
 		return db.IncrementPlayCount(file)
-	}, func() {})
+	}, func() {
+		t := a.queue.metaCache[file]
+		t.PlayCount++
+		a.queue.applyTrackMeta(file, t)
+	})
 }
 
 // markPicker lets you assign (or clear) a mark reason on the Queue-

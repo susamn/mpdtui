@@ -156,12 +156,12 @@ func TestQueueHeaderRowLabelsAndAlignment(t *testing.T) {
 	}{
 		{0, "", tview.AlignLeft},
 		{1, "", tview.AlignLeft},
-		{2, "Title", tview.AlignLeft},
-		{3, "Album", tview.AlignLeft},
-		{4, "Artist", tview.AlignLeft},
-		{5, "Year", tview.AlignLeft},
-		{6, "Genre", tview.AlignLeft},
-		{7, "Composer", tview.AlignLeft},
+		{2, "Title" + queueColumnGap, tview.AlignLeft},
+		{3, "Album" + queueColumnGap, tview.AlignLeft},
+		{4, "Artist" + queueColumnGap, tview.AlignLeft},
+		{5, "Year" + queueColumnGap, tview.AlignLeft},
+		{6, "Genre" + queueColumnGap, tview.AlignLeft},
+		{7, "Composer" + queueColumnGap, tview.AlignLeft},
 		{8, "Type" + formatGap, tview.AlignRight}, // formatGap matches formatTagCell's data-cell padding, see setQueueHeader's comment
 		{9, "Duration", tview.AlignRight},
 	}
@@ -187,13 +187,13 @@ func TestQueueHeaderRowIncludesLyrColumnWhenLyricsActive(t *testing.T) {
 		col  int
 		text string
 	}{
-		{2, "Title"},
+		{2, "Title" + queueColumnGap},
 		{3, "Lyr"},
-		{4, "Album"},
-		{5, "Artist"},
-		{6, "Year"},
-		{7, "Genre"},
-		{8, "Composer"},
+		{4, "Album" + queueColumnGap},
+		{5, "Artist" + queueColumnGap},
+		{6, "Year" + queueColumnGap},
+		{7, "Genre" + queueColumnGap},
+		{8, "Composer" + queueColumnGap},
 		{10, "Duration"},
 	}
 	for _, w := range wantHeaders {
@@ -205,9 +205,9 @@ func TestQueueHeaderRowIncludesLyrColumnWhenLyricsActive(t *testing.T) {
 
 // TestQueueHeaderIncludesMarkAndRatingWhenMetadataActive is the
 // metadata counterpart to TestQueueHeaderRowIncludesLyrColumnWhenLyricsActive:
-// Mark and Rating appear right before Type, in that order and right-
-// aligned like Type/Duration, only when the track-metadata feature is
-// active (App.metaDB != nil).
+// Plays, Mark and Rating appear right before Type, in that order and
+// right-aligned like Type/Duration, only when the track-metadata feature
+// is active (App.metaDB != nil).
 func TestQueueHeaderIncludesMarkAndRatingWhenMetadataActive(t *testing.T) {
 	a := newTestAppWithMetaDB(t)
 	a.queue.render(-1)
@@ -217,11 +217,12 @@ func TestQueueHeaderIncludesMarkAndRatingWhenMetadataActive(t *testing.T) {
 		text  string
 		align int
 	}{
-		{7, "Composer", tview.AlignLeft},
-		{8, "Mark" + queueColumnGap, tview.AlignRight},
-		{9, "Rating" + queueColumnGap, tview.AlignRight},
-		{10, "Type" + formatGap, tview.AlignRight},
-		{11, "Duration", tview.AlignRight},
+		{7, "Composer" + queueColumnGap, tview.AlignLeft},
+		{8, "Plays" + queueColumnGap, tview.AlignRight},
+		{9, "Mark" + queueColumnGap, tview.AlignRight},
+		{10, "Rating" + queueColumnGap, tview.AlignRight},
+		{11, "Type" + formatGap, tview.AlignRight},
+		{12, "Duration", tview.AlignRight},
 	}
 	for _, w := range wantHeaders {
 		cell := a.queue.table.GetCell(0, w.col)
@@ -235,15 +236,18 @@ func TestQueueHeaderIncludesMarkAndRatingWhenMetadataActive(t *testing.T) {
 }
 
 // TestQueueRenderShowsDefaultUnratedUnmarkedRow covers the "sensible
-// defaults" for a track with no local metadata row yet: all-empty gold
-// stars in Rating (same glyphs ratingStars(0) already produces), a blank
-// Mark cell -- not an error, not a placeholder icon.
+// defaults" for a track with no local metadata row yet: "0" plays,
+// all-empty gold stars in Rating (same glyphs ratingStars(0) already
+// produces), a blank Mark cell -- not an error, not a placeholder icon.
 func TestQueueRenderShowsDefaultUnratedUnmarkedRow(t *testing.T) {
 	a := newTestAppWithMetaDB(t)
 	a.queue.songs = []mpdclient.Song{{ID: 1, File: "artist/track.mp3"}}
 	a.queue.render(-1)
 
 	row := queueHeaderRows
+	if got, want := a.queue.table.GetCell(row, a.queue.cols.playcount).Text, "0"+queueColumnGap; got != want {
+		t.Errorf("default Plays cell = %q, want %q", got, want)
+	}
 	if got, want := a.queue.table.GetCell(row, a.queue.cols.rating).Text, ratingStars(0)+queueColumnGap; got != want {
 		t.Errorf("default Rating cell = %q, want %q", got, want)
 	}
@@ -262,7 +266,7 @@ func TestNewQueueColumnsOmitsLyrWhenInactive(t *testing.T) {
 	if cols.lyr != -1 {
 		t.Errorf("lyr = %d, want -1 (no Lyr column when lyrics is inactive)", cols.lyr)
 	}
-	want := queueColumns{lyr: -1, title: 2, album: 3, artist: 4, year: 5, genre: 6, composer: 7, mark: -1, rating: -1, typ: 8, duration: 9}
+	want := queueColumns{lyr: -1, title: 2, album: 3, artist: 4, year: 5, genre: 6, composer: 7, playcount: -1, mark: -1, rating: -1, typ: 8, duration: 9}
 	if cols != want {
 		t.Errorf("newQueueColumns(false, false) = %+v, want %+v", cols, want)
 	}
@@ -270,20 +274,20 @@ func TestNewQueueColumnsOmitsLyrWhenInactive(t *testing.T) {
 
 func TestNewQueueColumnsIncludesLyrWhenActive(t *testing.T) {
 	cols := newQueueColumns(true, false)
-	want := queueColumns{lyr: 3, title: 2, album: 4, artist: 5, year: 6, genre: 7, composer: 8, mark: -1, rating: -1, typ: 9, duration: 10}
+	want := queueColumns{lyr: 3, title: 2, album: 4, artist: 5, year: 6, genre: 7, composer: 8, playcount: -1, mark: -1, rating: -1, typ: 9, duration: 10}
 	if cols != want {
 		t.Errorf("newQueueColumns(true, false) = %+v, want %+v", cols, want)
 	}
 }
 
 // TestNewQueueColumnsIncludesMarkAndRatingWhenMetadataActive is the
-// counterpart covering the new Mark/Rating columns: they sit right
-// before Type, in that order, and only exist when metadataActive (i.e.
-// App.metaDB != nil) -- otherwise the layout is identical to Lyr's own
-// "no such column" omission.
+// counterpart covering the new Playcount/Mark/Rating columns: they sit
+// right before Type, in that order, and only exist when metadataActive
+// (i.e. App.metaDB != nil) -- otherwise the layout is identical to Lyr's
+// own "no such column" omission.
 func TestNewQueueColumnsIncludesMarkAndRatingWhenMetadataActive(t *testing.T) {
 	cols := newQueueColumns(false, true)
-	want := queueColumns{lyr: -1, title: 2, album: 3, artist: 4, year: 5, genre: 6, composer: 7, mark: 8, rating: 9, typ: 10, duration: 11}
+	want := queueColumns{lyr: -1, title: 2, album: 3, artist: 4, year: 5, genre: 6, composer: 7, playcount: 8, mark: 9, rating: 10, typ: 11, duration: 12}
 	if cols != want {
 		t.Errorf("newQueueColumns(false, true) = %+v, want %+v", cols, want)
 	}
@@ -291,7 +295,7 @@ func TestNewQueueColumnsIncludesMarkAndRatingWhenMetadataActive(t *testing.T) {
 
 func TestNewQueueColumnsIncludesLyrAndMarkAndRatingTogether(t *testing.T) {
 	cols := newQueueColumns(true, true)
-	want := queueColumns{lyr: 3, title: 2, album: 4, artist: 5, year: 6, genre: 7, composer: 8, mark: 9, rating: 10, typ: 11, duration: 12}
+	want := queueColumns{lyr: 3, title: 2, album: 4, artist: 5, year: 6, genre: 7, composer: 8, playcount: 9, mark: 10, rating: 11, typ: 12, duration: 13}
 	if cols != want {
 		t.Errorf("newQueueColumns(true, true) = %+v, want %+v", cols, want)
 	}
@@ -322,8 +326,8 @@ func TestQueueHeaderSurvivesRerender(t *testing.T) {
 	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "First"}, {ID: 2, Title: "Second"}}
 	a.queue.render(-1) // a second render, exercising Clear() + rebuild again
 
-	if got := a.queue.table.GetCell(0, 2).Text; got != "Title" {
-		t.Errorf("header after a second render = %q, want %q", got, "Title")
+	if got, want := a.queue.table.GetCell(0, 2).Text, "Title"+queueColumnGap; got != want {
+		t.Errorf("header after a second render = %q, want %q", got, want)
 	}
 }
 

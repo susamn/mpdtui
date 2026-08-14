@@ -189,6 +189,24 @@ func TestMaybeTrackPlayCountIncrementsAtHalfway(t *testing.T) {
 	}
 }
 
+// TestMaybeTrackPlayCountUpdatesQueuePlaysCell is the Plays-column
+// counterpart to TestHandleRateSelectedTrackUpdatesQueueRatingCell:
+// crossing the halfway threshold repaints the Queue table's Plays cell,
+// not just the database row.
+func TestMaybeTrackPlayCountUpdatesQueuePlaysCell(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	song := mpdclient.Song{File: "artist/track.mp3"}
+	a.queue.songs = []mpdclient.Song{{ID: 1, File: song.File}}
+	a.queue.render(-1)
+	total := 100 * time.Second
+
+	a.maybeTrackPlayCount(mpdclient.Status{SongID: 1, Duration: total, Elapsed: total}, song)
+
+	if got, want := a.queue.table.GetCell(queueHeaderRows, a.queue.cols.playcount).Text, "1"+queueColumnGap; got != want {
+		t.Errorf("Plays cell after one play-through = %q, want %q", got, want)
+	}
+}
+
 func TestMaybeTrackPlayCountCountsAgainForADifferentSongID(t *testing.T) {
 	a := newTestAppWithMetaDB(t)
 	song := mpdclient.Song{File: "artist/track.mp3"}
