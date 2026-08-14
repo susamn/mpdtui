@@ -177,16 +177,17 @@ var (
 // other column shifts left by one to fill that gap when Lyr is absent
 // (lyr == -1).
 type queueColumns struct {
-	lyr, title, album, artist, year, genre, composer, mark, rating, typ, duration int
+	lyr, title, album, artist, year, genre, composer, playcount, mark, rating, typ, duration int
 }
 
 // newQueueColumns computes the column layout for one header/render pass.
 // Marker (0) and position (1) are always fixed; Title always follows at
 // 2; everything from there on is assigned sequentially, with Lyr
-// included only when lyricsActive and Mark/Rating included only when
-// metadataActive (App.metaDB != nil) -- same "don't reserve space for a
-// column that will never show anything" reasoning as Lyr. Mark/Rating
-// sit right before Type, in that order, per explicit request.
+// included only when lyricsActive and Playcount/Mark/Rating included
+// only when metadataActive (App.metaDB != nil) -- same "don't reserve
+// space for a column that will never show anything" reasoning as Lyr.
+// Playcount/Mark/Rating sit right before Type, in that order, per
+// explicit request (Playcount ahead of Mark, itself ahead of Rating).
 func newQueueColumns(lyricsActive, metadataActive bool) queueColumns {
 	var c queueColumns
 	c.title = 2
@@ -208,11 +209,14 @@ func newQueueColumns(lyricsActive, metadataActive bool) queueColumns {
 	c.composer = next
 	next++
 	if metadataActive {
+		c.playcount = next
+		next++
 		c.mark = next
 		next++
 		c.rating = next
 		next++
 	} else {
+		c.playcount = -1
 		c.mark = -1
 		c.rating = -1
 	}
@@ -234,6 +238,28 @@ func newQueueColumns(lyricsActive, metadataActive bool) queueColumns {
 // formatGap-width to the left of that same edge, visibly misaligning the
 // two. Duration needs no such adjustment: neither its header nor its
 // data carry any padding.
+//
+// Title/Album/Artist/Year/Genre/Composer carry the same trailing
+// queueColumnGap their data cells do, for the same reason as Type: with
+// an empty queue there are no data rows at all, so tview.Table sizes
+// each column purely from this header row -- without the gap here too,
+// every one of those columns would visibly shrink to just its label's
+// width the moment the queue empties out, then jump back wider again as
+// soon as a track (with its own gap-padded cell) was added, a jarring
+// layout shift for something that should look the same regardless of
+// queue length.
+//
+// The Composer header cell also gets its own SetExpansion(1), matching
+// its data cells (render()) -- tview.Table only evaluates *visible* rows
+// per column (Table.Draw, evaluateAllRows is never set here), so with an
+// empty queue the header is the only row it looks at; without expansion
+// on the header cell too, an empty queue has no cell anywhere reporting
+// Expansion > 0 for that column, so the leftover terminal width past
+// Duration goes completely undistributed instead of widening Composer,
+// and every column from Composer rightward (Plays/Mark/Rating/Type/
+// Duration) collapses back to its bare minimum width and bunches up on
+// the left the moment the queue empties -- the actual dominant cause of
+// "the header shrinks", more than the missing per-label gap above.
 func setQueueHeader(t *tview.Table, cols queueColumns) {
 	set := func(col int, text string, align int) {
 		t.SetCell(0, col, tview.NewTableCell(text).
@@ -247,12 +273,16 @@ func setQueueHeader(t *tview.Table, cols queueColumns) {
 	if cols.lyr >= 0 {
 		set(cols.lyr, "Lyr", tview.AlignLeft)
 	}
-	set(cols.title, "Title", tview.AlignLeft)
-	set(cols.album, "Album", tview.AlignLeft)
-	set(cols.artist, "Artist", tview.AlignLeft)
-	set(cols.year, "Year", tview.AlignLeft)
-	set(cols.genre, "Genre", tview.AlignLeft)
-	set(cols.composer, "Composer", tview.AlignLeft)
+	set(cols.title, "Title"+queueColumnGap, tview.AlignLeft)
+	set(cols.album, "Album"+queueColumnGap, tview.AlignLeft)
+	set(cols.artist, "Artist"+queueColumnGap, tview.AlignLeft)
+	set(cols.year, "Year"+queueColumnGap, tview.AlignLeft)
+	set(cols.genre, "Genre"+queueColumnGap, tview.AlignLeft)
+	set(cols.composer, "Composer"+queueColumnGap, tview.AlignLeft)
+	t.GetCell(0, cols.composer).SetExpansion(1)
+	if cols.playcount >= 0 {
+		set(cols.playcount, "Plays"+queueColumnGap, tview.AlignRight)
+	}
 	if cols.mark >= 0 {
 		set(cols.mark, "Mark"+queueColumnGap, tview.AlignRight)
 	}
@@ -293,16 +323,16 @@ func (q *queuePanel) render(curID int) {
 			SetTextColor(queueTitleColor))
 		if cols.lyr >= 0 {
 			// lyrCell carries no queueColumnGap padding, unlike every
-			// other column here -- its only content is ever lyricsIcon or
+			// other column here -- its only content is ever lyricsTick or
 			// "", so tview.Table's own auto-sizing-to-content already
-			// makes the column exactly as wide as the icon and no wider
+			// makes the column exactly as wide as the tick and no wider
 			// (the explicit ask: "the column width should only take to
 			// contain the icon").
-			lyrCell := ""
+			lyrCell := tview.NewTableCell("")
 			if q.hasLyrics(s.File, lyricsDirs) {
-				lyrCell = lyricsIcon
+				lyrCell = tview.NewTableCell(lyricsTick).SetTextColor(lyricsTickColor)
 			}
-			q.table.SetCell(row, cols.lyr, tview.NewTableCell(lyrCell))
+			q.table.SetCell(row, cols.lyr, lyrCell)
 		}
 		q.table.SetCell(row, cols.album, tview.NewTableCell(truncateWithEllipsis(s.Album, queueAlbumMaxLen)+queueColumnGap))
 		q.table.SetCell(row, cols.artist, tview.NewTableCell(truncateWithEllipsis(s.Artist, queueArtistMaxLen)+queueColumnGap))
@@ -310,11 +340,14 @@ func (q *queuePanel) render(curID int) {
 		q.table.SetCell(row, cols.genre, tview.NewTableCell(truncateWithEllipsis(s.Genre, queueGenreMaxLen)+queueColumnGap))
 		q.table.SetCell(row, cols.composer, tview.NewTableCell(truncateWithEllipsis(s.Composer, queueComposerMaxLen)+queueColumnGap).
 			SetExpansion(1))
-		if cols.mark >= 0 || cols.rating >= 0 {
+		if cols.playcount >= 0 || cols.mark >= 0 || cols.rating >= 0 {
 			// Whatever's cached so far (possibly the zero-value Track, if
 			// the background fetch below hasn't landed yet) -- never a
 			// direct DB read here, so render() itself never blocks on I/O.
 			meta := q.metaCache[s.File]
+			if cols.playcount >= 0 {
+				q.table.SetCell(row, cols.playcount, playCountCell(meta.PlayCount))
+			}
 			if cols.mark >= 0 {
 				q.table.SetCell(row, cols.mark, markCell(meta.Mark))
 			}
@@ -374,14 +407,14 @@ func (q *queuePanel) refreshTrackMeta(seq int) {
 
 // applyTrackMeta records t as file's current metadata and, if it's
 // showing anywhere in the currently rendered queue, repaints just its
-// Mark/Rating cells in place -- used both by refreshTrackMeta's
-// background fetch and by a rating/mark write completing (see
+// Playcount/Mark/Rating cells in place -- used both by refreshTrackMeta's
+// background fetch and by a rating/mark/play-count write completing (see
 // trackmetadata.go) to reflect a change without a full re-render or a
 // synchronous DB round-trip on the UI goroutine. A file queued more than
 // once (same track added twice) updates every matching row.
 func (q *queuePanel) applyTrackMeta(file string, t metadata.Track) {
 	q.metaCache[file] = t
-	if q.cols.mark < 0 && q.cols.rating < 0 {
+	if q.cols.playcount < 0 && q.cols.mark < 0 && q.cols.rating < 0 {
 		return
 	}
 	for i, s := range q.songs {
@@ -389,6 +422,9 @@ func (q *queuePanel) applyTrackMeta(file string, t metadata.Track) {
 			continue
 		}
 		row := i + queueHeaderRows
+		if q.cols.playcount >= 0 {
+			q.table.SetCell(row, q.cols.playcount, playCountCell(t.PlayCount))
+		}
 		if q.cols.mark >= 0 {
 			q.table.SetCell(row, q.cols.mark, markCell(t.Mark))
 		}
@@ -396,6 +432,15 @@ func (q *queuePanel) applyTrackMeta(file string, t metadata.Track) {
 			q.table.SetCell(row, q.cols.rating, ratingCell(t.Rating))
 		}
 	}
+}
+
+// playCountCell renders a queue row's Plays column: the local play
+// count as plain right-aligned text -- "0" (not blank) is already the
+// correct, honest default for a track with no recorded plays yet, same
+// as Rating's all-empty stars.
+func playCountCell(count int) *tview.TableCell {
+	return tview.NewTableCell(fmt.Sprintf("%d", count) + queueColumnGap).
+		SetAlign(tview.AlignRight)
 }
 
 // queueRatingColor tints the Rating column gold, filled and unfilled
