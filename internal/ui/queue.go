@@ -238,6 +238,16 @@ func newQueueColumns(lyricsActive, metadataActive bool) queueColumns {
 // formatGap-width to the left of that same edge, visibly misaligning the
 // two. Duration needs no such adjustment: neither its header nor its
 // data carry any padding.
+//
+// Title/Album/Artist/Year/Genre/Composer carry the same trailing
+// queueColumnGap their data cells do, for the same reason as Type: with
+// an empty queue there are no data rows at all, so tview.Table sizes
+// each column purely from this header row -- without the gap here too,
+// every one of those columns would visibly shrink to just its label's
+// width the moment the queue empties out, then jump back wider again as
+// soon as a track (with its own gap-padded cell) was added, a jarring
+// layout shift for something that should look the same regardless of
+// queue length.
 func setQueueHeader(t *tview.Table, cols queueColumns) {
 	set := func(col int, text string, align int) {
 		t.SetCell(0, col, tview.NewTableCell(text).
@@ -251,12 +261,12 @@ func setQueueHeader(t *tview.Table, cols queueColumns) {
 	if cols.lyr >= 0 {
 		set(cols.lyr, "Lyr", tview.AlignLeft)
 	}
-	set(cols.title, "Title", tview.AlignLeft)
-	set(cols.album, "Album", tview.AlignLeft)
-	set(cols.artist, "Artist", tview.AlignLeft)
-	set(cols.year, "Year", tview.AlignLeft)
-	set(cols.genre, "Genre", tview.AlignLeft)
-	set(cols.composer, "Composer", tview.AlignLeft)
+	set(cols.title, "Title"+queueColumnGap, tview.AlignLeft)
+	set(cols.album, "Album"+queueColumnGap, tview.AlignLeft)
+	set(cols.artist, "Artist"+queueColumnGap, tview.AlignLeft)
+	set(cols.year, "Year"+queueColumnGap, tview.AlignLeft)
+	set(cols.genre, "Genre"+queueColumnGap, tview.AlignLeft)
+	set(cols.composer, "Composer"+queueColumnGap, tview.AlignLeft)
 	if cols.playcount >= 0 {
 		set(cols.playcount, "Plays"+queueColumnGap, tview.AlignRight)
 	}

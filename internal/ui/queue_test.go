@@ -156,12 +156,12 @@ func TestQueueHeaderRowLabelsAndAlignment(t *testing.T) {
 	}{
 		{0, "", tview.AlignLeft},
 		{1, "", tview.AlignLeft},
-		{2, "Title", tview.AlignLeft},
-		{3, "Album", tview.AlignLeft},
-		{4, "Artist", tview.AlignLeft},
-		{5, "Year", tview.AlignLeft},
-		{6, "Genre", tview.AlignLeft},
-		{7, "Composer", tview.AlignLeft},
+		{2, "Title" + queueColumnGap, tview.AlignLeft},
+		{3, "Album" + queueColumnGap, tview.AlignLeft},
+		{4, "Artist" + queueColumnGap, tview.AlignLeft},
+		{5, "Year" + queueColumnGap, tview.AlignLeft},
+		{6, "Genre" + queueColumnGap, tview.AlignLeft},
+		{7, "Composer" + queueColumnGap, tview.AlignLeft},
 		{8, "Type" + formatGap, tview.AlignRight}, // formatGap matches formatTagCell's data-cell padding, see setQueueHeader's comment
 		{9, "Duration", tview.AlignRight},
 	}
@@ -187,13 +187,13 @@ func TestQueueHeaderRowIncludesLyrColumnWhenLyricsActive(t *testing.T) {
 		col  int
 		text string
 	}{
-		{2, "Title"},
+		{2, "Title" + queueColumnGap},
 		{3, "Lyr"},
-		{4, "Album"},
-		{5, "Artist"},
-		{6, "Year"},
-		{7, "Genre"},
-		{8, "Composer"},
+		{4, "Album" + queueColumnGap},
+		{5, "Artist" + queueColumnGap},
+		{6, "Year" + queueColumnGap},
+		{7, "Genre" + queueColumnGap},
+		{8, "Composer" + queueColumnGap},
 		{10, "Duration"},
 	}
 	for _, w := range wantHeaders {
@@ -217,7 +217,7 @@ func TestQueueHeaderIncludesMarkAndRatingWhenMetadataActive(t *testing.T) {
 		text  string
 		align int
 	}{
-		{7, "Composer", tview.AlignLeft},
+		{7, "Composer" + queueColumnGap, tview.AlignLeft},
 		{8, "Plays" + queueColumnGap, tview.AlignRight},
 		{9, "Mark" + queueColumnGap, tview.AlignRight},
 		{10, "Rating" + queueColumnGap, tview.AlignRight},
@@ -326,8 +326,8 @@ func TestQueueHeaderSurvivesRerender(t *testing.T) {
 	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "First"}, {ID: 2, Title: "Second"}}
 	a.queue.render(-1) // a second render, exercising Clear() + rebuild again
 
-	if got := a.queue.table.GetCell(0, 2).Text; got != "Title" {
-		t.Errorf("header after a second render = %q, want %q", got, "Title")
+	if got, want := a.queue.table.GetCell(0, 2).Text, "Title"+queueColumnGap; got != want {
+		t.Errorf("header after a second render = %q, want %q", got, want)
 	}
 }
 
