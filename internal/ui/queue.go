@@ -248,6 +248,18 @@ func newQueueColumns(lyricsActive, metadataActive bool) queueColumns {
 // soon as a track (with its own gap-padded cell) was added, a jarring
 // layout shift for something that should look the same regardless of
 // queue length.
+//
+// The Composer header cell also gets its own SetExpansion(1), matching
+// its data cells (render()) -- tview.Table only evaluates *visible* rows
+// per column (Table.Draw, evaluateAllRows is never set here), so with an
+// empty queue the header is the only row it looks at; without expansion
+// on the header cell too, an empty queue has no cell anywhere reporting
+// Expansion > 0 for that column, so the leftover terminal width past
+// Duration goes completely undistributed instead of widening Composer,
+// and every column from Composer rightward (Plays/Mark/Rating/Type/
+// Duration) collapses back to its bare minimum width and bunches up on
+// the left the moment the queue empties -- the actual dominant cause of
+// "the header shrinks", more than the missing per-label gap above.
 func setQueueHeader(t *tview.Table, cols queueColumns) {
 	set := func(col int, text string, align int) {
 		t.SetCell(0, col, tview.NewTableCell(text).
@@ -267,6 +279,7 @@ func setQueueHeader(t *tview.Table, cols queueColumns) {
 	set(cols.year, "Year"+queueColumnGap, tview.AlignLeft)
 	set(cols.genre, "Genre"+queueColumnGap, tview.AlignLeft)
 	set(cols.composer, "Composer"+queueColumnGap, tview.AlignLeft)
+	t.GetCell(0, cols.composer).SetExpansion(1)
 	if cols.playcount >= 0 {
 		set(cols.playcount, "Plays"+queueColumnGap, tview.AlignRight)
 	}
