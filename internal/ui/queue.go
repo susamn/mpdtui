@@ -10,15 +10,8 @@ import (
 	"mpdtui/internal/lyrics"
 	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/version"
 )
-
-// appVersion is shown in the Stats box's own border (see newQueuePanel's
-// stats.SetDrawFunc) -- bump this by hand alongside Formula/mpdtui.rb on
-// every release (same "keep the two in sync by hand" habit that file's
-// own comment already documents); there's no build-time injection here,
-// deliberately, to avoid adding ldflags wiring to the Homebrew formula's
-// `go build` invocation for what's otherwise a purely cosmetic display.
-const appVersion = "v1.5.0"
 
 // queuePanel shows the current playback queue as a table, with the
 // playing track marked, plus a persistent search field pinned below it
@@ -107,15 +100,15 @@ func newQueuePanel(app *App) *queuePanel {
 	// tview.Box only supports one title string (one alignment for the
 	// whole thing), so the version can't just be a second SetTitle --
 	// SetDrawFunc runs after Box.Draw has already painted the border and
-	// the "Stats" title, letting this stamp appVersion directly onto the
-	// same top border line, right-aligned, without disturbing "Stats".
-	// Must still return the correct inner content rect itself (replacing
-	// Box.Draw's own default calculation): border but no custom padding,
-	// so it's just (x+1, y+1, width-2, height-2).
+	// the "Stats" title, letting this stamp version.String directly onto
+	// the same top border line, right-aligned, without disturbing
+	// "Stats". Must still return the correct inner content rect itself
+	// (replacing Box.Draw's own default calculation): border but no
+	// custom padding, so it's just (x+1, y+1, width-2, height-2).
 	stats.SetDrawFunc(func(screen tcell.Screen, x, y, width, height int) (int, int, int, int) {
-		labelX := x + width - 2 - len(appVersion)
+		labelX := x + width - 2 - len(version.String)
 		if labelX > x {
-			tview.Print(screen, appVersion, labelX, y, len(appVersion), tview.AlignLeft, tview.Styles.BorderColor)
+			tview.Print(screen, version.String, labelX, y, len(version.String), tview.AlignLeft, tview.Styles.BorderColor)
 		}
 		return x + 1, y + 1, width - 2, height - 2
 	})
