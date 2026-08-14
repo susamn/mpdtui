@@ -64,15 +64,17 @@ single-line inline player for a shell or tmux pane.
   delete stored playlists; `o` cycles between most-recently-updated and
   alphabetical
 - **Queue** — reorder, remove, clear, jump to any track; a pinned header
-  row (Title/Album/Artist/Year/Genre/Composer/Type/Duration) stays visible
-  while scrolling. Title is bold and colored WhatsApp green; Title/Album/
-  Artist/Genre/Composer are truncated (30/20/40/9/14 characters) with
-  "..." if longer; Type shows a color-coded format badge (MP3/FLAC/M4A/
-  ...); Type and Duration are right-aligned. A 📝 badge on the Title
-  means the track has a matching lyrics file -- see [Lyrics](#lyrics)
-- **Lyrics** (`y`) — a full-screen viewer for the currently playing
-  track's lyrics, read from a `.txt` sidecar file next to the track on
-  disk; see [Lyrics](#lyrics) for setup
+  row (Title/Lyr/Album/Artist/Year/Genre/Composer/Type/Duration) stays
+  visible while scrolling. Title is bold and colored WhatsApp green;
+  Title/Album/Artist/Genre/Composer are truncated (30/20/40/9/14
+  characters) with "..." if longer; Type shows a color-coded format badge
+  (MP3/FLAC/M4A/...); Type and Duration are right-aligned. The narrow Lyr
+  column shows a 📝 for any track with a matching lyrics file -- see
+  [Lyrics](#lyrics)
+- **Lyrics** (`y`) — a teal-bordered viewer, positioned over the Queue's
+  own Year-through-Type columns, for the currently playing track's
+  lyrics, read from a `.txt` sidecar file next to the track on disk; see
+  [Lyrics](#lyrics) for setup
 - **Library stats** — live total tracks/artists/playlists, shown
   alongside the Queue search box, refreshed on library/playlist changes
 - **Now Playing bar** — live progress, volume, repeat/random/single/consume

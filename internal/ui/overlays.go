@@ -190,6 +190,6 @@ const helpText = `[::b]Global[-:-:-]
   d              remove selected track
   J / K          move selected track down / up
   /              search: jump to first match (Esc cancels)
-  📝 badge on a track's title means it has a matching lyrics file
-  (see 'y'); rechecked live every time the Queue repopulates
+  📝 in the narrow "Lyr" column means that track has a matching
+  lyrics file (see 'y'); rechecked live every time the Queue repopulates
 `

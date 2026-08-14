@@ -11,10 +11,14 @@ import (
 )
 
 // lyricsIcon marks a Queue row whose track has a matching lyrics file
-// (see internal/lyrics), prefixed to the Title cell rather than given its
-// own column -- Queue's columns are already tight (verified at 220 cols
-// per this app's own column-width convention), and a whole column for a
-// single yes/no marker isn't worth that budget.
+// (see internal/lyrics), shown in its own narrow "Lyr" column
+// (queue.go's render) rather than prefixed to the Title cell -- that was
+// the first cut, but reads as cluttering Title rather than as a distinct
+// badge. The column carries no queueColumnGap padding (unlike every other
+// Queue column): its only content is ever this icon or "", so
+// tview.Table's own auto-sizing-to-content already makes it exactly as
+// wide as the icon and no wider, with no extra code needed to enforce
+// that.
 const lyricsIcon = "📝"
 
 // lyricsViewer shows the currently playing track's lyrics. It's
@@ -35,9 +39,17 @@ type lyricsViewer struct {
 	app *App
 }
 
+// lyricsColor is teal, distinguishing the viewer's border/title from
+// every other panel/overlay's own color (green for the focused-panel
+// border, yellow for Now Playing's, default elsewhere) -- a deliberate
+// visual cue that this is a different kind of thing (floating over part
+// of the Queue panel, not a panel or a centered popup itself).
+var lyricsColor = tcell.ColorTeal
+
 func newLyricsViewer(app *App) *lyricsViewer {
 	v := tview.NewTextView().SetDynamicColors(true)
 	v.SetBorder(true).SetTitle(" Lyrics (j/k/g/G to scroll) ")
+	v.SetBorderColor(lyricsColor).SetTitleColor(lyricsColor)
 	v.SetBorderPadding(1, 1, 2, 2)
 	v.SetScrollable(true)
 	return &lyricsViewer{TextView: v, app: app}
@@ -45,25 +57,42 @@ func newLyricsViewer(app *App) *lyricsViewer {
 
 // queueYearCol/queueDurationCol are the Queue table's column indices for
 // Year and Duration (see queue.go's queueHeaderLabels: 0 marker, 1
-// position, 2 Title, 3 Album, 4 Artist, 5 Year, 6 Genre, 7 Composer, 8
-// Type, 9 Duration) -- positionOverQueueColumns reads real screen
-// positions bracketing that Year-through-Type band from the header row's
-// own already-drawn cells.
+// position, 2 Title, 3 Lyr, 4 Album, 5 Artist, 6 Year, 7 Genre, 8
+// Composer, 9 Type, 10 Duration) -- positionOverQueueColumns reads real
+// screen positions bracketing that Year-through-Type band from the
+// header row's own already-drawn cells.
 const (
-	queueYearCol     = 5
-	queueDurationCol = 9
+	queueYearCol     = 6
+	queueDurationCol = 10
 )
+
+// lyricsViewerBottomMargin is how many rows short of the Queue table's
+// own bottom edge the viewer stops -- so it visibly floats within the
+// Queue panel (leaving a bit of the table, and its border, showing below
+// the viewer) rather than filling every last row down to the panel's own
+// border the way it did before this was asked to be "a bit smaller".
+const lyricsViewerBottomMargin = 2
 
 // lyricsViewerRect computes the viewer's rect from the Queue table's own
 // vertical extent (queueY, queueHeight) and the actual last-drawn x
-// positions of its Year and Duration columns (yearX, durationX): full
-// width from yearX up to (not including) durationX, full height matching
-// the Queue table. Split out as a pure function -- no tview.Table
-// involved -- so the positioning math is testable without a real
-// tcell.Screen, mirroring trackInfoCard's own quadrantRect/cardRect
-// split from positionOverQueue/Draw.
+// positions of its Year and Duration columns (yearX, durationX).
+// Horizontally: from yearX up to (not including) durationX. Vertically:
+// starting just below the header row (queueY+queueHeaderRows, so the
+// Year/Genre/... column headers stay visible above it, not covered) and
+// stopping lyricsViewerBottomMargin rows short of the table's own bottom
+// edge (queueY+queueHeight). Split out as a pure function -- no
+// tview.Table involved -- so the positioning math is testable without a
+// real tcell.Screen, mirroring trackInfoCard's own quadrantRect/cardRect
+// split from positionOverQueue/Draw. Clamps height to 0 rather than
+// negative for a pathologically short Queue table (smaller than the
+// header row plus the margin).
 func lyricsViewerRect(queueY, queueHeight, yearX, durationX int) (x, y, width, height int) {
-	return yearX, queueY, durationX - yearX, queueHeight
+	top := queueY + queueHeaderRows
+	height = queueHeight - queueHeaderRows - lyricsViewerBottomMargin
+	if height < 0 {
+		height = 0
+	}
+	return yearX, top, durationX - yearX, height
 }
 
 // positionOverQueueColumns sets the viewer's rect to span horizontally

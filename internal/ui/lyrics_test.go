@@ -16,8 +16,14 @@ func TestLyricsViewerRectSpansYearThroughTypeColumns(t *testing.T) {
 		queueY, queueHeight, yearX, durationX int
 		wantX, wantY, wantW, wantH            int
 	}{
-		{5, 30, 60, 90, 60, 5, 30, 30},
-		{0, 0, 0, 0, 0, 0, 0, 0},
+		// y starts one row below queueY (past the header row,
+		// queueHeaderRows == 1); height is queueHeight minus the header
+		// row minus lyricsViewerBottomMargin (2), so it stops short of
+		// the Queue table's own bottom edge: 30 - 1 - 2 = 27.
+		{5, 30, 60, 90, 60, 6, 30, 27},
+		// A pathologically short queueHeight (shorter than just the
+		// header row + margin) clamps height to 0 rather than negative.
+		{0, 0, 0, 0, 0, 1, 0, 0},
 	}
 	for _, tc := range cases {
 		gotX, gotY, gotW, gotH := lyricsViewerRect(tc.queueY, tc.queueHeight, tc.yearX, tc.durationX)

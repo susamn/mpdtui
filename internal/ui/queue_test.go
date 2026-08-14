@@ -157,13 +157,14 @@ func TestQueueHeaderRowLabelsAndAlignment(t *testing.T) {
 		{0, "", tview.AlignLeft},
 		{1, "", tview.AlignLeft},
 		{2, "Title", tview.AlignLeft},
-		{3, "Album", tview.AlignLeft},
-		{4, "Artist", tview.AlignLeft},
-		{5, "Year", tview.AlignLeft},
-		{6, "Genre", tview.AlignLeft},
-		{7, "Composer", tview.AlignLeft},
-		{8, "Type" + formatGap, tview.AlignRight}, // formatGap matches formatTagCell's data-cell padding, see queueHeaderLabels' comment
-		{9, "Duration", tview.AlignRight},
+		{3, "Lyr", tview.AlignLeft},
+		{4, "Album", tview.AlignLeft},
+		{5, "Artist", tview.AlignLeft},
+		{6, "Year", tview.AlignLeft},
+		{7, "Genre", tview.AlignLeft},
+		{8, "Composer", tview.AlignLeft},
+		{9, "Type" + formatGap, tview.AlignRight}, // formatGap matches formatTagCell's data-cell padding, see queueHeaderLabels' comment
+		{10, "Duration", tview.AlignRight},
 	}
 	for _, w := range wantHeaders {
 		cell := a.queue.table.GetCell(0, w.col)
@@ -218,7 +219,7 @@ func TestQueueRenderTitleCellIsBold(t *testing.T) {
 	if got := cellFg(titleCell); got != queueTitleColor {
 		t.Errorf("track title cell color = %v, want queueTitleColor %v", got, queueTitleColor)
 	}
-	albumCell := a.queue.table.GetCell(queueHeaderRows, 3)
+	albumCell := a.queue.table.GetCell(queueHeaderRows, 4)
 	if cellBold(albumCell) {
 		t.Error("album cell should not be bold")
 	}
@@ -229,7 +230,7 @@ func TestQueueRenderDurationCellRightAligned(t *testing.T) {
 	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track"}}
 	a.queue.render(-1)
 
-	if got := a.queue.table.GetCell(queueHeaderRows, 9).Align; got != tview.AlignRight {
+	if got := a.queue.table.GetCell(queueHeaderRows, 10).Align; got != tview.AlignRight {
 		t.Errorf("duration cell align = %d, want AlignRight", got)
 	}
 }
@@ -244,10 +245,10 @@ func TestQueueRenderShowsTitleAlbumArtistInOrder(t *testing.T) {
 	if got := a.queue.table.GetCell(queueHeaderRows, 2).Text; got != "Bohemian Rhapsody"+queueColumnGap {
 		t.Errorf("title cell = %q, want %q", got, "Bohemian Rhapsody"+queueColumnGap)
 	}
-	if got := a.queue.table.GetCell(queueHeaderRows, 3).Text; got != "A Night at the Opera"+queueColumnGap {
+	if got := a.queue.table.GetCell(queueHeaderRows, 4).Text; got != "A Night at the Opera"+queueColumnGap {
 		t.Errorf("album cell = %q, want %q", got, "A Night at the Opera"+queueColumnGap)
 	}
-	if got := a.queue.table.GetCell(queueHeaderRows, 4).Text; got != "Queen"+queueColumnGap {
+	if got := a.queue.table.GetCell(queueHeaderRows, 5).Text; got != "Queen"+queueColumnGap {
 		t.Errorf("artist cell = %q, want %q", got, "Queen"+queueColumnGap)
 	}
 }
@@ -264,10 +265,10 @@ func TestQueueRenderComposerColumnExpands(t *testing.T) {
 	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track", Artist: "Artist", Composer: "Composer"}}
 	a.queue.render(-1)
 
-	if got := a.queue.table.GetCell(queueHeaderRows, 7).Expansion; got != 1 {
+	if got := a.queue.table.GetCell(queueHeaderRows, 8).Expansion; got != 1 {
 		t.Errorf("composer cell Expansion = %d, want 1", got)
 	}
-	if got := a.queue.table.GetCell(queueHeaderRows, 4).Expansion; got != 0 {
+	if got := a.queue.table.GetCell(queueHeaderRows, 5).Expansion; got != 0 {
 		t.Errorf("artist cell Expansion = %d, want 0 (Composer carries it now, not Artist)", got)
 	}
 }
@@ -302,16 +303,16 @@ func TestQueueRenderTruncatesEachColumnToItsOwnMax(t *testing.T) {
 	if got := a.queue.table.GetCell(queueHeaderRows, 2).Text; got != wantTitle {
 		t.Errorf("title cell = %q, want %q", got, wantTitle)
 	}
-	if got := a.queue.table.GetCell(queueHeaderRows, 3).Text; got != wantAlbum {
+	if got := a.queue.table.GetCell(queueHeaderRows, 4).Text; got != wantAlbum {
 		t.Errorf("album cell = %q, want %q", got, wantAlbum)
 	}
-	if got := a.queue.table.GetCell(queueHeaderRows, 4).Text; got != wantArtist {
+	if got := a.queue.table.GetCell(queueHeaderRows, 5).Text; got != wantArtist {
 		t.Errorf("artist cell = %q, want %q", got, wantArtist)
 	}
-	if got := a.queue.table.GetCell(queueHeaderRows, 6).Text; got != wantGenre {
+	if got := a.queue.table.GetCell(queueHeaderRows, 7).Text; got != wantGenre {
 		t.Errorf("genre cell = %q, want %q", got, wantGenre)
 	}
-	if got := a.queue.table.GetCell(queueHeaderRows, 7).Text; got != wantComposer {
+	if got := a.queue.table.GetCell(queueHeaderRows, 8).Text; got != wantComposer {
 		t.Errorf("composer cell = %q, want %q", got, wantComposer)
 	}
 }
@@ -323,13 +324,13 @@ func TestQueueRenderShowsYearGenreComposer(t *testing.T) {
 	}
 	a.queue.render(-1)
 
-	if got := a.queue.table.GetCell(queueHeaderRows, 5).Text; got != "1975"+queueColumnGap {
+	if got := a.queue.table.GetCell(queueHeaderRows, 6).Text; got != "1975"+queueColumnGap {
 		t.Errorf("year cell = %q, want %q", got, "1975"+queueColumnGap)
 	}
-	if got := a.queue.table.GetCell(queueHeaderRows, 6).Text; got != "Rock"+queueColumnGap {
+	if got := a.queue.table.GetCell(queueHeaderRows, 7).Text; got != "Rock"+queueColumnGap {
 		t.Errorf("genre cell = %q, want %q", got, "Rock"+queueColumnGap)
 	}
-	if got := a.queue.table.GetCell(queueHeaderRows, 7).Text; got != "F. Mercury"+queueColumnGap {
+	if got := a.queue.table.GetCell(queueHeaderRows, 8).Text; got != "F. Mercury"+queueColumnGap {
 		t.Errorf("composer cell = %q, want %q", got, "F. Mercury"+queueColumnGap)
 	}
 }
@@ -342,10 +343,10 @@ func TestQueueRenderYearHandlesPlainYearAndEmptyDate(t *testing.T) {
 	}
 	a.queue.render(-1)
 
-	if got := a.queue.table.GetCell(queueHeaderRows, 5).Text; got != "1992"+queueColumnGap {
+	if got := a.queue.table.GetCell(queueHeaderRows, 6).Text; got != "1992"+queueColumnGap {
 		t.Errorf("year cell for a plain-year Date = %q, want %q", got, "1992"+queueColumnGap)
 	}
-	if got := a.queue.table.GetCell(queueHeaderRows+1, 5).Text; got != ""+queueColumnGap {
+	if got := a.queue.table.GetCell(queueHeaderRows+1, 6).Text; got != ""+queueColumnGap {
 		t.Errorf("year cell for an empty Date = %q, want just the gap %q", got, queueColumnGap)
 	}
 }

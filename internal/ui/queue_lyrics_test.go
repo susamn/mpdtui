@@ -51,7 +51,7 @@ func TestHasLyricsFalseWithoutMatchingSidecar(t *testing.T) {
 	}
 }
 
-func TestQueueRenderPrefixesLyricsIconOnlyWhenAvailable(t *testing.T) {
+func TestQueueRenderShowsLyricsIconInLyrColumnOnlyWhenAvailable(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "artist"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
@@ -67,20 +67,24 @@ func TestQueueRenderPrefixesLyricsIconOnlyWhenAvailable(t *testing.T) {
 	}
 	a.queue.render(-1)
 
-	withLyrics := a.queue.table.GetCell(queueHeaderRows, 2).Text
-	if want := lyricsIcon + " With Lyrics" + queueColumnGap; withLyrics != want {
-		t.Errorf("title cell for the track with lyrics = %q, want %q", withLyrics, want)
+	if got := a.queue.table.GetCell(queueHeaderRows, queueLyrCol).Text; got != lyricsIcon {
+		t.Errorf("Lyr cell for the track with lyrics = %q, want %q", got, lyricsIcon)
+	}
+	if got := a.queue.table.GetCell(queueHeaderRows, 2).Text; got != "With Lyrics"+queueColumnGap {
+		t.Errorf("title cell for the track with lyrics = %q, want it unprefixed (icon lives in its own column now)", got)
 	}
 
-	without := a.queue.table.GetCell(queueHeaderRows+1, 2).Text
-	if want := "Without Lyrics" + queueColumnGap; without != want {
-		t.Errorf("title cell for the track without lyrics = %q, want %q (no icon)", without, want)
+	if got := a.queue.table.GetCell(queueHeaderRows+1, queueLyrCol).Text; got != "" {
+		t.Errorf("Lyr cell for the track without lyrics = %q, want empty", got)
+	}
+	if got := a.queue.table.GetCell(queueHeaderRows+1, 2).Text; got != "Without Lyrics"+queueColumnGap {
+		t.Errorf("title cell for the track without lyrics = %q, want %q", got, "Without Lyrics"+queueColumnGap)
 	}
 }
 
 // TestQueueRenderRechecksLyricsOnEveryRender is the "as I may add more
 // lyrics" requirement: a track queued before its lyrics file existed
-// picks up the icon on the very next render, no restart or requeue
+// picks up the Lyr icon on the very next render, no restart or requeue
 // needed, since hasLyrics always reads the real directory contents (only
 // caching within one render pass, see render's lyricsDirs).
 func TestQueueRenderRechecksLyricsOnEveryRender(t *testing.T) {
@@ -94,8 +98,8 @@ func TestQueueRenderRechecksLyricsOnEveryRender(t *testing.T) {
 	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track", File: "artist/Track.mp3"}}
 	a.queue.render(-1)
 
-	if got := a.queue.table.GetCell(queueHeaderRows, 2).Text; got != "Track"+queueColumnGap {
-		t.Fatalf("setup: title cell = %q, want no lyrics icon yet", got)
+	if got := a.queue.table.GetCell(queueHeaderRows, queueLyrCol).Text; got != "" {
+		t.Fatalf("setup: Lyr cell = %q, want empty (no lyrics file yet)", got)
 	}
 
 	if err := os.WriteFile(filepath.Join(trackDir, "Track.txt"), []byte("now it exists"), 0o644); err != nil {
@@ -103,7 +107,7 @@ func TestQueueRenderRechecksLyricsOnEveryRender(t *testing.T) {
 	}
 	a.queue.render(-1)
 
-	if want := lyricsIcon + " Track" + queueColumnGap; a.queue.table.GetCell(queueHeaderRows, 2).Text != want {
-		t.Errorf("title cell after adding the lyrics file = %q, want %q", a.queue.table.GetCell(queueHeaderRows, 2).Text, want)
+	if got := a.queue.table.GetCell(queueHeaderRows, queueLyrCol).Text; got != lyricsIcon {
+		t.Errorf("Lyr cell after adding the lyrics file = %q, want %q", got, lyricsIcon)
 	}
 }

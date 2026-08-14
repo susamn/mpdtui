@@ -143,6 +143,9 @@ var (
 	queueHeaderFg = tcell.ColorBlack
 )
 
+// queueLyrCol is the Lyr column's index (see queueHeaderLabels).
+const queueLyrCol = 3
+
 // queueHeaderLabels are the column headers for the fixed header row, in
 // the same order render() writes data columns -- marker and position get
 // no label (blank), Type/Duration are right-aligned to match their data
@@ -152,7 +155,9 @@ var (
 // flush at the column's edge while the data (padded by formatGap to
 // separate it from the Duration column) sits formatGap-width to the left
 // of that same edge, visibly misaligning the two. Duration needs no such
-// adjustment: neither its header nor its data carry any padding.
+// adjustment: neither its header nor its data carry any padding. Lyr
+// carries no padding either, same reason -- see render()'s own comment on
+// why that column's data cells don't append queueColumnGap.
 var queueHeaderLabels = []struct {
 	text  string
 	align int
@@ -160,13 +165,14 @@ var queueHeaderLabels = []struct {
 	{"", tview.AlignLeft},                  // marker
 	{"", tview.AlignLeft},                  // position
 	{"Title", tview.AlignLeft},             // 2
-	{"Album", tview.AlignLeft},             // 3
-	{"Artist", tview.AlignLeft},            // 4
-	{"Year", tview.AlignLeft},              // 5
-	{"Genre", tview.AlignLeft},             // 6
-	{"Composer", tview.AlignLeft},          // 7
-	{"Type" + formatGap, tview.AlignRight}, // 8
-	{"Duration", tview.AlignRight},         // 9
+	{"Lyr", tview.AlignLeft},               // 3
+	{"Album", tview.AlignLeft},             // 4
+	{"Artist", tview.AlignLeft},            // 5
+	{"Year", tview.AlignLeft},              // 6
+	{"Genre", tview.AlignLeft},             // 7
+	{"Composer", tview.AlignLeft},          // 8
+	{"Type" + formatGap, tview.AlignRight}, // 9
+	{"Duration", tview.AlignRight},         // 10
 }
 
 // setQueueHeader (re)writes the fixed header row. Table.Clear() wipes
@@ -201,22 +207,29 @@ func (q *queuePanel) render(curID int) {
 			title = baseName(s.File)
 		}
 		titleText := truncateWithEllipsis(title, queueTitleMaxLen)
+		// lyrCell carries no queueColumnGap padding, unlike every other
+		// column here -- its only content is ever lyricsIcon or "", so
+		// tview.Table's own auto-sizing-to-content already makes the
+		// column exactly as wide as the icon and no wider (the explicit
+		// ask: "the column width should only take to contain the icon").
+		lyrCell := ""
 		if q.hasLyrics(s.File, lyricsDirs) {
-			titleText = lyricsIcon + " " + titleText
+			lyrCell = lyricsIcon
 		}
 		q.table.SetCell(row, 0, tview.NewTableCell(marker))
 		q.table.SetCell(row, 1, tview.NewTableCell(fmt.Sprintf("%3d", i+1)))
 		q.table.SetCell(row, 2, tview.NewTableCell(titleText+queueColumnGap).
 			SetAttributes(tcell.AttrBold).
 			SetTextColor(queueTitleColor))
-		q.table.SetCell(row, 3, tview.NewTableCell(truncateWithEllipsis(s.Album, queueAlbumMaxLen)+queueColumnGap))
-		q.table.SetCell(row, 4, tview.NewTableCell(truncateWithEllipsis(s.Artist, queueArtistMaxLen)+queueColumnGap))
-		q.table.SetCell(row, 5, tview.NewTableCell(yearFromDate(s.Date)+queueColumnGap))
-		q.table.SetCell(row, 6, tview.NewTableCell(truncateWithEllipsis(s.Genre, queueGenreMaxLen)+queueColumnGap))
-		q.table.SetCell(row, 7, tview.NewTableCell(truncateWithEllipsis(s.Composer, queueComposerMaxLen)+queueColumnGap).
+		q.table.SetCell(row, queueLyrCol, tview.NewTableCell(lyrCell))
+		q.table.SetCell(row, 4, tview.NewTableCell(truncateWithEllipsis(s.Album, queueAlbumMaxLen)+queueColumnGap))
+		q.table.SetCell(row, 5, tview.NewTableCell(truncateWithEllipsis(s.Artist, queueArtistMaxLen)+queueColumnGap))
+		q.table.SetCell(row, 6, tview.NewTableCell(yearFromDate(s.Date)+queueColumnGap))
+		q.table.SetCell(row, 7, tview.NewTableCell(truncateWithEllipsis(s.Genre, queueGenreMaxLen)+queueColumnGap))
+		q.table.SetCell(row, 8, tview.NewTableCell(truncateWithEllipsis(s.Composer, queueComposerMaxLen)+queueColumnGap).
 			SetExpansion(1))
-		q.table.SetCell(row, 8, formatTagCell(s.File))
-		q.table.SetCell(row, 9, tview.NewTableCell(FormatDuration(s.Duration)).SetAlign(tview.AlignRight))
+		q.table.SetCell(row, 9, formatTagCell(s.File))
+		q.table.SetCell(row, 10, tview.NewTableCell(FormatDuration(s.Duration)).SetAlign(tview.AlignRight))
 	}
 	q.table.SetTitle(fmt.Sprintf(" Queue (%d) ", len(q.songs)))
 }
