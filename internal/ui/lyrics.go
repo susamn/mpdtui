@@ -10,16 +10,23 @@ import (
 	"mpdtui/internal/mpdclient"
 )
 
-// lyricsIcon marks a Queue row whose track has a matching lyrics file
+// lyricsTick marks a Queue row whose track has a matching lyrics file
 // (see internal/lyrics), shown in its own narrow "Lyr" column
 // (queue.go's render) rather than prefixed to the Title cell -- that was
 // the first cut, but reads as cluttering Title rather than as a distinct
-// badge. The column carries no queueColumnGap padding (unlike every other
-// Queue column): its only content is ever this icon or "", so
-// tview.Table's own auto-sizing-to-content already makes it exactly as
-// wide as the icon and no wider, with no extra code needed to enforce
-// that.
-const lyricsIcon = "📝"
+// badge. Originally an emoji icon (📝); replaced with a plain colored
+// tick (lyricsTickColor), matching the Mark column's own "colored ticks,
+// no icons" convention. The column carries no queueColumnGap padding
+// (unlike every other Queue column): its only content is ever this tick
+// or "", so tview.Table's own auto-sizing-to-content already makes it
+// exactly as wide as the tick and no wider, with no extra code needed to
+// enforce that.
+const lyricsTick = "✓"
+
+// lyricsTickColor tints lyricsTick sky blue -- distinct from the Mark
+// column's own tick colors (markTickColors, cycled by mark reason), so
+// the two badge columns don't read as the same signal at a glance.
+var lyricsTickColor = tcell.ColorSkyblue
 
 // lyricsViewer shows the currently playing track's lyrics. It's
 // positioned over the Queue table's own Year-through-Type column band

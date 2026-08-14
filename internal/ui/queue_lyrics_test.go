@@ -68,8 +68,8 @@ func TestQueueRenderShowsLyricsIconInLyrColumnOnlyWhenAvailable(t *testing.T) {
 	a.queue.render(-1)
 	lyrCol := newQueueColumns(true, false).lyr
 
-	if got := a.queue.table.GetCell(queueHeaderRows, lyrCol).Text; got != lyricsIcon {
-		t.Errorf("Lyr cell for the track with lyrics = %q, want %q", got, lyricsIcon)
+	if got := a.queue.table.GetCell(queueHeaderRows, lyrCol).Text; got != lyricsTick {
+		t.Errorf("Lyr cell for the track with lyrics = %q, want %q", got, lyricsTick)
 	}
 	if got := a.queue.table.GetCell(queueHeaderRows, 2).Text; got != "With Lyrics"+queueColumnGap {
 		t.Errorf("title cell for the track with lyrics = %q, want it unprefixed (icon lives in its own column now)", got)
@@ -109,7 +109,7 @@ func TestQueueRenderRechecksLyricsOnEveryRender(t *testing.T) {
 	}
 	a.queue.render(-1)
 
-	if got := a.queue.table.GetCell(queueHeaderRows, lyrCol).Text; got != lyricsIcon {
-		t.Errorf("Lyr cell after adding the lyrics file = %q, want %q", got, lyricsIcon)
+	if got := a.queue.table.GetCell(queueHeaderRows, lyrCol).Text; got != lyricsTick {
+		t.Errorf("Lyr cell after adding the lyrics file = %q, want %q", got, lyricsTick)
 	}
 }
