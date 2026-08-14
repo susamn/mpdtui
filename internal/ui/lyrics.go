@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/lyrics"
@@ -16,15 +17,19 @@ import (
 // single yes/no marker isn't worth that budget.
 const lyricsIcon = "📝"
 
-// lyricsViewer shows the currently playing track's lyrics. Unlike
-// trackInfoCard's small floating quadrant card, this is a tall centered
-// overlay: lyrics can run to many lines and need real vertical room, not
-// just a glanceable summary -- hence "vertical" in openLyricsViewer's own
-// naming. Scrolling is entirely tview.TextView's own native vim-style
-// key handling (j/k line, g/G top/bottom, h/l horizontal, Ctrl-F/Ctrl-B
-// page) once SetScrollable(true) is set -- the same free vim bindings
-// Library's TreeView and Queue's Table already have built in, so no
-// custom key handling is needed here at all.
+// lyricsViewer shows the currently playing track's lyrics. It's
+// positioned over the Queue table's own Year-through-Type column band
+// (just before Duration), not centered on the full screen -- so it reads
+// as replacing that slice of the Queue panel rather than floating
+// disconnected from it, while still leaving Title/Album/Artist visible to
+// its left. Vertical, per the request that named this ("a vertical
+// lyrics viewer"): lyrics can run to many lines and need real scrolling
+// room, not just a glanceable summary the way trackInfoCard's small
+// floating quadrant card is. Scrolling is entirely tview.TextView's own
+// native vim-style key handling (j/k line, g/G top/bottom, h/l
+// horizontal, Ctrl-F/Ctrl-B page) once SetScrollable(true) is set -- the
+// same free vim bindings Library's TreeView and Queue's Table already
+// have built in, so no custom key handling is needed here at all.
 type lyricsViewer struct {
 	*tview.TextView
 	app *App
@@ -36,6 +41,65 @@ func newLyricsViewer(app *App) *lyricsViewer {
 	v.SetBorderPadding(1, 1, 2, 2)
 	v.SetScrollable(true)
 	return &lyricsViewer{TextView: v, app: app}
+}
+
+// queueYearCol/queueDurationCol are the Queue table's column indices for
+// Year and Duration (see queue.go's queueHeaderLabels: 0 marker, 1
+// position, 2 Title, 3 Album, 4 Artist, 5 Year, 6 Genre, 7 Composer, 8
+// Type, 9 Duration) -- positionOverQueueColumns reads real screen
+// positions bracketing that Year-through-Type band from the header row's
+// own already-drawn cells.
+const (
+	queueYearCol     = 5
+	queueDurationCol = 9
+)
+
+// lyricsViewerRect computes the viewer's rect from the Queue table's own
+// vertical extent (queueY, queueHeight) and the actual last-drawn x
+// positions of its Year and Duration columns (yearX, durationX): full
+// width from yearX up to (not including) durationX, full height matching
+// the Queue table. Split out as a pure function -- no tview.Table
+// involved -- so the positioning math is testable without a real
+// tcell.Screen, mirroring trackInfoCard's own quadrantRect/cardRect
+// split from positionOverQueue/Draw.
+func lyricsViewerRect(queueY, queueHeight, yearX, durationX int) (x, y, width, height int) {
+	return yearX, queueY, durationX - yearX, queueHeight
+}
+
+// positionOverQueueColumns sets the viewer's rect to span horizontally
+// from the Queue table's Year column through the end of Type (i.e. up to
+// but not including Duration), and vertically to match the Queue table's
+// own rect (see lyricsViewerRect). Reads each boundary column's *actual
+// last-drawn* x position (tview.TableCell.GetLastPosition()) rather than
+// computing an estimate from the column max-length constants (even where
+// those exist, e.g. queueTitleMaxLen): those are truncation caps, not a
+// column's real rendered width, which tview.Table sizes to fit whatever's
+// actually in the queue and shrinks below the cap for shorter content --
+// an estimate would drift out of sync with the real layout.
+//
+// Relies on the Queue table having already been drawn at least once this
+// frame -- true in practice from shortly after startup onward (it's
+// always visible, part of the "main" page), and specifically guaranteed
+// within a single frame here: tview.Pages.Draw (pages.go) draws its
+// pages in the order they were added, "main" (holding the Queue table)
+// before the "lyrics" overlay page showOverlay adds on top, so by the
+// time this runs the header row's cells reflect this exact frame's
+// layout, not a stale one.
+func (v *lyricsViewer) positionOverQueueColumns() {
+	_, qy, _, qh := v.app.queue.table.GetRect()
+	yearX, _, _ := v.app.queue.table.GetCell(0, queueYearCol).GetLastPosition()
+	durationX, _, _ := v.app.queue.table.GetCell(0, queueDurationCol).GetLastPosition()
+	v.SetRect(lyricsViewerRect(qy, qh, yearX, durationX))
+}
+
+// Draw repositions the viewer over the Queue table's Year-through-Type
+// column band (see positionOverQueueColumns) on every frame, then
+// delegates to the embedded TextView to actually paint it -- mirrors
+// trackInfoCard.Draw's own "reposition from a sibling primitive's current
+// layout, then paint" pattern.
+func (v *lyricsViewer) Draw(screen tcell.Screen) {
+	v.positionOverQueueColumns()
+	v.TextView.Draw(screen)
 }
 
 // render loads and shows the lyrics for the currently playing song, fresh
@@ -79,5 +143,5 @@ func (v *lyricsViewer) render(song mpdclient.Song) {
 // updated state instead of fetching on demand.
 func (a *App) openLyricsViewer() {
 	a.lyricsViewer.render(a.currentSong)
-	a.showOverlay("lyrics", centered(a.lyricsViewer, 70, 34), a.lyricsViewer)
+	a.showOverlay("lyrics", a.lyricsViewer, a.lyricsViewer)
 }

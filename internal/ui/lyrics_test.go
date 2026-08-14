@@ -11,6 +11,23 @@ import (
 	"mpdtui/internal/mpdclient"
 )
 
+func TestLyricsViewerRectSpansYearThroughTypeColumns(t *testing.T) {
+	cases := []struct {
+		queueY, queueHeight, yearX, durationX int
+		wantX, wantY, wantW, wantH            int
+	}{
+		{5, 30, 60, 90, 60, 5, 30, 30},
+		{0, 0, 0, 0, 0, 0, 0, 0},
+	}
+	for _, tc := range cases {
+		gotX, gotY, gotW, gotH := lyricsViewerRect(tc.queueY, tc.queueHeight, tc.yearX, tc.durationX)
+		if gotX != tc.wantX || gotY != tc.wantY || gotW != tc.wantW || gotH != tc.wantH {
+			t.Errorf("lyricsViewerRect(%d,%d,%d,%d) = (%d,%d,%d,%d), want (%d,%d,%d,%d)",
+				tc.queueY, tc.queueHeight, tc.yearX, tc.durationX, gotX, gotY, gotW, gotH, tc.wantX, tc.wantY, tc.wantW, tc.wantH)
+		}
+	}
+}
+
 func TestLyricsViewerRenderNothingPlaying(t *testing.T) {
 	a := newTestApp()
 	a.lyricsViewer.render(mpdclient.Song{})
