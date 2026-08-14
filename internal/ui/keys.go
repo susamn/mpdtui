@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 )
 
 // globalInputCapture is the single place all keybindings are decided.
@@ -17,22 +18,35 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			a.closeOverlay()
 			return nil
 		}
-		// 'i' toggles the track info card closed while it's the open
-		// overlay, mirroring Esc -- every other overlay only closes via
-		// Esc, but the info card's own key doubles as a close shortcut.
-		if event.Key() == tcell.KeyRune && event.Rune() == 'i' && a.tv.GetFocus() == a.trackInfo {
-			a.closeOverlay()
-			return nil
-		}
-		// 'q' still quits while the track info card is open -- it's a
-		// read-only display, not a text input, so there's no risk of
-		// swallowing a 'q' the user meant to type (unlike the search/
-		// filter/save-playlist inputs, where 'q' has to stay literal
-		// text). Scoped to just this overlay rather than every overlay
-		// for that reason.
-		if event.Key() == tcell.KeyRune && event.Rune() == 'q' && a.tv.GetFocus() == a.trackInfo {
-			a.tv.Stop()
-			return nil
+		// readOnlyOverlayToggles: for these two, the key that opened the
+		// overlay also closes it again while it's focused, mirroring Esc
+		// -- every other overlay only closes via Esc, but these two are
+		// pure read-only displays (nothing to type), so doubling their own
+		// key as a close shortcut is unambiguous. 'q' also still quits
+		// while either is open, for the same read-only-so-nothing-to-
+		// swallow reason (unlike the search/filter/save-playlist inputs,
+		// where 'q' has to stay literal text).
+		if event.Key() == tcell.KeyRune {
+			readOnlyOverlayToggles := []struct {
+				key       rune
+				primitive tview.Primitive
+			}{
+				{'i', a.trackInfo},
+				{'y', a.lyricsViewer},
+			}
+			for _, ov := range readOnlyOverlayToggles {
+				if a.tv.GetFocus() != ov.primitive {
+					continue
+				}
+				if event.Rune() == ov.key {
+					a.closeOverlay()
+					return nil
+				}
+				if event.Rune() == 'q' {
+					a.tv.Stop()
+					return nil
+				}
+			}
 		}
 		return event
 	}
@@ -88,6 +102,9 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			return nil
 		case 'i':
 			a.openTrackInfo()
+			return nil
+		case 'y':
+			a.openLyricsViewer()
 			return nil
 		case 'v':
 			a.visualizer.next()

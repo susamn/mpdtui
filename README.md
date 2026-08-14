@@ -68,7 +68,11 @@ single-line inline player for a shell or tmux pane.
   while scrolling. Title is bold and colored WhatsApp green; Title/Album/
   Artist/Genre/Composer are truncated (30/20/40/9/14 characters) with
   "..." if longer; Type shows a color-coded format badge (MP3/FLAC/M4A/
-  ...); Type and Duration are right-aligned
+  ...); Type and Duration are right-aligned. A 📝 badge on the Title
+  means the track has a matching lyrics file -- see [Lyrics](#lyrics)
+- **Lyrics** (`y`) — a full-screen viewer for the currently playing
+  track's lyrics, read from a `.txt` sidecar file next to the track on
+  disk; see [Lyrics](#lyrics) for setup
 - **Library stats** — live total tracks/artists/playlists, shown
   alongside the Queue search box, refreshed on library/playlist changes
 - **Now Playing bar** — live progress, volume, repeat/random/single/consume
@@ -144,6 +148,7 @@ Press `?` inside the full UI for the in-app keybinding list.
 | `f` | Global search from any panel -- type `a`/`al`/`p`/`t` + a term (artist/album/playlist/track); matches appear live as an fzf-style hint list. Up/Down (or Ctrl-P/Ctrl-N) move the highlight while typing; `Tab` (or `f` to return) switches focus to the hint list for `j`/`k`/`g`/`G` navigation, within the popup only. `Enter` acts on the highlight and closes the popup (track adds+plays, playlist loads+plays, artist/album jump into that group in the Library); from the hint list, `a` instead adds without playing (track) or appends (playlist) and leaves the popup open, so several tracks can be queued back-to-back. Stays open with "no X found" if nothing matches |
 | `F` | Clear any active search/filter, in every panel at once (Library search, Playlists filter) -- unlike a panel's own `Esc`, works regardless of which panel is currently focused |
 | `i` | Track info card for the currently playing track (Track/Album/Artist/Genre/Year), anchored to the bottom-right quarter of the Queue panel |
+| `y` | Lyrics viewer for the currently playing track (needs `music_dir` set, see [Lyrics](#lyrics) below) -- `j`/`k`/`g`/`G`/Ctrl-F/Ctrl-B to scroll, `y` or `Esc` to close |
 | `v` | Cycle Now Playing visualizations (right half of the Now Playing bar) |
 | `L` | Locate the currently playing track: selects it in the Queue and moves focus there, from any panel, and also reveals it in the Library tree (expanding every folder along its path and selecting it there, without moving focus away from Queue). The Queue-selecting part also happens automatically, whenever the playing track actually changes (explicit play action or natural auto-advance alike) -- except while an overlay is open, or on startup; the Library reveal is only on the explicit keypress |
 | `?` | Help overlay |
@@ -173,6 +178,36 @@ Press `?` inside the full UI for the in-app keybinding list.
 
 **Mini mode** (`-mini`): `Space` play/pause, `n`/`p` next/prev, `s` stop,
 `-`/`=` volume, `q`/`Ctrl-C` quit.
+
+## Lyrics
+
+Put a `.txt` file next to a track (same directory, e.g. `/a/b/Some
+Track [84934].mp3` → `/a/b/Some Track [84934].txt`) and mpdtui will show
+it. Matching is normalized rather than exact: special characters are
+stripped from both the track's and the `.txt`'s filename before
+comparing, so `Some Track [84934].txt` and `some_track-84934.txt` both
+match the same track despite differing punctuation.
+
+MPD's own protocol has no command to serve an arbitrary sidecar file's
+content (unlike album art, which MPD serves natively), so this requires
+mpdtui to read the file directly off disk -- it only works if mpdtui runs
+somewhere that can actually see the same files MPD does (typically the
+same host, or a mounted/synced path). Point it at the right directory by
+creating `~/.config/mpdtui/config` (respects `$XDG_CONFIG_HOME` if set)
+with:
+
+```
+music_dir = /path/to/your/music
+```
+
+(`~/` is expanded.) Without this file, the lyrics feature just stays
+inactive -- no badges, and `y` explains what's missing.
+
+Lyrics availability is rechecked live every time the Queue repopulates
+(adding a track, loading/appending a playlist, even another client like
+`mpc` changing the queue), not cached from when a track was first added
+-- so a `.txt` file dropped in later shows up on the next Queue refresh
+without needing to requeue anything.
 
 ## Test
 

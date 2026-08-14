@@ -7,6 +7,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
+	"mpdtui/internal/lyrics"
 	"mpdtui/internal/mpdclient"
 )
 
@@ -184,6 +185,11 @@ func setQueueHeader(t *tview.Table) {
 func (q *queuePanel) render(curID int) {
 	q.table.Clear()
 	setQueueHeader(q.table)
+	// lyricsDirs caches internal/lyrics.Candidates per directory for the
+	// duration of this one render pass only (no caching across renders,
+	// see hasLyrics) -- multiple queued tracks from the same album share
+	// a directory, so this avoids re-listing it once per track.
+	lyricsDirs := map[string]map[string]string{}
 	for i, s := range q.songs {
 		row := i + queueHeaderRows
 		marker := "  "
@@ -194,9 +200,13 @@ func (q *queuePanel) render(curID int) {
 		if title == "" {
 			title = baseName(s.File)
 		}
+		titleText := truncateWithEllipsis(title, queueTitleMaxLen)
+		if q.hasLyrics(s.File, lyricsDirs) {
+			titleText = lyricsIcon + " " + titleText
+		}
 		q.table.SetCell(row, 0, tview.NewTableCell(marker))
 		q.table.SetCell(row, 1, tview.NewTableCell(fmt.Sprintf("%3d", i+1)))
-		q.table.SetCell(row, 2, tview.NewTableCell(truncateWithEllipsis(title, queueTitleMaxLen)+queueColumnGap).
+		q.table.SetCell(row, 2, tview.NewTableCell(titleText+queueColumnGap).
 			SetAttributes(tcell.AttrBold).
 			SetTextColor(queueTitleColor))
 		q.table.SetCell(row, 3, tview.NewTableCell(truncateWithEllipsis(s.Album, queueAlbumMaxLen)+queueColumnGap))
@@ -209,6 +219,29 @@ func (q *queuePanel) render(curID int) {
 		q.table.SetCell(row, 9, tview.NewTableCell(FormatDuration(s.Duration)).SetAlign(tview.AlignRight))
 	}
 	q.table.SetTitle(fmt.Sprintf(" Queue (%d) ", len(q.songs)))
+}
+
+// hasLyrics reports whether file has a matching lyrics sidecar (see
+// internal/lyrics), rechecked live against the real directory contents on
+// every render -- there's no caching across render() calls, only within
+// this one pass (dirCache), so a lyrics file added after a track was
+// already queued shows up as soon as the Queue next repopulates (adding/
+// removing/moving a track, or another client's own change via MPD's
+// "playlist" idle event), without needing a special "recheck" code path
+// of its own. Always false if musicDir is unset (the feature is
+// inactive).
+func (q *queuePanel) hasLyrics(file string, dirCache map[string]map[string]string) bool {
+	if q.app.musicDir == "" {
+		return false
+	}
+	dir := lyrics.Dir(q.app.musicDir, file)
+	candidates, cached := dirCache[dir]
+	if !cached {
+		candidates = lyrics.Candidates(dir)
+		dirCache[dir] = candidates
+	}
+	_, ok := lyrics.Match(file, candidates)
+	return ok
 }
 
 // truncateWithEllipsis returns s unchanged if it's at most max runes,

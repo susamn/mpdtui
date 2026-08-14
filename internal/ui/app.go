@@ -31,6 +31,12 @@ type App struct {
 	client  *mpdclient.Client
 	watcher *mpdclient.Watcher
 
+	// musicDir is the local filesystem path mirroring MPD's own
+	// music_directory (see internal/config.LoadMusicDir), needed by
+	// internal/lyrics to find lyrics files -- "" means the lyrics feature
+	// is inactive (no config.LoadMusicDir setup), not an error.
+	musicDir string
+
 	pages *tview.Pages
 	root  *tview.Flex
 
@@ -38,11 +44,19 @@ type App struct {
 	playlists *playlistsPanel
 	queue     *queuePanel
 
-	nowPlaying *tview.TextView
-	hintBar    *tview.TextView
-	albumArt   *albumArtPanel
-	trackInfo  *trackInfoCard
-	visualizer *visualizerPanel
+	nowPlaying   *tview.TextView
+	hintBar      *tview.TextView
+	albumArt     *albumArtPanel
+	trackInfo    *trackInfoCard
+	lyricsViewer *lyricsViewer
+	visualizer   *visualizerPanel
+
+	// currentSong is refreshNowPlaying's own last-fetched CurrentSong,
+	// kept around so openLyricsViewer can show it without a redundant
+	// fetch of its own -- trackInfoCard gets to skip this same fetch for
+	// the same reason, since refreshNowPlaying already re-renders it
+	// unconditionally on every tick.
+	currentSong mpdclient.Song
 
 	panels   []tview.Primitive
 	panelIdx int
@@ -66,11 +80,14 @@ type App struct {
 
 // Run connects a Watcher and runs the full TUI until the user quits or an
 // unrecoverable error occurs. Blocks until the application exits.
-func Run(client *mpdclient.Client) error {
+// musicDir enables the lyrics feature (see internal/lyrics) when
+// non-empty; pass "" to leave it inactive.
+func Run(client *mpdclient.Client, musicDir string) error {
 	a := &App{
-		tv:     tview.NewApplication(),
-		client: client,
-		done:   make(chan struct{}),
+		tv:       tview.NewApplication(),
+		client:   client,
+		musicDir: musicDir,
+		done:     make(chan struct{}),
 	}
 
 	w, err := client.Watch("player", "mixer", "options", "playlist", "stored_playlist", "database")
@@ -119,6 +136,7 @@ func (a *App) build() {
 
 	a.albumArt = newAlbumArtPanel(a)
 	a.trackInfo = newTrackInfoCard(a)
+	a.lyricsViewer = newLyricsViewer(a)
 	a.visualizer = newVisualizerPanel(a)
 
 	a.hintBar = tview.NewTextView().SetDynamicColors(true)
@@ -297,6 +315,7 @@ func (a *App) refreshNowPlaying() {
 		return
 	}
 	a.renderNowPlaying(st, song)
+	a.currentSong = song
 
 	// Computed before setCurrent overwrites queue.currentID with the new
 	// value.
@@ -305,9 +324,25 @@ func (a *App) refreshNowPlaying() {
 	a.queue.setCurrent(st.SongID)
 	a.albumArt.onTrackChanged(song.File)
 	a.trackInfo.render(song)
+	a.maybeRefreshLyricsViewer(song, trackChanged)
 	a.visualizer.tick(st)
 
 	a.maybeJumpToCurrentTrack(trackChanged)
+}
+
+// maybeRefreshLyricsViewer re-renders the lyrics viewer for song when
+// trackChanged (see trackChangedForJump) and it's the currently open
+// overlay -- so a track auto-advancing while the viewer is open shows the
+// new track's lyrics without needing to close and reopen it. Deliberately
+// NOT called unconditionally the way trackInfo.render is (cheap string
+// formatting of data already fetched this tick): lyrics.Read does real
+// filesystem I/O, so re-running it on every ~500ms tick regardless of
+// whether the viewer is even visible would be wasted work for a feature
+// most ticks won't have it open at all.
+func (a *App) maybeRefreshLyricsViewer(song mpdclient.Song, trackChanged bool) {
+	if trackChanged && a.mode == modeOverlay && a.tv.GetFocus() == a.lyricsViewer {
+		a.lyricsViewer.render(song)
+	}
 }
 
 // maybeJumpToCurrentTrack jumps focus to the Queue panel and selects the
@@ -414,6 +449,7 @@ var globalHints = []hint{
 	{"f", "find"},
 	{"F", "reset"},
 	{"i", "info"},
+	{"y", "lyrics"},
 	{"v", "visualizer"},
 	{"L", "locate"},
 	{"?", "help"},

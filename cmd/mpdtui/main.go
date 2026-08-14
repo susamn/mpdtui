@@ -40,7 +40,7 @@ func main() {
 	case *miniMode:
 		err = mini.Run(client)
 	default:
-		err = ui.Run(client)
+		err = ui.Run(client, config.LoadMusicDir())
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mpdtui: %v\n", err)
