@@ -12,6 +12,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
+	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
 )
 
@@ -37,6 +38,23 @@ type App struct {
 	// is inactive (no config.LoadMusicDir setup), not an error.
 	musicDir string
 
+	// metaDB is the local track-metadata database (play count, rating,
+	// mark, tags -- see internal/metadata), opened by cmd/mpdtui's main.go
+	// only when config.LoadTrackMetadataEnabled() is true. nil means the
+	// feature is inactive, not an error -- every consumer of metaDB has to
+	// check for nil and no-op (typically via invalidKey) rather than
+	// assume it's always present.
+	metaDB *metadata.DB
+
+	// runAsync runs a unit of (typically metaDB) work in the background
+	// and applies its result on the UI goroutine -- see runAsyncDefault,
+	// which build() wires this to. A field rather than calling
+	// runAsyncDefault directly so tests can swap in a synchronous stand-
+	// in: nothing drains tv's update queue without tv.Run() actually
+	// running, so the real (QueueUpdateDraw-based) implementation would
+	// otherwise never complete inside a test.
+	runAsync func(work func() error, onSuccess func())
+
 	pages *tview.Pages
 	root  *tview.Flex
 
@@ -49,6 +67,7 @@ type App struct {
 	albumArt     *albumArtPanel
 	trackInfo    *trackInfoCard
 	lyricsViewer *lyricsViewer
+	markPicker   *markPicker
 	visualizer   *visualizerPanel
 
 	// currentSong is refreshNowPlaying's own last-fetched CurrentSong,
@@ -57,6 +76,13 @@ type App struct {
 	// the same reason, since refreshNowPlaying already re-renders it
 	// unconditionally on every tick.
 	currentSong mpdclient.Song
+
+	// playCountedSongID is the queue song id maybeTrackPlayCount has
+	// already incremented the play count for, so ticking past the
+	// halfway point on every ~500ms refresh doesn't count it again; -1
+	// (matching queuePanel.currentID's own "none" convention) means
+	// nothing's been counted yet this session.
+	playCountedSongID int
 
 	panels   []tview.Primitive
 	panelIdx int
@@ -81,13 +107,19 @@ type App struct {
 // Run connects a Watcher and runs the full TUI until the user quits or an
 // unrecoverable error occurs. Blocks until the application exits.
 // musicDir enables the lyrics feature (see internal/lyrics) when
-// non-empty; pass "" to leave it inactive.
-func Run(client *mpdclient.Client, musicDir string) error {
+// non-empty; pass "" to leave it inactive. metaDB enables the local
+// play-count/rating/mark/tags database (see internal/metadata) when
+// non-nil; pass nil to leave it inactive. Run itself never opens or
+// closes metaDB -- that's the caller's (cmd/mpdtui's) responsibility,
+// same as the MPD client.
+func Run(client *mpdclient.Client, musicDir string, metaDB *metadata.DB) error {
 	a := &App{
-		tv:       tview.NewApplication(),
-		client:   client,
-		musicDir: musicDir,
-		done:     make(chan struct{}),
+		tv:                tview.NewApplication(),
+		client:            client,
+		musicDir:          musicDir,
+		metaDB:            metaDB,
+		playCountedSongID: -1,
+		done:              make(chan struct{}),
 	}
 
 	w, err := client.Watch("player", "mixer", "options", "playlist", "stored_playlist", "database")
@@ -118,8 +150,28 @@ func Run(client *mpdclient.Client, musicDir string) error {
 	return a.tv.Run()
 }
 
+// runAsyncDefault is runAsync's real (production) implementation: work
+// runs on its own goroutine, off the UI goroutine entirely, so a
+// database write never makes a keypress wait on disk I/O; once it's
+// done, onSuccess runs safely on the UI goroutine (typical use: repaint
+// a Queue-panel cell) via QueueUpdateDraw, or the error is flashed
+// instead if work failed.
+func (a *App) runAsyncDefault(work func() error, onSuccess func()) {
+	go func() {
+		err := work()
+		a.tv.QueueUpdateDraw(func() {
+			if err != nil {
+				a.showError(err)
+				return
+			}
+			onSuccess()
+		})
+	}()
+}
+
 func (a *App) build() {
 	applyTheme()
+	a.runAsync = a.runAsyncDefault
 
 	a.library = newLibraryPanel(a)
 	a.playlists = newPlaylistsPanel(a)
@@ -137,6 +189,7 @@ func (a *App) build() {
 	a.albumArt = newAlbumArtPanel(a)
 	a.trackInfo = newTrackInfoCard(a)
 	a.lyricsViewer = newLyricsViewer(a)
+	a.markPicker = newMarkPicker(a)
 	a.visualizer = newVisualizerPanel(a)
 
 	a.hintBar = tview.NewTextView().SetDynamicColors(true)
@@ -325,6 +378,7 @@ func (a *App) refreshNowPlaying() {
 	a.albumArt.onTrackChanged(song.File)
 	a.trackInfo.render(song)
 	a.maybeRefreshLyricsViewer(song, trackChanged)
+	a.maybeTrackPlayCount(st, song)
 	a.visualizer.tick(st)
 
 	a.maybeJumpToCurrentTrack(trackChanged)
@@ -472,6 +526,9 @@ func (a *App) updateHintBar() {
 		}
 	case a.queue.table:
 		panelHints = []hint{{"Enter", "play"}, {"d", "remove"}, {"J/K", "move"}}
+		if a.metaDB != nil {
+			panelHints = append(panelHints, hint{"1-5", "rate"}, hint{"m", "mark"})
+		}
 	}
 
 	text := formatHints(panelHints)

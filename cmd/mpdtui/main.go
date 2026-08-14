@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"mpdtui/internal/config"
+	"mpdtui/internal/metadata"
 	"mpdtui/internal/mini"
 	"mpdtui/internal/mpdclient"
 	"mpdtui/internal/picker"
@@ -32,6 +33,21 @@ func main() {
 	}
 	defer client.Close()
 
+	var metaDB *metadata.DB
+	if config.LoadTrackMetadataEnabled() {
+		metaDB, err = metadata.Open(config.DBFile())
+		if err != nil {
+			// Non-fatal, unlike the MPD connection above: this is an
+			// opt-in local bookkeeping feature, not something the rest of
+			// the app depends on -- a broken local database shouldn't
+			// stop the music from playing.
+			fmt.Fprintf(os.Stderr, "mpdtui: track metadata database (%s): %v -- continuing without it\n", config.DBFile(), err)
+			metaDB = nil
+		} else {
+			defer metaDB.Close()
+		}
+	}
+
 	switch {
 	case *playlistPicker:
 		err = picker.RunPlaylistPicker(client)
@@ -40,7 +56,7 @@ func main() {
 	case *miniMode:
 		err = mini.Run(client)
 	default:
-		err = ui.Run(client, config.LoadMusicDir())
+		err = ui.Run(client, config.LoadMusicDir(), metaDB)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mpdtui: %v\n", err)

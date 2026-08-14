@@ -22,14 +22,59 @@ func ConfigDir() string {
 	return filepath.Join(home, ".config", "mpdtui")
 }
 
-// ConfigFile is the path to mpdtui's own local settings file (currently
-// just music_dir, see LoadMusicDir), inside ConfigDir.
+// ConfigFile is the path to mpdtui's own local settings file (music_dir,
+// track_metadata -- see LoadMusicDir/LoadTrackMetadataEnabled), inside
+// ConfigDir.
 func ConfigFile() string {
 	dir := ConfigDir()
 	if dir == "" {
 		return ""
 	}
 	return filepath.Join(dir, "config")
+}
+
+// DBFile is the path to mpdtui's local track-metadata SQLite database
+// (see internal/metadata), inside ConfigDir -- next to ConfigFile, never
+// outside it.
+func DBFile() string {
+	dir := ConfigDir()
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "mpdtui.db")
+}
+
+// loadConfigValues parses ConfigFile into a key->value map, or nil if it
+// doesn't exist or can't be read. Shared by every LoadX function in this
+// file so the file is only ever parsed once per key looked up, not once
+// per setting.
+//
+// The file format is deliberately minimal ("key = value" lines, "#"
+// comments, blank lines ignored) rather than TOML/YAML/JSON: pulling in a
+// config-format dependency for a handful of settings felt like the wrong
+// tradeoff for a tool that otherwise has none.
+func loadConfigValues() map[string]string {
+	path := ConfigFile()
+	if path == "" {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	values := make(map[string]string)
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		values[strings.TrimSpace(key)] = strings.TrimSpace(value)
+	}
+	return values
 }
 
 // LoadMusicDir reads music_dir from ConfigFile -- the local filesystem
@@ -46,39 +91,32 @@ func ConfigFile() string {
 // rather than leaking a path nothing can actually read into the rest of
 // the app.
 //
-// The file format is deliberately minimal ("key = value" lines, "#"
-// comments, blank lines ignored) rather than TOML/YAML/JSON: this is a
-// single-setting file today, and pulling in a config-format dependency
-// for that felt like the wrong tradeoff for a tool that has zero such
-// dependencies otherwise. A leading "~/" in the value is expanded against
-// the home directory, since path config values are commonly written that
-// way.
+// A leading "~/" in the value is expanded against the home directory,
+// since path config values are commonly written that way.
 func LoadMusicDir() string {
-	path := ConfigFile()
-	if path == "" {
+	value, ok := loadConfigValues()["music_dir"]
+	if !ok {
 		return ""
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
+	dir := expandHome(value)
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
 		return ""
 	}
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok || strings.TrimSpace(key) != "music_dir" {
-			continue
-		}
-		dir := expandHome(strings.TrimSpace(value))
-		info, err := os.Stat(dir)
-		if err != nil || !info.IsDir() {
-			return ""
-		}
-		return dir
-	}
-	return ""
+	return dir
+}
+
+// LoadTrackMetadataEnabled reads track_metadata from ConfigFile -- the
+// activation flag for internal/metadata's local play-count/rating/mark/
+// tags database. Off (false) unless the config file has a line reading
+// exactly "track_metadata = true": missing file, missing key, or any
+// other value all mean inactive, matching LoadMusicDir's own "absent
+// config is a normal, supported state" convention. Deliberately opt-in
+// rather than on-by-default -- this feature writes a local database file
+// on every play/pause tick once active, which isn't something to turn on
+// without the user asking for it.
+func LoadTrackMetadataEnabled() bool {
+	return loadConfigValues()["track_metadata"] == "true"
 }
 
 // expandHome replaces a leading "~/" in path with the user's home

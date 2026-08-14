@@ -18,27 +18,28 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			a.closeOverlay()
 			return nil
 		}
-		// readOnlyOverlayToggles: for these two, the key that opened the
-		// overlay also closes it again while it's focused, mirroring Esc
-		// -- every other overlay only closes via Esc, but these two are
-		// pure read-only displays (nothing to type), so doubling their own
-		// key as a close shortcut is unambiguous. 'q' also still quits
-		// while either is open, for the same read-only-so-nothing-to-
-		// swallow reason (unlike the search/filter/save-playlist inputs,
-		// where 'q' has to stay literal text).
+		// noTextInputOverlays: none of these three have anything to type
+		// (a track-info/lyrics display, or a plain selection list), so
+		// 'q' can safely still quit while any of them is open -- unlike
+		// the search/filter/save-playlist inputs, where 'q' has to stay
+		// literal text. The first two also double their own opening key
+		// as a close shortcut, mirroring Esc (closeKey == 0 for
+		// markPicker: there's no natural "same key" for a selection list,
+		// only Esc/Enter make sense there).
 		if event.Key() == tcell.KeyRune {
-			readOnlyOverlayToggles := []struct {
-				key       rune
+			noTextInputOverlays := []struct {
+				closeKey  rune
 				primitive tview.Primitive
 			}{
 				{'i', a.trackInfo},
 				{'y', a.lyricsViewer},
+				{0, a.markPicker},
 			}
-			for _, ov := range readOnlyOverlayToggles {
+			for _, ov := range noTextInputOverlays {
 				if a.tv.GetFocus() != ov.primitive {
 					continue
 				}
-				if event.Rune() == ov.key {
+				if ov.closeKey != 0 && event.Rune() == ov.closeKey {
 					a.closeOverlay()
 					return nil
 				}
@@ -49,19 +50,21 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			}
 			// Transport controls (play/pause, stop, skip, seek, volume,
 			// shuffle, repeat, consume, single) stay live while the lyrics
-			// viewer specifically is open -- unlike every other overlay
-			// (including trackInfoCard, which doesn't get this), it's meant
-			// to be read *while music plays*, so pausing or skipping
-			// shouldn't require closing it first. None of these touch focus
-			// or open another overlay (unlike e.g. '?'/help or 'i'/track
-			// info, deliberately left out here), which is what would
-			// actually conflict with an overlay already being open -- see
-			// maybeJumpToCurrentTrack's own doc comment on why stealing
-			// focus out from under an open overlay is the specific thing to
-			// avoid. Scoped to lyricsViewer only, not a blanket rule: a
+			// viewer or the mark picker specifically is open -- unlike
+			// every other overlay (including trackInfoCard, which doesn't
+			// get this), both are meant to be usable *while music plays*,
+			// so pausing or skipping shouldn't require closing them first.
+			// None of these touch focus or open another overlay (unlike
+			// e.g. '?'/help or 'i'/track info, deliberately left out
+			// here), which is what would actually conflict with an
+			// overlay already being open -- see maybeJumpToCurrentTrack's
+			// own doc comment on why stealing focus out from under an open
+			// overlay is the specific thing to avoid. A
 			// search/filter/save-playlist input still needs 's'/Space to
-			// stay literal typed text.
-			if a.tv.GetFocus() == a.lyricsViewer && event.Key() == tcell.KeyRune && a.handleTransportKey(event.Rune()) {
+			// stay literal typed text, so this stays scoped to just these
+			// two rather than a blanket rule.
+			focus := a.tv.GetFocus()
+			if (focus == a.lyricsViewer || focus == a.markPicker) && a.handleTransportKey(event.Rune()) {
 				return nil
 			}
 		}
@@ -97,20 +100,35 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 		case 'L':
 			a.jumpToCurrentTrack()
 			return nil
+		case 'm':
+			a.handleOpenMarkPicker()
+			return nil
 		case '?':
 			a.openHelp()
 			return nil
 		case 'q':
 			a.tv.Stop()
 			return nil
-		case '1':
-			a.focusPanel(0)
-			return nil
-		case '2':
-			a.focusPanel(1)
-			return nil
-		case '3':
-			a.focusPanel(2)
+		case '1', '2', '3', '4', '5':
+			// While the Queue panel is focused, 1-5 rate the selected
+			// track instead of jumping panel focus -- an explicit tradeoff
+			// (Tab/Backtab still cycle panels regardless of focus, so
+			// nothing is unreachable, just not on this specific shortcut
+			// from inside Queue).
+			if a.tv.GetFocus() == a.queue.table {
+				a.handleRateSelectedTrack(int(event.Rune() - '0'))
+				return nil
+			}
+			switch event.Rune() {
+			case '1':
+				a.focusPanel(0)
+			case '2':
+				a.focusPanel(1)
+			case '3':
+				a.focusPanel(2)
+			default:
+				a.invalidKey(string(event.Rune()))
+			}
 			return nil
 		case 'a':
 			a.handleAdd()
