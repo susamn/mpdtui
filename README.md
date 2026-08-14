@@ -78,6 +78,10 @@ single-line inline player for a shell or tmux pane.
   own Year-through-Type columns, for the currently playing track's
   lyrics, read from a `.txt` sidecar file next to the track on disk; see
   [Lyrics](#lyrics) for setup
+- **Track metadata** (`1`-`5`, `m`) — local play count, 1-5 star rating,
+  and a mark-with-reason flag (e.g. "mark for deletion"), stored in a
+  SQLite database separate from MPD's own library; see
+  [Track metadata](#track-metadata) for setup
 - **Library stats** — live total tracks/artists/playlists, shown
   alongside the Queue search box, refreshed on library/playlist changes
 - **Now Playing bar** — live progress, volume, repeat/random/single/consume
@@ -180,6 +184,8 @@ Press `?` inside the full UI for the in-app keybinding list.
 | Queue | `d` | Remove selected track |
 | Queue | `J` / `K` | Move selected track down / up |
 | Queue | `/` | Search: focuses the always-visible "Search track:" box above the queue, Enter jumps to first match (Esc cancels) |
+| Queue | `1`-`5` | Rate the selected track 1-5 stars (needs `track_metadata` set, see [Track metadata](#track-metadata) below). Note: this means `1`/`2` no longer jump to Library/Playlists from inside Queue -- `Tab`/`Backtab` still cycle panels regardless of focus |
+| Queue | `m` | Mark the selected track with a reason, or clear an existing mark, from a small popup -- `j`/`k`/`g`/`G` to navigate, `Enter` to apply, `Esc` to cancel. Transport controls keep working while it's open |
 
 **Mini mode** (`-mini`): `Space` play/pause, `n`/`p` next/prev, `s` stop,
 `-`/`=` volume, `q`/`Ctrl-C` quit.
@@ -217,6 +223,58 @@ Lyrics availability is rechecked live every time the Queue repopulates
 `mpc` changing the queue), not cached from when a track was first added
 -- so a `.txt` file dropped in later shows up on the next Queue refresh
 without needing to requeue anything.
+
+## Track metadata
+
+Local, per-track bookkeeping -- play count, a 1-5 star rating, and a
+"marked with a reason" flag -- that MPD itself has no concept of, kept in
+a SQLite database entirely separate from MPD's own library (mpdtui never
+writes to anything MPD manages; it only ever adds its own opinions about
+a track MPD already reports).
+
+Off by default. Enable it by adding to `~/.config/mpdtui/config` (the
+same file `music_dir` lives in):
+
+```
+track_metadata = true
+```
+
+The database itself lives at `~/.config/mpdtui/mpdtui.db` (next to
+`config`, nowhere else) and is created automatically the first time it's
+needed.
+
+When active, the Queue table gains two right-aligned columns right
+before Type: **Mark** (a colored tick, blank if unmarked -- different
+mark reasons get different tick colors) and **Rating** (gold stars,
+filled/unfilled). All database reads/writes happen in the background --
+rating or marking a track flashes its confirmation immediately, and the
+column repaints as soon as the write lands, without ever blocking a
+keypress on disk I/O.
+
+- **Rating** (`1`-`5`, Queue panel): rates whichever track is currently
+  *selected* in the Queue -- not necessarily the one playing.
+- **Play count**: tracked automatically, no keybinding. A track counts as
+  played once you've listened to at least 50% of it (by elapsed/duration,
+  not just "it started"), counted once per queue song id so ticking past
+  the halfway point on every refresh, or seeking back across it, doesn't
+  inflate the count.
+- **Mark** (`m`, Queue panel): opens a small popup listing mark reasons
+  (e.g. "mark for deletion") for the selected track, plus a "(clear
+  mark)" entry to unmark it. This is bookkeeping only -- mpdtui never
+  deletes or moves a file itself, marking one just records your own
+  intent for you to act on later.
+
+Tracks are matched by their file path, normalized the same way lyrics
+sidecar files are (special characters stripped per path segment,
+lowercased) -- so minor path differences don't create duplicate rows, but
+each directory still stays distinct (a track named the same as another in
+a different folder is still tracked separately).
+
+There's currently no in-app way to edit the mark-reason catalog or the
+tag catalog -- add rows to the `mark_reason`/`tags` tables directly (e.g.
+via the `sqlite3` CLI against `~/.config/mpdtui/mpdtui.db`) if you want
+more than the seeded defaults ("mark for deletion"; "bengali"/"hindi"/
+"english" for tags, not yet exposed in the UI).
 
 ## Test
 

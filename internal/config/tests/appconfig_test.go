@@ -123,6 +123,61 @@ func TestLoadMusicDirExpandsLeadingTilde(t *testing.T) {
 	}
 }
 
+func TestLoadTrackMetadataEnabledDefaultsToFalse(t *testing.T) {
+	withEnv(t, "XDG_CONFIG_HOME", t.TempDir())
+	if config.LoadTrackMetadataEnabled() {
+		t.Error("LoadTrackMetadataEnabled() with no config file = true, want false")
+	}
+}
+
+func TestLoadTrackMetadataEnabledTrue(t *testing.T) {
+	dir := t.TempDir()
+	withEnv(t, "XDG_CONFIG_HOME", dir)
+	writeConfigFile(t, dir, "track_metadata = true\n")
+
+	if !config.LoadTrackMetadataEnabled() {
+		t.Error("LoadTrackMetadataEnabled() = false, want true")
+	}
+}
+
+// TestLoadTrackMetadataEnabledRejectsAnythingButExactlyTrue guards the
+// deliberately strict match ("== \"true\"", not a general boolean
+// parse): a typo or a "yes"/"1"/"True" should stay inactive rather than
+// silently activating a feature that starts writing a local database
+// file on every play/pause tick.
+func TestLoadTrackMetadataEnabledRejectsAnythingButExactlyTrue(t *testing.T) {
+	for _, value := range []string{"True", "yes", "1", "enabled", ""} {
+		dir := t.TempDir()
+		withEnv(t, "XDG_CONFIG_HOME", dir)
+		writeConfigFile(t, dir, "track_metadata = "+value+"\n")
+
+		if config.LoadTrackMetadataEnabled() {
+			t.Errorf("LoadTrackMetadataEnabled() with track_metadata = %q = true, want false", value)
+		}
+	}
+}
+
+func TestLoadMusicDirAndTrackMetadataFromTheSameFile(t *testing.T) {
+	dir := t.TempDir()
+	withEnv(t, "XDG_CONFIG_HOME", dir)
+	musicDir := t.TempDir()
+	writeConfigFile(t, dir, "music_dir = "+musicDir+"\ntrack_metadata = true\n")
+
+	if got, want := config.LoadMusicDir(), musicDir; got != want {
+		t.Errorf("LoadMusicDir() = %q, want %q", got, want)
+	}
+	if !config.LoadTrackMetadataEnabled() {
+		t.Error("LoadTrackMetadataEnabled() = false, want true")
+	}
+}
+
+func TestDBFileIsInsideConfigDir(t *testing.T) {
+	withEnv(t, "XDG_CONFIG_HOME", "/xdg")
+	if got, want := config.DBFile(), filepath.Join("/xdg", "mpdtui", "mpdtui.db"); got != want {
+		t.Errorf("DBFile() = %q, want %q", got, want)
+	}
+}
+
 func writeConfigFile(t *testing.T, xdgConfigHome, content string) {
 	t.Helper()
 	dir := filepath.Join(xdgConfigHome, "mpdtui")

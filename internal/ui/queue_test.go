@@ -203,27 +203,97 @@ func TestQueueHeaderRowIncludesLyrColumnWhenLyricsActive(t *testing.T) {
 	}
 }
 
+// TestQueueHeaderIncludesMarkAndRatingWhenMetadataActive is the
+// metadata counterpart to TestQueueHeaderRowIncludesLyrColumnWhenLyricsActive:
+// Mark and Rating appear right before Type, in that order and right-
+// aligned like Type/Duration, only when the track-metadata feature is
+// active (App.metaDB != nil).
+func TestQueueHeaderIncludesMarkAndRatingWhenMetadataActive(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.queue.render(-1)
+
+	wantHeaders := []struct {
+		col   int
+		text  string
+		align int
+	}{
+		{7, "Composer", tview.AlignLeft},
+		{8, "Mark" + queueColumnGap, tview.AlignRight},
+		{9, "Rating" + queueColumnGap, tview.AlignRight},
+		{10, "Type" + formatGap, tview.AlignRight},
+		{11, "Duration", tview.AlignRight},
+	}
+	for _, w := range wantHeaders {
+		cell := a.queue.table.GetCell(0, w.col)
+		if cell.Text != w.text {
+			t.Errorf("header col %d text = %q, want %q", w.col, cell.Text, w.text)
+		}
+		if cell.Align != w.align {
+			t.Errorf("header col %d align = %d, want %d", w.col, cell.Align, w.align)
+		}
+	}
+}
+
+// TestQueueRenderShowsDefaultUnratedUnmarkedRow covers the "sensible
+// defaults" for a track with no local metadata row yet: all-empty gold
+// stars in Rating (same glyphs ratingStars(0) already produces), a blank
+// Mark cell -- not an error, not a placeholder icon.
+func TestQueueRenderShowsDefaultUnratedUnmarkedRow(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.queue.songs = []mpdclient.Song{{ID: 1, File: "artist/track.mp3"}}
+	a.queue.render(-1)
+
+	row := queueHeaderRows
+	if got, want := a.queue.table.GetCell(row, a.queue.cols.rating).Text, ratingStars(0)+queueColumnGap; got != want {
+		t.Errorf("default Rating cell = %q, want %q", got, want)
+	}
+	if got, want := a.queue.table.GetCell(row, a.queue.cols.mark).Text, queueColumnGap; got != want {
+		t.Errorf("default Mark cell = %q, want %q (blank)", got, want)
+	}
+}
+
 // TestNewQueueColumnsOmitsLyrWhenInactive is a pure unit test of the
 // column-layout logic underlying both TestQueueHeaderRowLabelsAndAlignment
 // and TestQueueHeaderRowIncludesLyrColumnWhenLyricsActive above --
 // lyr == -1 is the "no such column" sentinel render()/setQueueHeader
 // check before ever touching that index.
 func TestNewQueueColumnsOmitsLyrWhenInactive(t *testing.T) {
-	cols := newQueueColumns(false)
+	cols := newQueueColumns(false, false)
 	if cols.lyr != -1 {
 		t.Errorf("lyr = %d, want -1 (no Lyr column when lyrics is inactive)", cols.lyr)
 	}
-	want := queueColumns{lyr: -1, title: 2, album: 3, artist: 4, year: 5, genre: 6, composer: 7, typ: 8, duration: 9}
+	want := queueColumns{lyr: -1, title: 2, album: 3, artist: 4, year: 5, genre: 6, composer: 7, mark: -1, rating: -1, typ: 8, duration: 9}
 	if cols != want {
-		t.Errorf("newQueueColumns(false) = %+v, want %+v", cols, want)
+		t.Errorf("newQueueColumns(false, false) = %+v, want %+v", cols, want)
 	}
 }
 
 func TestNewQueueColumnsIncludesLyrWhenActive(t *testing.T) {
-	cols := newQueueColumns(true)
-	want := queueColumns{lyr: 3, title: 2, album: 4, artist: 5, year: 6, genre: 7, composer: 8, typ: 9, duration: 10}
+	cols := newQueueColumns(true, false)
+	want := queueColumns{lyr: 3, title: 2, album: 4, artist: 5, year: 6, genre: 7, composer: 8, mark: -1, rating: -1, typ: 9, duration: 10}
 	if cols != want {
-		t.Errorf("newQueueColumns(true) = %+v, want %+v", cols, want)
+		t.Errorf("newQueueColumns(true, false) = %+v, want %+v", cols, want)
+	}
+}
+
+// TestNewQueueColumnsIncludesMarkAndRatingWhenMetadataActive is the
+// counterpart covering the new Mark/Rating columns: they sit right
+// before Type, in that order, and only exist when metadataActive (i.e.
+// App.metaDB != nil) -- otherwise the layout is identical to Lyr's own
+// "no such column" omission.
+func TestNewQueueColumnsIncludesMarkAndRatingWhenMetadataActive(t *testing.T) {
+	cols := newQueueColumns(false, true)
+	want := queueColumns{lyr: -1, title: 2, album: 3, artist: 4, year: 5, genre: 6, composer: 7, mark: 8, rating: 9, typ: 10, duration: 11}
+	if cols != want {
+		t.Errorf("newQueueColumns(false, true) = %+v, want %+v", cols, want)
+	}
+}
+
+func TestNewQueueColumnsIncludesLyrAndMarkAndRatingTogether(t *testing.T) {
+	cols := newQueueColumns(true, true)
+	want := queueColumns{lyr: 3, title: 2, album: 4, artist: 5, year: 6, genre: 7, composer: 8, mark: 9, rating: 10, typ: 11, duration: 12}
+	if cols != want {
+		t.Errorf("newQueueColumns(true, true) = %+v, want %+v", cols, want)
 	}
 }
 

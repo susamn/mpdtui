@@ -66,7 +66,7 @@ func TestQueueRenderShowsLyricsIconInLyrColumnOnlyWhenAvailable(t *testing.T) {
 		{ID: 2, Title: "Without Lyrics", File: "artist/Without Lyrics.mp3"},
 	}
 	a.queue.render(-1)
-	lyrCol := newQueueColumns(true).lyr
+	lyrCol := newQueueColumns(true, false).lyr
 
 	if got := a.queue.table.GetCell(queueHeaderRows, lyrCol).Text; got != lyricsIcon {
 		t.Errorf("Lyr cell for the track with lyrics = %q, want %q", got, lyricsIcon)
@@ -98,7 +98,7 @@ func TestQueueRenderRechecksLyricsOnEveryRender(t *testing.T) {
 	a := newTestAppWithMusicDir(dir)
 	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track", File: "artist/Track.mp3"}}
 	a.queue.render(-1)
-	lyrCol := newQueueColumns(true).lyr
+	lyrCol := newQueueColumns(true, false).lyr
 
 	if got := a.queue.table.GetCell(queueHeaderRows, lyrCol).Text; got != "" {
 		t.Fatalf("setup: Lyr cell = %q, want empty (no lyrics file yet)", got)

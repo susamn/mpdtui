@@ -119,7 +119,7 @@ func lyricsViewerRect(queueY, queueHeight, yearX, durationX int) (x, y, width, h
 // layout, not a stale one.
 func (v *lyricsViewer) positionOverQueueColumns() {
 	_, qy, _, qh := v.app.queue.table.GetRect()
-	cols := newQueueColumns(v.app.musicDir != "")
+	cols := newQueueColumns(v.app.musicDir != "", v.app.metaDB != nil)
 	yearX, _, _ := v.app.queue.table.GetCell(0, cols.year).GetLastPosition()
 	durationX, _, _ := v.app.queue.table.GetCell(0, cols.duration).GetLastPosition()
 	v.SetRect(lyricsViewerRect(qy, qh, yearX, durationX))

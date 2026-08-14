@@ -192,6 +192,14 @@ const helpText = `[::b]Global[-:-:-]
   d              remove selected track
   J / K          move selected track down / up
   /              search: jump to first match (Esc cancels)
+  1-5            rate the selected track (needs track_metadata set in
+                 ~/.config/mpdtui/config); as a result, 1/2 no longer
+                 jump to Library/Playlists from inside Queue --
+                 Tab/Backtab still cycle panels regardless of focus
+  m              mark the selected track with a reason (or clear an
+                 existing mark), from a small popup: j/k/g/G to
+                 navigate, Enter to apply, Esc to cancel -- transport
+                 controls still work while it's open
   📝 in the narrow "Lyr" column means that track has a matching
   lyrics file (see 'y'); rechecked live every time the Queue repopulates.
   The Lyr column itself is only shown when music_dir is configured and

@@ -8,6 +8,7 @@ import (
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/lyrics"
+	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
 )
 
@@ -26,6 +27,28 @@ type queuePanel struct {
 	songs  []mpdclient.Song
 
 	currentID int // queue id of the playing/selected track, or -1 if none (see setCurrent)
+
+	// cols is the column layout render() most recently drew, kept around
+	// so applyTrackMeta (an async DB-fetch result landing later, or an
+	// immediate rate/mark write) can address the right cells without
+	// recomputing it -- must only be read/written on the main (tview)
+	// goroutine, same as every other field here.
+	cols queueColumns
+
+	// metaCache holds the last known local metadata (rating/mark) per
+	// song file, populated asynchronously (see refreshTrackMeta) so
+	// render() never blocks the UI goroutine on a database read. Absent
+	// entries render as the zero-value Track (unrated, unmarked) until
+	// the background fetch fills them in. Main-goroutine-only.
+	metaCache map[string]metadata.Track
+
+	// metaSeq is bumped every time render() kicks off a fresh background
+	// metadata fetch; a fetch's result is only applied if metaSeq still
+	// matches the value captured when it started, so a queue change that
+	// happens while an old fetch is still in flight can't clobber newer
+	// data with stale results. Main-goroutine-only (only ever touched
+	// from render() and from inside QueueUpdateDraw callbacks).
+	metaSeq int
 }
 
 // queueHeaderRows is the number of fixed rows (see Table.SetFixed) taken
@@ -35,7 +58,7 @@ type queuePanel struct {
 const queueHeaderRows = 1
 
 func newQueuePanel(app *App) *queuePanel {
-	q := &queuePanel{app: app, currentID: -1}
+	q := &queuePanel{app: app, currentID: -1, metaCache: map[string]metadata.Track{}}
 
 	t := tview.NewTable()
 	t.SetBorder(true).SetTitle(" Queue ")
@@ -55,7 +78,8 @@ func newQueuePanel(app *App) *queuePanel {
 		q.app.refreshNowPlaying()
 	})
 	q.table = t
-	setQueueHeader(t, newQueueColumns(app.musicDir != ""))
+	q.cols = newQueueColumns(app.musicDir != "", app.metaDB != nil)
+	setQueueHeader(t, q.cols)
 
 	search := tview.NewInputField().SetLabel("Search track: ")
 	search.SetBorder(true)
@@ -153,14 +177,17 @@ var (
 // other column shifts left by one to fill that gap when Lyr is absent
 // (lyr == -1).
 type queueColumns struct {
-	lyr, title, album, artist, year, genre, composer, typ, duration int
+	lyr, title, album, artist, year, genre, composer, mark, rating, typ, duration int
 }
 
 // newQueueColumns computes the column layout for one header/render pass.
 // Marker (0) and position (1) are always fixed; Title always follows at
 // 2; everything from there on is assigned sequentially, with Lyr
-// included only when lyricsActive.
-func newQueueColumns(lyricsActive bool) queueColumns {
+// included only when lyricsActive and Mark/Rating included only when
+// metadataActive (App.metaDB != nil) -- same "don't reserve space for a
+// column that will never show anything" reasoning as Lyr. Mark/Rating
+// sit right before Type, in that order, per explicit request.
+func newQueueColumns(lyricsActive, metadataActive bool) queueColumns {
 	var c queueColumns
 	c.title = 2
 	next := 3
@@ -180,6 +207,15 @@ func newQueueColumns(lyricsActive bool) queueColumns {
 	next++
 	c.composer = next
 	next++
+	if metadataActive {
+		c.mark = next
+		next++
+		c.rating = next
+		next++
+	} else {
+		c.mark = -1
+		c.rating = -1
+	}
 	c.typ = next
 	next++
 	c.duration = next
@@ -217,6 +253,12 @@ func setQueueHeader(t *tview.Table, cols queueColumns) {
 	set(cols.year, "Year", tview.AlignLeft)
 	set(cols.genre, "Genre", tview.AlignLeft)
 	set(cols.composer, "Composer", tview.AlignLeft)
+	if cols.mark >= 0 {
+		set(cols.mark, "Mark"+queueColumnGap, tview.AlignRight)
+	}
+	if cols.rating >= 0 {
+		set(cols.rating, "Rating"+queueColumnGap, tview.AlignRight)
+	}
 	set(cols.typ, "Type"+formatGap, tview.AlignRight)
 	set(cols.duration, "Duration", tview.AlignRight)
 }
@@ -224,7 +266,9 @@ func setQueueHeader(t *tview.Table, cols queueColumns) {
 func (q *queuePanel) render(curID int) {
 	q.table.Clear()
 	lyricsActive := q.app.musicDir != ""
-	cols := newQueueColumns(lyricsActive)
+	metadataActive := q.app.metaDB != nil
+	cols := newQueueColumns(lyricsActive, metadataActive)
+	q.cols = cols
 	setQueueHeader(q.table, cols)
 	// lyricsDirs caches internal/lyrics.Candidates per directory for the
 	// duration of this one render pass only (no caching across renders,
@@ -266,10 +310,144 @@ func (q *queuePanel) render(curID int) {
 		q.table.SetCell(row, cols.genre, tview.NewTableCell(truncateWithEllipsis(s.Genre, queueGenreMaxLen)+queueColumnGap))
 		q.table.SetCell(row, cols.composer, tview.NewTableCell(truncateWithEllipsis(s.Composer, queueComposerMaxLen)+queueColumnGap).
 			SetExpansion(1))
+		if cols.mark >= 0 || cols.rating >= 0 {
+			// Whatever's cached so far (possibly the zero-value Track, if
+			// the background fetch below hasn't landed yet) -- never a
+			// direct DB read here, so render() itself never blocks on I/O.
+			meta := q.metaCache[s.File]
+			if cols.mark >= 0 {
+				q.table.SetCell(row, cols.mark, markCell(meta.Mark))
+			}
+			if cols.rating >= 0 {
+				q.table.SetCell(row, cols.rating, ratingCell(meta.Rating))
+			}
+		}
 		q.table.SetCell(row, cols.typ, formatTagCell(s.File))
 		q.table.SetCell(row, cols.duration, tview.NewTableCell(FormatDuration(s.Duration)).SetAlign(tview.AlignRight))
 	}
 	q.table.SetTitle(fmt.Sprintf(" Queue (%d) ", len(q.songs)))
+
+	if metadataActive {
+		q.metaSeq++
+		q.refreshTrackMeta(q.metaSeq)
+	}
+}
+
+// refreshTrackMeta fetches local metadata (rating/mark) for the current
+// q.songs from the database in the background (see App.runAsync), then
+// applies the result to the table -- keeps render() itself free of any
+// DB I/O so opening/refreshing the Queue panel never blocks the UI
+// goroutine on disk reads. seq guards against a stale fetch (started
+// before a since-superseded queue change) overwriting newer data:
+// application is skipped if q.metaSeq has moved on by the time it lands.
+func (q *queuePanel) refreshTrackMeta(seq int) {
+	db := q.app.metaDB
+	files := make([]string, 0, len(q.songs))
+	seen := map[string]bool{}
+	for _, s := range q.songs {
+		if seen[s.File] {
+			continue
+		}
+		seen[s.File] = true
+		files = append(files, s.File)
+	}
+
+	result := make(map[string]metadata.Track, len(files))
+	q.app.runAsync(func() error {
+		for _, f := range files {
+			t, err := db.Get(f)
+			if err != nil {
+				return err
+			}
+			result[f] = t
+		}
+		return nil
+	}, func() {
+		if seq != q.metaSeq {
+			return // queue changed again since this fetch started; discard
+		}
+		for file, t := range result {
+			q.applyTrackMeta(file, t)
+		}
+	})
+}
+
+// applyTrackMeta records t as file's current metadata and, if it's
+// showing anywhere in the currently rendered queue, repaints just its
+// Mark/Rating cells in place -- used both by refreshTrackMeta's
+// background fetch and by a rating/mark write completing (see
+// trackmetadata.go) to reflect a change without a full re-render or a
+// synchronous DB round-trip on the UI goroutine. A file queued more than
+// once (same track added twice) updates every matching row.
+func (q *queuePanel) applyTrackMeta(file string, t metadata.Track) {
+	q.metaCache[file] = t
+	if q.cols.mark < 0 && q.cols.rating < 0 {
+		return
+	}
+	for i, s := range q.songs {
+		if s.File != file {
+			continue
+		}
+		row := i + queueHeaderRows
+		if q.cols.mark >= 0 {
+			q.table.SetCell(row, q.cols.mark, markCell(t.Mark))
+		}
+		if q.cols.rating >= 0 {
+			q.table.SetCell(row, q.cols.rating, ratingCell(t.Rating))
+		}
+	}
+}
+
+// queueRatingColor tints the Rating column gold, filled and unfilled
+// stars alike (ratingStars renders both in one string) -- a single
+// text color per cell is all tview.Table's TableCell supports, unlike a
+// TextView's per-rune dynamic-color tags.
+var queueRatingColor = tcell.NewRGBColor(0xFF, 0xD7, 0x00)
+
+// ratingCell renders a queue row's Rating column from its local rating
+// (0-5): ratingStars' filled+empty star glyphs, in gold.
+func ratingCell(rating int) *tview.TableCell {
+	return tview.NewTableCell(ratingStars(rating) + queueColumnGap).
+		SetTextColor(queueRatingColor).
+		SetAlign(tview.AlignRight)
+}
+
+// queueMarkTick is the glyph shown in the Mark column for a marked
+// track -- a plain colored tick, not an icon/emoji, per explicit
+// direction (colored ticks for Mark, distinct from the Lyr column's
+// icon and from Rating's stars).
+const queueMarkTick = "✓"
+
+// markTickColors gives each mark_reason a distinct tick color, cycling
+// through this palette by id -- the catalog is user-editable (see
+// internal/metadata's seedMarkReasons doc comment) and open-ended, so
+// there's no fixed reason-to-color mapping to hardcode; a deterministic
+// cycle at least keeps the same reason the same color across a session
+// and across restarts.
+var markTickColors = []tcell.Color{
+	tcell.ColorRed,
+	tcell.NewRGBColor(0xFF, 0xA5, 0x00), // orange
+	tcell.ColorGold,
+	tcell.ColorFuchsia,
+	tcell.ColorDeepSkyBlue,
+	tcell.ColorLime,
+}
+
+// markCell renders a queue row's Mark column: blank if mark is nil
+// (unmarked -- the sensible default for a track with no opinion
+// recorded yet, same as Rating's all-empty stars), otherwise
+// queueMarkTick colored by the mark reason's id.
+func markCell(mark *metadata.MarkReason) *tview.TableCell {
+	if mark == nil {
+		return tview.NewTableCell(queueColumnGap).SetAlign(tview.AlignRight)
+	}
+	color := markTickColors[0]
+	if mark.ID >= 1 {
+		color = markTickColors[(mark.ID-1)%int64(len(markTickColors))]
+	}
+	return tview.NewTableCell(queueMarkTick + queueColumnGap).
+		SetTextColor(color).
+		SetAlign(tview.AlignRight)
 }
 
 // hasLyrics reports whether file has a matching lyrics sidecar (see
