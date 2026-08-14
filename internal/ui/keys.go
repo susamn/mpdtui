@@ -47,50 +47,32 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 					return nil
 				}
 			}
+			// Transport controls (play/pause, stop, skip, seek, volume,
+			// shuffle, repeat, consume, single) stay live while the lyrics
+			// viewer specifically is open -- unlike every other overlay
+			// (including trackInfoCard, which doesn't get this), it's meant
+			// to be read *while music plays*, so pausing or skipping
+			// shouldn't require closing it first. None of these touch focus
+			// or open another overlay (unlike e.g. '?'/help or 'i'/track
+			// info, deliberately left out here), which is what would
+			// actually conflict with an overlay already being open -- see
+			// maybeJumpToCurrentTrack's own doc comment on why stealing
+			// focus out from under an open overlay is the specific thing to
+			// avoid. Scoped to lyricsViewer only, not a blanket rule: a
+			// search/filter/save-playlist input still needs 's'/Space to
+			// stay literal typed text.
+			if a.tv.GetFocus() == a.lyricsViewer && event.Key() == tcell.KeyRune && a.handleTransportKey(event.Rune()) {
+				return nil
+			}
 		}
 		return event
 	}
 
 	if event.Key() == tcell.KeyRune {
+		if a.handleTransportKey(event.Rune()) {
+			return nil
+		}
 		switch event.Rune() {
-		case ' ':
-			a.togglePlayPause()
-			return nil
-		case 's':
-			a.stop()
-			return nil
-		case 'n':
-			a.next()
-			return nil
-		case 'p':
-			a.previous()
-			return nil
-		case ',':
-			a.seek(-5 * time.Second)
-			return nil
-		case '.':
-			a.seek(5 * time.Second)
-			return nil
-		case '-':
-			a.changeVolume(-5)
-			return nil
-		case '=':
-			// Same physical key as '+' on a US layout, without needing
-			// shift -- matches '-' also needing no modifier.
-			a.changeVolume(5)
-			return nil
-		case 'z':
-			a.toggleRandom()
-			return nil
-		case 'x':
-			a.toggleRepeat()
-			return nil
-		case 'c':
-			a.toggleConsume()
-			return nil
-		case 'Z':
-			a.toggleSingle()
-			return nil
 		case '/':
 			a.openSearch()
 			return nil
@@ -204,6 +186,49 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 // no-op.
 func (a *App) invalidKey(key string) {
 	a.flash("[red]'" + key + "' has no action here[-]")
+}
+
+// handleTransportKey handles the playback-transport cluster of global
+// keys -- play/pause, stop, skip, seek, volume, shuffle, repeat, consume,
+// single -- and reports whether r was one of them. Split out from
+// globalInputCapture's normal-mode switch so the exact same handling can
+// also run while the lyrics viewer overlay is open (see
+// globalInputCapture's modeOverlay branch): unlike every other global key
+// (panel focus, search, other overlays), none of these touch focus or
+// open another overlay, which is what actually makes them safe to keep
+// live under an already-open overlay.
+func (a *App) handleTransportKey(r rune) bool {
+	switch r {
+	case ' ':
+		a.togglePlayPause()
+	case 's':
+		a.stop()
+	case 'n':
+		a.next()
+	case 'p':
+		a.previous()
+	case ',':
+		a.seek(-5 * time.Second)
+	case '.':
+		a.seek(5 * time.Second)
+	case '-':
+		a.changeVolume(-5)
+	case '=':
+		// Same physical key as '+' on a US layout, without needing shift --
+		// matches '-' also needing no modifier.
+		a.changeVolume(5)
+	case 'z':
+		a.toggleRandom()
+	case 'x':
+		a.toggleRepeat()
+	case 'c':
+		a.toggleConsume()
+	case 'Z':
+		a.toggleSingle()
+	default:
+		return false
+	}
+	return true
 }
 
 func (a *App) togglePlayPause() {

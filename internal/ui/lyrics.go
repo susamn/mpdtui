@@ -66,29 +66,36 @@ const (
 	queueDurationCol = 10
 )
 
-// lyricsViewerBottomMargin is how many rows short of the Queue table's
-// own bottom edge the viewer stops -- so it visibly floats within the
-// Queue panel (leaving a bit of the table, and its border, showing below
-// the viewer) rather than filling every last row down to the panel's own
-// border the way it did before this was asked to be "a bit smaller".
+// lyricsViewerBottomMargin is how many of the Queue table's own data rows
+// stay visible below the viewer (in addition to the table's own bottom
+// border row, which is never covered either way) -- so it visibly floats
+// within the Queue panel rather than filling every last row down to the
+// panel's own border.
 const lyricsViewerBottomMargin = 2
 
 // lyricsViewerRect computes the viewer's rect from the Queue table's own
-// vertical extent (queueY, queueHeight) and the actual last-drawn x
-// positions of its Year and Duration columns (yearX, durationX).
-// Horizontally: from yearX up to (not including) durationX. Vertically:
-// starting just below the header row (queueY+queueHeaderRows, so the
-// Year/Genre/... column headers stay visible above it, not covered) and
-// stopping lyricsViewerBottomMargin rows short of the table's own bottom
-// edge (queueY+queueHeight). Split out as a pure function -- no
-// tview.Table involved -- so the positioning math is testable without a
-// real tcell.Screen, mirroring trackInfoCard's own quadrantRect/cardRect
-// split from positionOverQueue/Draw. Clamps height to 0 rather than
-// negative for a pathologically short Queue table (smaller than the
-// header row plus the margin).
+// rect (queueY, queueHeight -- GetRect(), which includes the table's own
+// top and bottom border rows) and the actual last-drawn x positions of
+// its Year and Duration columns (yearX, durationX).
+//
+// Horizontally: from yearX up to (not including) durationX.
+//
+// Vertically: queueY itself is the table's own top border row, queueY+1
+// is the header row, so the first actual data row -- where the viewer
+// starts, leaving the header row visible above it -- is
+// queueY+1+queueHeaderRows. It stops lyricsViewerBottomMargin data rows
+// before the table's own bottom border row (at queueY+queueHeight-1),
+// which itself is also never covered.
+//
+// Split out as a pure function -- no tview.Table involved -- so the
+// positioning math is testable without a real tcell.Screen, mirroring
+// trackInfoCard's own quadrantRect/cardRect split from
+// positionOverQueue/Draw. Clamps height to 0 rather than negative for a
+// pathologically short Queue table (smaller than its own two border rows
+// plus the header row plus the margin).
 func lyricsViewerRect(queueY, queueHeight, yearX, durationX int) (x, y, width, height int) {
-	top := queueY + queueHeaderRows
-	height = queueHeight - queueHeaderRows - lyricsViewerBottomMargin
+	top := queueY + 1 + queueHeaderRows
+	height = queueHeight - queueHeaderRows - lyricsViewerBottomMargin - 2
 	if height < 0 {
 		height = 0
 	}

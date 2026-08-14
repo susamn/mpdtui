@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
 )
@@ -16,14 +17,17 @@ func TestLyricsViewerRectSpansYearThroughTypeColumns(t *testing.T) {
 		queueY, queueHeight, yearX, durationX int
 		wantX, wantY, wantW, wantH            int
 	}{
-		// y starts one row below queueY (past the header row,
-		// queueHeaderRows == 1); height is queueHeight minus the header
-		// row minus lyricsViewerBottomMargin (2), so it stops short of
-		// the Queue table's own bottom edge: 30 - 1 - 2 = 27.
-		{5, 30, 60, 90, 60, 6, 30, 27},
-		// A pathologically short queueHeight (shorter than just the
-		// header row + margin) clamps height to 0 rather than negative.
-		{0, 0, 0, 0, 0, 1, 0, 0},
+		// y = queueY + 1 (the table's own top border row) + 1
+		// (queueHeaderRows), landing on the first data row, past the
+		// header. height = queueHeight - queueHeaderRows -
+		// lyricsViewerBottomMargin (2) - 2 (both the table's own border
+		// rows), so it stops lyricsViewerBottomMargin data rows short of
+		// the table's own bottom border: 30 - 1 - 2 - 2 = 25.
+		{5, 30, 60, 90, 60, 7, 30, 25},
+		// A pathologically short queueHeight (shorter than just the two
+		// border rows + header row + margin) clamps height to 0 rather
+		// than negative.
+		{0, 0, 0, 0, 0, 2, 0, 0},
 	}
 	for _, tc := range cases {
 		gotX, gotY, gotW, gotH := lyricsViewerRect(tc.queueY, tc.queueHeight, tc.yearX, tc.durationX)
@@ -194,5 +198,63 @@ func TestMaybeRefreshLyricsViewerOnlyWhenOpenAndTrackChanged(t *testing.T) {
 	}
 	if !strings.Contains(got, "New Track") {
 		t.Errorf("viewer after trackChanged = %q, want it updated to the new track", got)
+	}
+}
+
+// TestHandleTransportKeyUnrecognizedRuneReturnsFalseWithoutTouchingClient
+// proves the "not a transport key" path never reaches a.client (which is
+// nil in this offline test -- any of the real handlers, e.g.
+// togglePlayPause, would panic if mistakenly called) -- '#' is neither a
+// transport key nor any other bound key in this app.
+func TestHandleTransportKeyUnrecognizedRuneReturnsFalseWithoutTouchingClient(t *testing.T) {
+	a := newTestApp() // nil a.client
+	if a.handleTransportKey('#') {
+		t.Error("handleTransportKey('#') = true, want false")
+	}
+}
+
+// TestTransportKeysNotConsumedWhileAnotherOverlayOpen proves the "stays
+// live" behavior is scoped to the lyrics viewer specifically, not a
+// blanket rule for every overlay -- offline-safe (no a.client call
+// happens, since focus isn't a.lyricsViewer, so handleTransportKey is
+// never reached): a search/filter/save-playlist input still needs
+// Space to stay literal typed text, so Space must fall through
+// unconsumed (to whatever's focused) while e.g. help is open.
+func TestTransportKeysNotConsumedWhileAnotherOverlayOpen(t *testing.T) {
+	a := newTestApp()
+	a.tv.SetFocus(a.queue.table)
+	a.openHelp()
+
+	space := tcell.NewEventKey(tcell.KeyRune, ' ', tcell.ModNone)
+	if result := a.globalInputCapture(space); result == nil {
+		t.Error("Space while help (not the lyrics viewer) is open should not be consumed by the transport-key passthrough")
+	}
+}
+
+// TestTransportKeysStayLiveWhileLyricsViewerOpenNeedsLiveMPD needs a real
+// client, since handleTransportKey's whole point is calling one -- but
+// keeps the actual side effect minimal and reversible, the same way
+// TestVolumeClamped (internal/mpdclient/tests) already accepts a small
+// live side effect as the cost of testing a real transport action:
+// toggling play/pause twice restores whatever state playback was already
+// in, rather than leaving it changed.
+func TestTransportKeysStayLiveWhileLyricsViewerOpenNeedsLiveMPD(t *testing.T) {
+	c := dialOrSkip(t)
+	a := &App{tv: tview.NewApplication(), client: c}
+	a.build()
+	a.tv.SetFocus(a.queue.table)
+	a.openLyricsViewer()
+
+	space := tcell.NewEventKey(tcell.KeyRune, ' ', tcell.ModNone)
+	if result := a.globalInputCapture(space); result != nil {
+		t.Errorf("Space while the lyrics viewer is open should be consumed (routed to togglePlayPause), got %v", result)
+	}
+	a.globalInputCapture(space) // toggle back, restoring whatever state playback was already in
+
+	if a.mode != modeOverlay {
+		t.Error("mode after a transport key should stay modeOverlay -- the lyrics viewer itself must stay open")
+	}
+	if a.tv.GetFocus() != a.lyricsViewer {
+		t.Errorf("focus after a transport key = %T, want to stay on the lyrics viewer", a.tv.GetFocus())
 	}
 }

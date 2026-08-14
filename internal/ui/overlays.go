@@ -159,7 +159,9 @@ const helpText = `[::b]Global[-:-:-]
   i              track info card for the currently playing track
   y              lyrics viewer for the currently playing track (needs
                  music_dir set in ~/.config/mpdtui/config); j/k/g/G/
-                 Ctrl-F/Ctrl-B to scroll, 'y' or Esc to close
+                 Ctrl-F/Ctrl-B to scroll, 'y' or Esc to close --
+                 transport controls (Space/s/n/p/,/./-/=/z/x/c/Z) still
+                 work while it's open
   v              cycle Now Playing visualizations
   L              locate the currently playing track in the Queue
   ?              this help
