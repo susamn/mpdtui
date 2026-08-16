@@ -61,16 +61,21 @@ func StateGlyph(s mpdclient.State) string {
 }
 
 // StateGlyphColor returns the tview color tag value for s's own
-// StateGlyph -- green for Play/Pause, red for Stop (and any other
-// state), per explicit direction ("green play and pause and red stop
-// icon here, not the real icon... i just want colors"): the glyph
-// character itself is unchanged, only its color.
+// StateGlyph -- bright green for Play, bright yellow for Pause, bright
+// red for Stop (and any other state), per explicit direction ("a bit
+// more vibrant... pause: bright yellow, play: bright green, stop:
+// bright red"): the glyph character itself is unchanged, only its
+// color. Pure/saturated hex rather than the softer WhatsApp-green/gold
+// used elsewhere in this bar -- "vibrant" was an explicit correction
+// after Play and Pause first shared that softer green.
 func StateGlyphColor(s mpdclient.State) string {
 	switch s {
-	case mpdclient.StatePlay, mpdclient.StatePause:
-		return "#25D366"
+	case mpdclient.StatePlay:
+		return "#00FF00"
+	case mpdclient.StatePause:
+		return "#FFFF00"
 	default:
-		return "red"
+		return "#FF0000"
 	}
 }
 
