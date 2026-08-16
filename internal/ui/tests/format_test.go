@@ -51,6 +51,23 @@ func TestStateGlyph(t *testing.T) {
 	}
 }
 
+// TestStateGlyphColor covers the glyph's *color* separately from its
+// character (StateGlyph, above) -- bright green for Play, bright yellow
+// for Pause, bright red for Stop, explicit direction to color the
+// existing glyphs rather than swap them for something else.
+func TestStateGlyphColor(t *testing.T) {
+	cases := map[mpdclient.State]string{
+		mpdclient.StatePlay:  "#00FF00",
+		mpdclient.StatePause: "#FFFF00",
+		mpdclient.StateStop:  "#FF0000",
+	}
+	for state, want := range cases {
+		if got := ui.StateGlyphColor(state); got != want {
+			t.Errorf("StateGlyphColor(%v) = %q, want %q", state, got, want)
+		}
+	}
+}
+
 func TestOnOff(t *testing.T) {
 	if ui.OnOff(true) != "on" || ui.OnOff(false) != "off" {
 		t.Fatal("OnOff mismatch")
@@ -63,6 +80,45 @@ func TestVolText(t *testing.T) {
 	}
 	if ui.VolText(79) != "79" {
 		t.Errorf("expected 79, got %q", ui.VolText(79))
+	}
+}
+
+func TestVolumeColorGradientEndpointsAndMidpoint(t *testing.T) {
+	if got := ui.VolumeColor(-1); got != "" {
+		t.Errorf("VolumeColor(-1) = %q, want empty (unknown volume)", got)
+	}
+	if got, want := ui.VolumeColor(0), "#25D366"; got != want {
+		t.Errorf("VolumeColor(0) = %q, want %q (WhatsApp green)", got, want)
+	}
+	if got, want := ui.VolumeColor(50), "#FFD700"; got != want {
+		t.Errorf("VolumeColor(50) = %q, want %q (gold)", got, want)
+	}
+	if got, want := ui.VolumeColor(100), "#DC3545"; got != want {
+		t.Errorf("VolumeColor(100) = %q, want %q (red)", got, want)
+	}
+	// Over 100 clamps rather than extrapolating past red.
+	if got := ui.VolumeColor(150); got != ui.VolumeColor(100) {
+		t.Errorf("VolumeColor(150) = %q, want it clamped to VolumeColor(100) = %q", got, ui.VolumeColor(100))
+	}
+}
+
+func TestVolumeTextColorsKnownVolumeOnly(t *testing.T) {
+	if got, want := ui.VolumeText(-1), "?%"; got != want {
+		t.Errorf("VolumeText(-1) = %q, want %q (no color tag for unknown volume)", got, want)
+	}
+	got := ui.VolumeText(50)
+	want := "[#FFD700]50%[-]"
+	if got != want {
+		t.Errorf("VolumeText(50) = %q, want %q", got, want)
+	}
+}
+
+func TestFlagTextColorsAndBoldsTheValue(t *testing.T) {
+	if got, want := ui.FlagText("repeat", true), "repeat [#25D366::b]on[-:-:-]"; got != want {
+		t.Errorf("FlagText(repeat, true) = %q, want %q", got, want)
+	}
+	if got, want := ui.FlagText("repeat", false), "repeat [red::b]off[-:-:-]"; got != want {
+		t.Errorf("FlagText(repeat, false) = %q, want %q", got, want)
 	}
 }
 

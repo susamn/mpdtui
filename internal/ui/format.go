@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -59,6 +60,25 @@ func StateGlyph(s mpdclient.State) string {
 	}
 }
 
+// StateGlyphColor returns the tview color tag value for s's own
+// StateGlyph -- bright green for Play, bright yellow for Pause, bright
+// red for Stop (and any other state), per explicit direction ("a bit
+// more vibrant... pause: bright yellow, play: bright green, stop:
+// bright red"): the glyph character itself is unchanged, only its
+// color. Pure/saturated hex rather than the softer WhatsApp-green/gold
+// used elsewhere in this bar -- "vibrant" was an explicit correction
+// after Play and Pause first shared that softer green.
+func StateGlyphColor(s mpdclient.State) string {
+	switch s {
+	case mpdclient.StatePlay:
+		return "#00FF00"
+	case mpdclient.StatePause:
+		return "#FFFF00"
+	default:
+		return "#FF0000"
+	}
+}
+
 // OnOff renders b as "on"/"off".
 func OnOff(b bool) string {
 	if b {
@@ -73,6 +93,60 @@ func VolText(v int) string {
 		return "?"
 	}
 	return strconv.Itoa(v)
+}
+
+// VolumeColor interpolates a tview hex color tag value (no brackets)
+// from WhatsApp green (0%) through gold (50%) to red (100%), so a
+// displayed volume percentage communicates its level at a glance --
+// explicit request ("the volume percentage value with diff color from
+// green to all the way to red"). Green/gold reuse the same colors
+// already established elsewhere for the same concepts (queueTitleColor,
+// queueRatingColor). Returns "" for an unknown volume (v < 0, VolText's
+// own "?" case), letting the caller skip coloring it entirely.
+func VolumeColor(v int) string {
+	if v < 0 {
+		return ""
+	}
+	if v > 100 {
+		v = 100
+	}
+	type rgb struct{ r, g, b int }
+	green := rgb{0x25, 0xD3, 0x66}
+	gold := rgb{0xFF, 0xD7, 0x00}
+	red := rgb{0xDC, 0x35, 0x45}
+
+	from, to, t := green, gold, float64(v)/50
+	if v > 50 {
+		from, to, t = gold, red, float64(v-50)/50
+	}
+	r := int(float64(from.r) + t*float64(to.r-from.r))
+	g := int(float64(from.g) + t*float64(to.g-from.g))
+	b := int(float64(from.b) + t*float64(to.b-from.b))
+	return fmt.Sprintf("#%02X%02X%02X", r, g, b)
+}
+
+// VolumeText renders v as "N%" (or "?%" if unknown), colored via
+// VolumeColor -- falls back to plain, uncolored text for an unknown
+// volume, where VolumeColor returns "".
+func VolumeText(v int) string {
+	text := VolText(v) + "%"
+	color := VolumeColor(v)
+	if color == "" {
+		return text
+	}
+	return fmt.Sprintf("[%s]%s[-]", color, text)
+}
+
+// FlagText renders label + a bold, colored on/off value -- WhatsApp
+// green when on, red when off (explicit request: "red being off and
+// whatsapp green being on... make the value fonts bold"), for the
+// Now Playing bar's repeat/random/single/consume flags.
+func FlagText(label string, on bool) string {
+	color := "red"
+	if on {
+		color = "#25D366"
+	}
+	return fmt.Sprintf("%s [%s::b]%s[-:-:-]", label, color, OnOff(on))
 }
 
 // TrackFormat derives a track's container/codec label (MP3, FLAC, M4A,
