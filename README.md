@@ -90,10 +90,12 @@ single-line inline player for a shell or tmux pane.
   when playback changes from another client, e.g. `mpc`); its right half
   shows a small playback-driven visualization (`v` to cycle, currently a
   dancing equalizer scaled by actual volume)
-- **Lightweight inline mode** (`-mini`) — a small bordered box of live
-  status lines (queue/playlist counts, now playing, progress/volume,
-  plus local rating/play count/mark when track metadata is active), no
-  alt-screen takeover, for tmux status panes or a quick glance
+- **Lightweight inline mode** (`-mini`) — a small bordered box, sized to
+  its own content rather than stretched to the terminal width, of live
+  status lines (queue/playlist counts in sky blue, now playing with the
+  track in WhatsApp green, a block-style progress bar in cyan, plus
+  local rating in gold/play count/mark when track metadata is active),
+  no alt-screen takeover, for tmux status panes or a quick glance
 - **Fuzzy pickers** (`-p` / `-t`) — fzf-style playlist/track search from
   the shell, no panels involved
 - Confirmation prompts on destructive actions (clear queue, delete playlist)

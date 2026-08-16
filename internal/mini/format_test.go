@@ -25,22 +25,22 @@ func TestFormatDuration(t *testing.T) {
 }
 
 func TestProgressBar(t *testing.T) {
-	if got, want := progressBar(0, 100*time.Second, 10), ">"+strings.Repeat(" ", 10); got != want {
+	if got, want := progressBar(0, 100*time.Second, 10), strings.Repeat("░", 10); got != want {
 		t.Errorf("progressBar(0, 100s, 10) = %q, want %q", got, want)
 	}
-	if got, want := progressBar(50*time.Second, 100*time.Second, 10), strings.Repeat("=", 5)+">"+strings.Repeat(" ", 5); got != want {
+	if got, want := progressBar(50*time.Second, 100*time.Second, 10), strings.Repeat("█", 5)+strings.Repeat("░", 5); got != want {
 		t.Errorf("progressBar(50%%, 10) = %q, want %q", got, want)
 	}
-	if got, want := progressBar(100*time.Second, 100*time.Second, 10), strings.Repeat("=", 10)+">"; got != want {
+	if got, want := progressBar(100*time.Second, 100*time.Second, 10), strings.Repeat("█", 10); got != want {
 		t.Errorf("progressBar(100%%, 10) = %q, want %q", got, want)
 	}
 	// duration <= 0 -> ratio 0, not a division by zero panic.
-	if got, want := progressBar(5*time.Second, 0, 10), ">"+strings.Repeat(" ", 10); got != want {
+	if got, want := progressBar(5*time.Second, 0, 10), strings.Repeat("░", 10); got != want {
 		t.Errorf("progressBar with zero duration = %q, want %q", got, want)
 	}
 	// width <= 0 defaults to 12.
-	if got := progressBar(0, 100*time.Second, 0); len([]rune(got)) != 13 { // 12 spaces + ">"
-		t.Errorf("progressBar with width<=0 defaulted to length %d, want 13", len([]rune(got)))
+	if got := progressBar(0, 100*time.Second, 0); len([]rune(got)) != 12 {
+		t.Errorf("progressBar with width<=0 defaulted to length %d, want 12", len([]rune(got)))
 	}
 }
 
@@ -97,8 +97,57 @@ func TestPadOrTruncateIsRuneSafe(t *testing.T) {
 	}
 }
 
+func TestPlainWidthIgnoresNothingSinceSegmentsHoldNoAnsiYet(t *testing.T) {
+	segs := []segment{{text: "abc", fg: ansiTrackGreen}, {text: "de"}}
+	if got := plainWidth(segs); got != 5 {
+		t.Errorf("plainWidth = %d, want 5", got)
+	}
+}
+
+// TestRenderLineColorsAndPadsToVisibleWidth is the core correctness
+// property renderLine exists for: the *rendered* (color-code-included)
+// string is longer than width in raw bytes/runes, but its *visible*
+// width -- what renderLine pads to -- must still be exactly width, or
+// the box border would drift out of alignment on any colored line.
+func TestRenderLineColorsAndPadsToVisibleWidth(t *testing.T) {
+	segs := []segment{{text: "AB", fg: ansiTrackGreen}, {text: "cd"}}
+	got := renderLine(segs, 10)
+	want := ansiTrackGreen + "AB" + ansiReset + "cd" + "      " // 6 trailing spaces: 10 - 4
+	if got != want {
+		t.Errorf("renderLine = %q, want %q", got, want)
+	}
+}
+
+func TestRenderLineExactWidthNoTrailingPadding(t *testing.T) {
+	segs := []segment{{text: "AB", fg: ansiTrackGreen}, {text: "cd"}}
+	got := renderLine(segs, 4)
+	want := ansiTrackGreen + "AB" + ansiReset + "cd"
+	if got != want {
+		t.Errorf("renderLine at exact width = %q, want %q", got, want)
+	}
+}
+
+// TestRenderLineFallsBackToPlainWhenTooLong guards the narrow-terminal
+// edge case: rather than truncating mid-segment and leaving a colored
+// escape code unclosed, renderLine drops color entirely and truncates
+// the plain concatenated text instead.
+func TestRenderLineFallsBackToPlainWhenTooLong(t *testing.T) {
+	segs := []segment{{text: "hello", fg: ansiTrackGreen}, {text: " world"}}
+	got := renderLine(segs, 8)
+	want := padOrTruncate("hello world", 8)
+	if got != want {
+		t.Errorf("renderLine (over-width) = %q, want %q (plain, no color)", got, want)
+	}
+	if strings.Contains(got, "\x1b[") {
+		t.Errorf("renderLine (over-width) = %q, want no ANSI escape codes", got)
+	}
+}
+
+// TestBoxWrapsLinesWithConsistentWidth covers box() itself, which now
+// just frames already width-prepared lines (padOrTruncate/renderLine's
+// job, exercised separately) rather than padding them itself.
 func TestBoxWrapsLinesWithConsistentWidth(t *testing.T) {
-	lines := box([]string{"short", "a longer line here"}, 20)
+	lines := box([]string{padOrTruncate("short", 20), padOrTruncate("a longer line here", 20)}, 20)
 	if len(lines) != 4 { // top border + 2 content + bottom border
 		t.Fatalf("box() returned %d lines, want 4", len(lines))
 	}

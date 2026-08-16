@@ -18,13 +18,16 @@ import (
 
 const tickInterval = 500 * time.Millisecond
 
-// miniBoxMinWidth/miniBoxMaxWidth clamp the box's total width (borders
-// included): never so narrow the content gets crushed, never so wide it
-// stretches across a huge terminal -- this mode is for a quick glance or
-// a tmux status pane, not to fill the screen.
+// miniContentMinWidth/miniContentMaxWidth clamp the box's *content*
+// width (borders excluded): never so narrow the content gets crushed,
+// never so wide a long track title balloons the box. The box itself is
+// sized to its actual content within that range (see contentWidthFor),
+// not stretched to fill the terminal -- a short "N track(s)..." line
+// otherwise left a lot of empty space on the right when the terminal
+// was wide.
 const (
-	miniBoxMinWidth = 40
-	miniBoxMaxWidth = 78
+	miniContentMinWidth = 30
+	miniContentMaxWidth = 70
 )
 
 // Run starts the inline player and blocks until the user quits (q,
@@ -224,21 +227,34 @@ func (b *block) print(lines []string) {
 	b.lines = len(lines)
 }
 
-// boxTotalWidth picks the box's total width (borders included) from the
-// current terminal width, queried fresh on every render since it can
-// change (a resized terminal, or a tmux pane growing/shrinking).
-// Falls back to the max when the size can't be determined (e.g. stdout
-// redirected to a file/pipe while stdin is still a real terminal).
-func boxTotalWidth() int {
-	w, _, err := term.GetSize(int(os.Stdout.Fd()))
-	if err != nil || w <= 0 {
-		w = miniBoxMaxWidth
+// contentWidthFor picks the box's content width (borders excluded) from
+// the actual lines about to be shown: the widest one's own plain width,
+// clamped to [miniContentMinWidth, miniContentMaxWidth] and never wider
+// than the real terminal can show (queried fresh every render, since it
+// can change -- a resized terminal, or a tmux pane growing/shrinking).
+// Sizing to content rather than always maximizing to the terminal width
+// is what keeps a short status line from leaving a lot of empty space
+// on the right in a wide terminal.
+func contentWidthFor(lines [][]segment) int {
+	w := 0
+	for _, segs := range lines {
+		if pw := plainWidth(segs); pw > w {
+			w = pw
+		}
 	}
-	if w > miniBoxMaxWidth {
-		w = miniBoxMaxWidth
+	if w < miniContentMinWidth {
+		w = miniContentMinWidth
 	}
-	if w < miniBoxMinWidth {
-		w = miniBoxMinWidth
+	if w > miniContentMaxWidth {
+		w = miniContentMaxWidth
+	}
+	if termWidth, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && termWidth > 0 {
+		if maxFromTerm := termWidth - 4; maxFromTerm < w {
+			w = maxFromTerm
+		}
+	}
+	if w < 1 {
+		w = 1
 	}
 	return w
 }
@@ -255,7 +271,7 @@ func render(out *block, client *mpdclient.Client, metaDB *metadata.DB, playlistC
 		return
 	}
 
-	lines := []string{statsLine(st, playlistCount), nowPlayingLine(st, song), progressLine(st)}
+	lineSegs := [][]segment{statsSegments(st, playlistCount), nowPlayingSegments(st, song), progressSegments(st)}
 	if metaDB != nil {
 		maybeTrackPlayCount(metaDB, st, song, playCountedSongID)
 		if song.File != "" {
@@ -265,15 +281,23 @@ func render(out *block, client *mpdclient.Client, metaDB *metadata.DB, playlistC
 			// zero-opinion defaults rather than an error line breaking
 			// the box.
 			meta, _ := metaDB.Get(song.File)
-			lines = append(lines, metaLine(meta))
+			lineSegs = append(lineSegs, metaSegments(meta))
 		}
 	}
 
-	out.print(box(lines, boxTotalWidth()-4))
+	width := contentWidthFor(lineSegs)
+	lines := make([]string, len(lineSegs))
+	for i, segs := range lineSegs {
+		lines[i] = renderLine(segs, width)
+	}
+	out.print(box(lines, width))
 }
 
-func statsLine(st mpdclient.Status, playlistCount int) string {
-	return fmt.Sprintf("%d track(s) in queue  ·  %d playlist(s)", st.PlaylistLength, playlistCount)
+// statsSegments is sky blue in full, matching the full panel UI's own
+// use of tcell.ColorSkyblue elsewhere (e.g. the Queue's Lyr tick).
+func statsSegments(st mpdclient.Status, playlistCount int) []segment {
+	text := fmt.Sprintf("%d track(s) in queue  ·  %d playlist(s)", st.PlaylistLength, playlistCount)
+	return []segment{{text: text, fg: ansiStatsSkyBlue}}
 }
 
 func stateGlyph(state mpdclient.State) string {
@@ -289,30 +313,46 @@ func stateGlyph(state mpdclient.State) string {
 	}
 }
 
-func nowPlayingLine(st mpdclient.Status, song mpdclient.Song) string {
+// nowPlayingSegments colors just the track title WhatsApp green
+// (matching queueTitleColor), leaving the play-state glyph plain --
+// mirrors the full UI, where only the Title cell itself is tinted.
+func nowPlayingSegments(st mpdclient.Status, song mpdclient.Song) []segment {
 	track := song.DisplayName()
 	if track == "" {
 		track = "(nothing playing)"
 	}
-	return stateGlyph(st.State) + " " + track
+	return []segment{
+		{text: stateGlyph(st.State) + " "},
+		{text: track, fg: ansiTrackGreen},
+	}
 }
 
-func progressLine(st mpdclient.Status) string {
+// progressSegments colors just the bar itself, leaving the brackets and
+// the elapsed/duration/volume text plain.
+func progressSegments(st mpdclient.Status) []segment {
 	bar := progressBar(st.Elapsed, st.Duration, 12)
 	vol := "?"
 	if st.Volume >= 0 {
 		vol = fmt.Sprintf("%d", st.Volume)
 	}
-	return fmt.Sprintf("[%s] %s/%s  vol %s%%", bar, formatDuration(st.Elapsed), formatDuration(st.Duration), vol)
+	return []segment{
+		{text: "["},
+		{text: bar, fg: ansiBarCyan},
+		{text: fmt.Sprintf("] %s/%s  vol %s%%", formatDuration(st.Elapsed), formatDuration(st.Duration), vol)},
+	}
 }
 
-// metaLine shows the currently playing track's local rating and play
-// count (and its mark, if any) -- only ever called when metaDB is
-// active and something's actually playing (see render).
-func metaLine(meta metadata.Track) string {
-	l := fmt.Sprintf("%s  played %dx", ratingStars(meta.Rating), meta.PlayCount)
-	if meta.Mark != nil {
-		l += "  marked: " + meta.Mark.Reason
+// metaSegments shows the currently playing track's local rating (gold,
+// matching queueRatingColor) and play count (and its mark, if any, both
+// plain) -- only ever called when metaDB is active and something's
+// actually playing (see render).
+func metaSegments(meta metadata.Track) []segment {
+	segs := []segment{
+		{text: ratingStars(meta.Rating), fg: ansiRatingGold},
+		{text: fmt.Sprintf("  played %dx", meta.PlayCount)},
 	}
-	return l
+	if meta.Mark != nil {
+		segs = append(segs, segment{text: "  marked: " + meta.Mark.Reason})
+	}
+	return segs
 }

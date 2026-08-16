@@ -2,6 +2,7 @@ package mini
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -51,56 +52,97 @@ func TestStateGlyph(t *testing.T) {
 	}
 }
 
-func TestStatsLine(t *testing.T) {
-	got := statsLine(mpdclient.Status{PlaylistLength: 3}, 7)
+// plainText concatenates segs' plain (uncolored) text, for content
+// assertions that don't care which parts are colored.
+func plainText(segs []segment) string {
+	s := ""
+	for _, seg := range segs {
+		s += seg.text
+	}
+	return s
+}
+
+func TestStatsSegmentsIsAllSkyBlue(t *testing.T) {
+	segs := statsSegments(mpdclient.Status{PlaylistLength: 3}, 7)
 	want := "3 track(s) in queue  ·  7 playlist(s)"
-	if got != want {
-		t.Errorf("statsLine = %q, want %q", got, want)
+	if got := plainText(segs); got != want {
+		t.Errorf("statsSegments text = %q, want %q", got, want)
+	}
+	for _, seg := range segs {
+		if seg.fg != ansiStatsSkyBlue {
+			t.Errorf("statsSegments segment %q fg = %q, want %q", seg.text, seg.fg, ansiStatsSkyBlue)
+		}
 	}
 }
 
-func TestNowPlayingLineFallsBackWhenNothingPlaying(t *testing.T) {
-	got := nowPlayingLine(mpdclient.Status{State: mpdclient.StateStop}, mpdclient.Song{})
+func TestNowPlayingSegmentsFallsBackWhenNothingPlaying(t *testing.T) {
+	segs := nowPlayingSegments(mpdclient.Status{State: mpdclient.StateStop}, mpdclient.Song{})
 	want := "[] (nothing playing)"
-	if got != want {
-		t.Errorf("nowPlayingLine(empty song) = %q, want %q", got, want)
+	if got := plainText(segs); got != want {
+		t.Errorf("nowPlayingSegments(empty song) text = %q, want %q", got, want)
 	}
 }
 
-func TestNowPlayingLineShowsTrack(t *testing.T) {
-	got := nowPlayingLine(mpdclient.Status{State: mpdclient.StatePlay}, mpdclient.Song{Title: "Track"})
+func TestNowPlayingSegmentsColorsOnlyTheTrackGreen(t *testing.T) {
+	segs := nowPlayingSegments(mpdclient.Status{State: mpdclient.StatePlay}, mpdclient.Song{Title: "Track"})
 	want := "> Track"
-	if got != want {
-		t.Errorf("nowPlayingLine = %q, want %q", got, want)
+	if got := plainText(segs); got != want {
+		t.Errorf("nowPlayingSegments text = %q, want %q", got, want)
+	}
+	for _, seg := range segs {
+		switch seg.text {
+		case "Track":
+			if seg.fg != ansiTrackGreen {
+				t.Errorf("track segment fg = %q, want %q", seg.fg, ansiTrackGreen)
+			}
+		default:
+			if seg.fg != "" {
+				t.Errorf("non-track segment %q fg = %q, want plain (no color)", seg.text, seg.fg)
+			}
+		}
 	}
 }
 
-func TestProgressLineUnknownVolume(t *testing.T) {
-	got := progressLine(mpdclient.Status{Elapsed: 30 * time.Second, Duration: 60 * time.Second, Volume: -1})
-	if got == "" {
-		t.Fatal("progressLine returned empty string")
-	}
+func TestProgressSegmentsUnknownVolume(t *testing.T) {
+	segs := progressSegments(mpdclient.Status{Elapsed: 30 * time.Second, Duration: 60 * time.Second, Volume: -1})
 	// -1 means "unknown" (see mpdclient.Status), rendered as "?" rather
 	// than a nonsensical "-1%".
-	want := "[======>      ] 0:30/1:00  vol ?%"
-	if got != want {
-		t.Errorf("progressLine = %q, want %q", got, want)
+	want := "[██████░░░░░░] 0:30/1:00  vol ?%"
+	if got := plainText(segs); got != want {
+		t.Errorf("progressSegments text = %q, want %q", got, want)
+	}
+	var barFg string
+	for _, seg := range segs {
+		if strings.Contains(seg.text, "█") || strings.Contains(seg.text, "░") {
+			barFg = seg.fg
+		}
+	}
+	if barFg != ansiBarCyan {
+		t.Errorf("progress bar segment fg = %q, want %q", barFg, ansiBarCyan)
 	}
 }
 
-func TestMetaLineUnratedUnmarked(t *testing.T) {
-	got := metaLine(metadata.Track{})
+func TestMetaSegmentsUnratedUnmarked(t *testing.T) {
+	segs := metaSegments(metadata.Track{})
 	want := "☆☆☆☆☆  played 0x"
-	if got != want {
-		t.Errorf("metaLine(zero-value Track) = %q, want %q", got, want)
+	if got := plainText(segs); got != want {
+		t.Errorf("metaSegments(zero-value Track) text = %q, want %q", got, want)
 	}
 }
 
-func TestMetaLineRatedAndMarked(t *testing.T) {
-	got := metaLine(metadata.Track{Rating: 4, PlayCount: 12, Mark: &metadata.MarkReason{Reason: "mark for deletion"}})
+func TestMetaSegmentsRatedAndMarkedColorsOnlyTheStarsGold(t *testing.T) {
+	segs := metaSegments(metadata.Track{Rating: 4, PlayCount: 12, Mark: &metadata.MarkReason{Reason: "mark for deletion"}})
 	want := "★★★★☆  played 12x  marked: mark for deletion"
-	if got != want {
-		t.Errorf("metaLine = %q, want %q", got, want)
+	if got := plainText(segs); got != want {
+		t.Errorf("metaSegments text = %q, want %q", got, want)
+	}
+	if segs[0].fg != ansiRatingGold {
+		t.Errorf("rating segment fg = %q, want %q", segs[0].fg, ansiRatingGold)
+	}
+	for _, seg := range segs[1:] {
+		if seg.fg != "" {
+			t.Errorf("non-rating segment %q fg = %q, want plain (no color)", seg.text, seg.fg)
+		}
 	}
 }
 
