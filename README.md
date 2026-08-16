@@ -305,13 +305,15 @@ UI so far.
 `e` opens a two-tab overlay, `Tab`/`Backtab` switches between tabs,
 `Esc` closes it:
 
-- **Config** -- read-only. Shows exactly what mpdtui resolved at
-  startup: MPD host/port (and whether a password is set, never the
-  password itself), `music_dir` (or a note that it's not configured),
-  and `track_metadata`'s status plus the config/database file paths.
-  There's no way to edit any of this from here -- it's a snapshot for
-  reference, not a settings form; change the underlying environment
-  variables or `~/.config/mpdtui/config` and restart mpdtui instead.
+- **Config** -- read-only, shown as a bordered Setting/Value table
+  (matching the Database tab's own look). Shows exactly what mpdtui
+  resolved at startup: MPD host/port (and whether a password is set,
+  never the password itself), `music_dir` (or a note that it's not
+  configured), and `track_metadata`'s status plus the config/database
+  file paths. There's no way to edit any of this from here -- it's a
+  snapshot for reference, not a settings form; change the underlying
+  environment variables or `~/.config/mpdtui/config` and restart mpdtui
+  instead.
 - **Database** -- a small table-selector wizard over the `mark_reason`/
   `tags` catalog tables (see [Track metadata](#track-metadata) above),
   only shown when `track_metadata` is active (otherwise this tab just

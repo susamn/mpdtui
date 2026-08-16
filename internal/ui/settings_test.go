@@ -5,39 +5,67 @@ import (
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 )
 
-func TestFormatConfigSummaryShowsPlaceholdersForEmptyValues(t *testing.T) {
-	got := formatConfigSummary(ConfigSummary{MPDHost: "localhost", MPDPort: "6600"})
+// configTableText concatenates every cell's text in a populateConfigTable
+// table (including the header row), space-joined per row and newline-
+// joined across rows, so tests can assert on it with simple substring
+// checks the same way the old flat-string formatConfigSummary let them.
+func configTableText(table *tview.Table) string {
+	var b strings.Builder
+	for row := 0; row < table.GetRowCount(); row++ {
+		for col := 0; col < table.GetColumnCount(); col++ {
+			cell := table.GetCell(row, col)
+			if cell == nil {
+				continue
+			}
+			b.WriteString(cell.Text)
+			b.WriteByte(' ')
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func TestPopulateConfigTableShowsPlaceholdersForEmptyValues(t *testing.T) {
+	table := tview.NewTable()
+	populateConfigTable(table, ConfigSummary{MPDHost: "localhost", MPDPort: "6600"})
+	got := configTableText(table)
+
 	if !strings.Contains(got, "(not configured -- lyrics feature inactive)") {
-		t.Errorf("formatConfigSummary(empty MusicDir) = %q, want it to explain the lyrics feature is inactive", got)
+		t.Errorf("populateConfigTable(empty MusicDir) = %q, want it to explain the lyrics feature is inactive", got)
 	}
-	if !strings.Contains(got, "Password: not set") {
-		t.Errorf("formatConfigSummary(no password) = %q, want %q", got, "Password: not set")
+	if !strings.Contains(got, "MPD Password not set") {
+		t.Errorf("populateConfigTable(no password) = %q, want %q", got, "MPD Password not set")
 	}
-	if !strings.Contains(got, "Enabled:       no") {
-		t.Errorf("formatConfigSummary(TrackMetadataEnabled=false) = %q, want it to say no", got)
+	if !strings.Contains(got, "Track Metadata no") {
+		t.Errorf("populateConfigTable(TrackMetadataEnabled=false) = %q, want it to say no", got)
 	}
 }
 
-func TestFormatConfigSummaryNeverShowsThePasswordItself(t *testing.T) {
+func TestPopulateConfigTableNeverShowsThePasswordItself(t *testing.T) {
 	// MPDPasswordSet only ever carries a bool -- there's no field a
 	// caller could even pass the real password through by mistake, but
 	// this guards the actual rendered output too.
-	got := formatConfigSummary(ConfigSummary{MPDPasswordSet: true})
-	if !strings.Contains(got, "Password: set") {
-		t.Errorf("formatConfigSummary(password set) = %q, want %q", got, "Password: set")
+	table := tview.NewTable()
+	populateConfigTable(table, ConfigSummary{MPDPasswordSet: true})
+	got := configTableText(table)
+	if !strings.Contains(got, "MPD Password set") {
+		t.Errorf("populateConfigTable(password set) = %q, want %q", got, "MPD Password set")
 	}
 }
 
-func TestFormatConfigSummaryShowsResolvedValues(t *testing.T) {
-	got := formatConfigSummary(ConfigSummary{
+func TestPopulateConfigTableShowsResolvedValues(t *testing.T) {
+	table := tview.NewTable()
+	populateConfigTable(table, ConfigSummary{
 		MPDHost: "192.168.1.5", MPDPort: "6601", MusicDir: "/music",
 		TrackMetadataEnabled: true, ConfigFilePath: "/cfg", DBFilePath: "/db",
 	})
-	for _, want := range []string{"192.168.1.5", "6601", "/music", "Enabled:       yes", "/cfg", "/db"} {
+	got := configTableText(table)
+	for _, want := range []string{"192.168.1.5", "6601", "/music", "Track Metadata yes", "/cfg", "/db"} {
 		if !strings.Contains(got, want) {
-			t.Errorf("formatConfigSummary(...) = %q, missing %q", got, want)
+			t.Errorf("populateConfigTable(...) = %q, missing %q", got, want)
 		}
 	}
 }

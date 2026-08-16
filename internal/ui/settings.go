@@ -75,7 +75,7 @@ type settingsView struct {
 	pages  *tview.Pages
 	tabBar *tview.TextView
 
-	configView *tview.TextView
+	configView *tview.Table
 
 	// databaseInteractive is false when metaDB is nil -- fixed for the
 	// whole session (metaDB's nil-ness never changes after startup), so
@@ -100,8 +100,10 @@ type settingsView struct {
 func newSettingsView(app *App) *settingsView {
 	s := &settingsView{app: app}
 
-	s.configView = tview.NewTextView().SetDynamicColors(true).SetScrollable(true)
-	s.configView.SetText(formatConfigSummary(app.cfg))
+	s.configView = tview.NewTable()
+	s.configView.SetBorder(true).SetTitle(" Config (read-only) ")
+	s.configView.SetSelectable(false, false)
+	populateConfigTable(s.configView, app.cfg)
 
 	s.pages = tview.NewPages().
 		AddPage("config", s.configView, true, true).
@@ -161,8 +163,21 @@ func (s *settingsView) buildDatabaseTab() tview.Primitive {
 		AddItem(s.dbPages, 0, 1, true)
 }
 
-// formatConfigSummary renders cfg as the Config tab's fixed content.
-func formatConfigSummary(cfg ConfigSummary) string {
+// populateConfigTable renders cfg into table as a plain Setting/Value
+// grid -- explicit follow-up request ("also show the config same way
+// please for keeping things similar") to match the Database tab's own
+// bordered, tabular look (header row styled with queueHeaderFg/
+// queueHeaderBg, same as the catalog table and every other table in
+// this app) rather than a plain block of text. Non-selectable
+// (SetSelectable(false, false), set by the caller): there's nothing to
+// act on here, only to read.
+func populateConfigTable(table *tview.Table, cfg ConfigSummary) {
+	table.Clear()
+	table.SetCell(0, 0, tview.NewTableCell("Setting").
+		SetSelectable(false).SetTextColor(queueHeaderFg).SetBackgroundColor(queueHeaderBg))
+	table.SetCell(0, 1, tview.NewTableCell("Value").
+		SetSelectable(false).SetTextColor(queueHeaderFg).SetBackgroundColor(queueHeaderBg).SetExpansion(1))
+
 	password := "not set"
 	if cfg.MPDPasswordSet {
 		password = "set"
@@ -175,14 +190,21 @@ func formatConfigSummary(cfg ConfigSummary) string {
 	if cfg.TrackMetadataEnabled {
 		trackMetadata = "yes"
 	}
-	return fmt.Sprintf(
-		"[::b]MPD[-:-:-]\n  Host:     %s\n  Port:     %s\n  Password: %s\n\n"+
-			"[::b]Music directory[-:-:-]\n  %s\n\n"+
-			"[::b]Track metadata[-:-:-]\n  Enabled:       %s\n  Config file:   %s\n  Database file: %s\n",
-		cfg.MPDHost, cfg.MPDPort, password,
-		musicDir,
-		trackMetadata, orPlaceholder(cfg.ConfigFilePath), orPlaceholder(cfg.DBFilePath),
-	)
+
+	rows := []struct{ setting, value string }{
+		{"MPD Host", cfg.MPDHost},
+		{"MPD Port", cfg.MPDPort},
+		{"MPD Password", password},
+		{"Music Directory", musicDir},
+		{"Track Metadata", trackMetadata},
+		{"Config File", orPlaceholder(cfg.ConfigFilePath)},
+		{"Database File", orPlaceholder(cfg.DBFilePath)},
+	}
+	for i, r := range rows {
+		row := i + 1
+		table.SetCell(row, 0, tview.NewTableCell(r.setting))
+		table.SetCell(row, 1, tview.NewTableCell(r.value).SetExpansion(1))
+	}
 }
 
 func orPlaceholder(s string) string {
