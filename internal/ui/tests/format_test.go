@@ -66,6 +66,45 @@ func TestVolText(t *testing.T) {
 	}
 }
 
+func TestVolumeColorGradientEndpointsAndMidpoint(t *testing.T) {
+	if got := ui.VolumeColor(-1); got != "" {
+		t.Errorf("VolumeColor(-1) = %q, want empty (unknown volume)", got)
+	}
+	if got, want := ui.VolumeColor(0), "#25D366"; got != want {
+		t.Errorf("VolumeColor(0) = %q, want %q (WhatsApp green)", got, want)
+	}
+	if got, want := ui.VolumeColor(50), "#FFD700"; got != want {
+		t.Errorf("VolumeColor(50) = %q, want %q (gold)", got, want)
+	}
+	if got, want := ui.VolumeColor(100), "#DC3545"; got != want {
+		t.Errorf("VolumeColor(100) = %q, want %q (red)", got, want)
+	}
+	// Over 100 clamps rather than extrapolating past red.
+	if got := ui.VolumeColor(150); got != ui.VolumeColor(100) {
+		t.Errorf("VolumeColor(150) = %q, want it clamped to VolumeColor(100) = %q", got, ui.VolumeColor(100))
+	}
+}
+
+func TestVolumeTextColorsKnownVolumeOnly(t *testing.T) {
+	if got, want := ui.VolumeText(-1), "?%"; got != want {
+		t.Errorf("VolumeText(-1) = %q, want %q (no color tag for unknown volume)", got, want)
+	}
+	got := ui.VolumeText(50)
+	want := "[#FFD700]50%[-]"
+	if got != want {
+		t.Errorf("VolumeText(50) = %q, want %q", got, want)
+	}
+}
+
+func TestFlagTextColorsAndBoldsTheValue(t *testing.T) {
+	if got, want := ui.FlagText("repeat", true), "repeat [#25D366::b]on[-:-:-]"; got != want {
+		t.Errorf("FlagText(repeat, true) = %q, want %q", got, want)
+	}
+	if got, want := ui.FlagText("repeat", false), "repeat [red::b]off[-:-:-]"; got != want {
+		t.Errorf("FlagText(repeat, false) = %q, want %q", got, want)
+	}
+}
+
 func TestTrackFormat(t *testing.T) {
 	cases := map[string]string{
 		"queen/absolute-greatest/track.mp3": "MP3",
