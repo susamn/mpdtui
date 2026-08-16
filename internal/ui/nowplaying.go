@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"mpdtui/internal/mpdclient"
 )
@@ -44,50 +43,23 @@ func (a *App) renderNowPlaying(st mpdclient.Status, song mpdclient.Song) {
 }
 
 // nowPlayingTrackText mirrors mpdclient.Song.DisplayName's own
-// Artist+Title / Title-only / File fallback chain, but colors the
-// artist and title separately (bold sky blue / bold WhatsApp green)
-// rather than returning one plain "Artist - Title" string -- explicit
-// request. Artist/Title are also rendered fullwidth (toFullwidth) for
-// visual size, since a terminal grid has no real font-size concept to
-// reach for instead. The bare-File and nothing-playing fallbacks stay
-// plain (normal width, uncolored), same as before.
+// Artist+Title fallback chain, but shows "Title - Artist" (not
+// DisplayName's "Artist - Title" order -- explicit correction) and
+// colors the two halves separately (bold WhatsApp green / bold sky
+// blue) rather than returning one plain string. The bare-File and
+// nothing-playing fallbacks stay uncolored, same as before. (An earlier
+// version of this also rendered the text fullwidth for visual size;
+// reverted -- explicitly disliked.)
 func nowPlayingTrackText(song mpdclient.Song) string {
 	switch {
 	case song.Artist != "" && song.Title != "":
 		return fmt.Sprintf("[%s::b]%s[-:-:-] - [%s::b]%s[-:-:-]",
-			nowPlayingArtistColor, toFullwidth(song.Artist), nowPlayingTrackColor, toFullwidth(song.Title))
+			nowPlayingTrackColor, song.Title, nowPlayingArtistColor, song.Artist)
 	case song.Title != "":
-		return fmt.Sprintf("[%s::b]%s[-:-:-]", nowPlayingTrackColor, toFullwidth(song.Title))
+		return fmt.Sprintf("[%s::b]%s[-:-:-]", nowPlayingTrackColor, song.Title)
 	case song.File != "":
 		return song.File
 	default:
 		return "(nothing playing)"
 	}
-}
-
-// toFullwidth converts each plain-ASCII printable character (0x21-0x7E)
-// to its Unicode "fullwidth" counterpart (U+FF01-U+FF5E, a fixed
-// +0xFEE0 offset) and a plain space to the fullwidth space (U+3000) --
-// most terminals render these roughly double-width, which is the
-// closest a fixed character-cell terminal grid gets to "bigger text"
-// (explicit request; tview/SGR style tags have no font-size concept at
-// all). Runes outside plain ASCII (e.g. the "é" in "Céline Dion",
-// already non-ASCII) pass through unchanged -- there's no equivalent
-// fullwidth mapping for them via this same fixed-offset trick, so a
-// name mixing ASCII and accented letters ends up rendering at two
-// visually different widths. A known, explicitly-accepted tradeoff of
-// this approach, not a bug.
-func toFullwidth(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case r == ' ':
-			b.WriteRune('　') // fullwidth (ideographic) space
-		case r >= '!' && r <= '~':
-			b.WriteRune(r + 0xFEE0)
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
 }
