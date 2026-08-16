@@ -74,9 +74,10 @@ single-line inline player for a shell or tmux pane.
   `music_dir` is configured and actually exists; otherwise the Queue
   looks exactly as it would without the lyrics feature -- see
   [Lyrics](#lyrics)
-- **Lyrics** (`y`) — a teal-bordered viewer, positioned over the Queue's
-  own Year-through-Type columns, for the currently playing track's
-  lyrics, read from a `.txt` sidecar file next to the track on disk; see
+- **Lyrics** (`y`) — a viewer (bordered the same green as a focused
+  panel, muted-yellow text), positioned over the Queue's own
+  Year-through-Type columns, for the currently playing track's lyrics,
+  read from a `.txt` sidecar file next to the track on disk; see
   [Lyrics](#lyrics) for setup
 - **Track metadata** (`1`-`5`, `m`) — local play count, 1-5 star rating,
   and a mark-with-reason flag (e.g. "mark for deletion"), stored in a
