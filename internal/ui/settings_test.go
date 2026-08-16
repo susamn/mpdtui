@@ -57,12 +57,13 @@ func TestOpenSettingsStartsOnConfigTabAndFocusesIt(t *testing.T) {
 	}
 }
 
+func tabKeyEvent() *tcell.EventKey { return tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone) }
+
 func TestSettingsHandleKeyTabSwitchesTabs(t *testing.T) {
 	a := newTestApp()
 	a.openSettings()
 
-	tabKey := tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone)
-	if consumed := a.settings.handleKey(tabKey); !consumed {
+	if consumed := a.settings.handleKey(tabKeyEvent()); !consumed {
 		t.Fatal("handleKey(Tab) should report it consumed the event")
 	}
 	if a.settings.activeTab != settingsTabDatabase {
@@ -70,7 +71,7 @@ func TestSettingsHandleKeyTabSwitchesTabs(t *testing.T) {
 	}
 
 	// Only two tabs, so Tab again goes back to Config.
-	a.settings.handleKey(tabKey)
+	a.settings.handleKey(tabKeyEvent())
 	if a.settings.activeTab != settingsTabConfig {
 		t.Errorf("activeTab after a second Tab = %d, want settingsTabConfig", a.settings.activeTab)
 	}
@@ -84,14 +85,14 @@ func TestSettingsDatabaseTabExplainsWhenMetaDBInactive(t *testing.T) {
 		t.Fatal("databaseInteractive should be false without metaDB")
 	}
 
-	tabKey := tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone)
-	a.settings.handleKey(tabKey)
+	a.settings.handleKey(tabKeyEvent())
 
-	// Down/Up must no-op (nothing to focus) rather than panic on nil
-	// input field pointers.
-	downKey := tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone)
-	if consumed := a.settings.handleKey(downKey); consumed {
-		t.Error("handleKey(Down) on a non-interactive Database tab should not report it consumed the event")
+	// 'a'/'d' must no-op (nothing to act on) rather than panic on nil
+	// widget pointers (catalogTable/addInput/confirmView are never built
+	// when metaDB is nil).
+	aKey := tcell.NewEventKey(tcell.KeyRune, 'a', tcell.ModNone)
+	if consumed := a.settings.handleKey(aKey); consumed {
+		t.Error("handleKey('a') on a non-interactive Database tab should not report it consumed the event")
 	}
 }
 
@@ -111,24 +112,73 @@ func openTestAppSettingsDatabaseTab(t *testing.T) *App {
 	t.Helper()
 	a := newTestAppWithMetaDB(t)
 	a.openSettings()
-	a.settings.handleKey(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone))
+	a.settings.handleKey(tabKeyEvent())
 	if !a.settings.databaseInteractive {
 		t.Fatal("setup: databaseInteractive should be true with metaDB active")
 	}
-	if a.tv.GetFocus() != a.settings.newReasonInput {
-		t.Fatalf("setup: focus after switching to Database tab = %T, want the new-reason input", a.tv.GetFocus())
+	if a.settings.dbMode != dbModeTable {
+		t.Fatalf("setup: dbMode after switching to Database tab = %d, want dbModeTable", a.settings.dbMode)
+	}
+	if a.tv.GetFocus() != a.settings.catalogTable {
+		t.Fatalf("setup: focus after switching to Database tab = %T, want the catalog table", a.tv.GetFocus())
 	}
 	return a
 }
 
-func TestSettingsSubmitNewMarkReasonAddsAndClearsField(t *testing.T) {
+func TestSettingsCatalogTableShowsSeededMarkReasons(t *testing.T) {
 	a := openTestAppSettingsDatabaseTab(t)
 
-	a.settings.newReasonInput.SetText("mark for review")
-	a.settings.submitNewMarkReason()
+	if len(a.settings.currentRows) != 1 || a.settings.currentRows[0].name != "mark for deletion" {
+		t.Errorf("currentRows = %+v, want the single seeded mark reason", a.settings.currentRows)
+	}
+	if got := a.settings.catalogTable.GetCell(1, 1).Text; got != "mark for deletion" {
+		t.Errorf("catalogTable row 1 = %q, want %q", got, "mark for deletion")
+	}
+}
 
-	if got := a.settings.newReasonInput.GetText(); got != "" {
-		t.Errorf("newReasonInput text after submit = %q, want cleared", got)
+func TestSettingsLeftRightSwitchesCatalog(t *testing.T) {
+	a := openTestAppSettingsDatabaseTab(t)
+
+	rightKey := tcell.NewEventKey(tcell.KeyRight, 0, tcell.ModNone)
+	if consumed := a.settings.handleKey(rightKey); !consumed {
+		t.Fatal("handleKey(Right) should report it consumed the event")
+	}
+	if a.settings.subTab != dbSubTabTags {
+		t.Errorf("subTab after Right = %d, want dbSubTabTags", a.settings.subTab)
+	}
+	if len(a.settings.currentRows) != 3 { // bengali, hindi, english
+		t.Errorf("currentRows after switching to Tags = %+v, want the 3 seeded tags", a.settings.currentRows)
+	}
+
+	leftKey := tcell.NewEventKey(tcell.KeyLeft, 0, tcell.ModNone)
+	a.settings.handleKey(leftKey)
+	if a.settings.subTab != dbSubTabMarkReasons {
+		t.Errorf("subTab after Left = %d, want dbSubTabMarkReasons", a.settings.subTab)
+	}
+}
+
+func TestSettingsAddMarkReason(t *testing.T) {
+	a := openTestAppSettingsDatabaseTab(t)
+
+	aKey := tcell.NewEventKey(tcell.KeyRune, 'a', tcell.ModNone)
+	if consumed := a.settings.handleKey(aKey); !consumed {
+		t.Fatal("handleKey('a') should report it consumed the event")
+	}
+	if a.settings.dbMode != dbModeAdd {
+		t.Fatalf("dbMode after 'a' = %d, want dbModeAdd", a.settings.dbMode)
+	}
+	if a.tv.GetFocus() != a.settings.addInput {
+		t.Fatalf("focus after 'a' = %T, want the add-entry input field", a.tv.GetFocus())
+	}
+
+	a.settings.addInput.SetText("mark for review")
+	a.settings.submitAdd()
+
+	if a.settings.dbMode != dbModeTable {
+		t.Errorf("dbMode after submitAdd = %d, want dbModeTable (back to browsing)", a.settings.dbMode)
+	}
+	if got := a.settings.addInput.GetText(); got != "" {
+		t.Errorf("addInput text after submit = %q, want cleared", got)
 	}
 	reasons, err := a.metaDB.ListMarkReasons()
 	if err != nil {
@@ -137,16 +187,17 @@ func TestSettingsSubmitNewMarkReasonAddsAndClearsField(t *testing.T) {
 	if len(reasons) != 2 || reasons[1].Reason != "mark for review" {
 		t.Errorf("ListMarkReasons() = %+v, want the new reason appended", reasons)
 	}
-	if got := a.settings.markReasonsList.GetText(true); !strings.Contains(got, "mark for review") {
-		t.Errorf("markReasonsList text = %q, want it to include the new reason", got)
+	if len(a.settings.currentRows) != 2 {
+		t.Errorf("currentRows after add = %+v, want the table repainted with 2 rows", a.settings.currentRows)
 	}
 }
 
-func TestSettingsSubmitNewMarkReasonIgnoresBlankInput(t *testing.T) {
+func TestSettingsAddIgnoresBlankInput(t *testing.T) {
 	a := openTestAppSettingsDatabaseTab(t)
 
-	a.settings.newReasonInput.SetText("   ")
-	a.settings.submitNewMarkReason()
+	a.settings.startAdd()
+	a.settings.addInput.SetText("   ")
+	a.settings.submitAdd()
 
 	reasons, err := a.metaDB.ListMarkReasons()
 	if err != nil {
@@ -157,15 +208,37 @@ func TestSettingsSubmitNewMarkReasonIgnoresBlankInput(t *testing.T) {
 	}
 }
 
-func TestSettingsSubmitNewTagAddsAndClearsField(t *testing.T) {
+// TestSettingsAddAcceptsLettersThatAreAlsoShortcutsElsewhere proves 'a'/
+// 'd' typed into the add-entry field are literal text, not routed back
+// into startAdd/startDelete -- handleKey returns false in dbModeAdd, so
+// tview's native InputField handling gets every keystroke.
+func TestSettingsAddAcceptsLettersThatAreAlsoShortcutsElsewhere(t *testing.T) {
 	a := openTestAppSettingsDatabaseTab(t)
 
-	a.settings.newTagInput.SetText("french")
-	a.settings.submitNewTag()
+	a.settings.startAdd()
+	a.settings.addInput.SetText("add and delete tracks")
+	a.settings.submitAdd()
 
-	if got := a.settings.newTagInput.GetText(); got != "" {
-		t.Errorf("newTagInput text after submit = %q, want cleared", got)
+	reasons, err := a.metaDB.ListMarkReasons()
+	if err != nil {
+		t.Fatalf("ListMarkReasons: %v", err)
 	}
+	if len(reasons) != 2 || reasons[1].Reason != "add and delete tracks" {
+		t.Errorf("ListMarkReasons() = %+v, want %q added verbatim", reasons, "add and delete tracks")
+	}
+}
+
+func TestSettingsAddTag(t *testing.T) {
+	a := openTestAppSettingsDatabaseTab(t)
+	a.settings.switchSubTab(dbSubTabTags)
+
+	a.settings.startAdd()
+	if got, want := a.settings.addInput.GetLabel(), "Add tag: "; got != want {
+		t.Errorf("addInput label on the Tags sub-tab = %q, want %q", got, want)
+	}
+	a.settings.addInput.SetText("french")
+	a.settings.submitAdd()
+
 	tags, err := a.metaDB.ListTags()
 	if err != nil {
 		t.Fatalf("ListTags: %v", err)
@@ -175,17 +248,87 @@ func TestSettingsSubmitNewTagAddsAndClearsField(t *testing.T) {
 	}
 }
 
-func TestSettingsHandleKeyDownUpMovesBetweenDatabaseFields(t *testing.T) {
-	a := openTestAppSettingsDatabaseTab(t) // focus starts on newReasonInput
+func TestSettingsDeleteRequiresConfirmation(t *testing.T) {
+	a := openTestAppSettingsDatabaseTab(t)
+	a.settings.catalogTable.Select(1, 0) // the seeded "mark for deletion" row
 
-	a.settings.handleKey(tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone))
-	if a.tv.GetFocus() != a.settings.newTagInput {
-		t.Errorf("focus after Down = %T, want the new-tag input", a.tv.GetFocus())
+	dKey := tcell.NewEventKey(tcell.KeyRune, 'd', tcell.ModNone)
+	if consumed := a.settings.handleKey(dKey); !consumed {
+		t.Fatal("handleKey('d') should report it consumed the event")
+	}
+	if a.settings.dbMode != dbModeConfirmDelete {
+		t.Fatalf("dbMode after 'd' = %d, want dbModeConfirmDelete", a.settings.dbMode)
+	}
+	if a.settings.pendingDeleteName != "mark for deletion" {
+		t.Errorf("pendingDeleteName = %q, want %q", a.settings.pendingDeleteName, "mark for deletion")
 	}
 
-	a.settings.handleKey(tcell.NewEventKey(tcell.KeyUp, 0, tcell.ModNone))
-	if a.tv.GetFocus() != a.settings.newReasonInput {
-		t.Errorf("focus after Up = %T, want the new-reason input", a.tv.GetFocus())
+	// Not yet deleted -- only confirming with 'y' actually removes it.
+	reasons, err := a.metaDB.ListMarkReasons()
+	if err != nil {
+		t.Fatalf("ListMarkReasons: %v", err)
+	}
+	if len(reasons) != 1 {
+		t.Errorf("ListMarkReasons() = %+v, want the row still present before confirming", reasons)
+	}
+}
+
+func TestSettingsDeleteConfirmedWithY(t *testing.T) {
+	a := openTestAppSettingsDatabaseTab(t)
+	a.settings.catalogTable.Select(1, 0)
+	a.settings.startDelete()
+
+	yKey := tcell.NewEventKey(tcell.KeyRune, 'y', tcell.ModNone)
+	if consumed := a.settings.handleKey(yKey); !consumed {
+		t.Fatal("handleKey('y') during a confirm prompt should report it consumed the event")
+	}
+	if a.settings.dbMode != dbModeTable {
+		t.Errorf("dbMode after confirming = %d, want dbModeTable", a.settings.dbMode)
+	}
+
+	reasons, err := a.metaDB.ListMarkReasons()
+	if err != nil {
+		t.Fatalf("ListMarkReasons: %v", err)
+	}
+	if len(reasons) != 0 {
+		t.Errorf("ListMarkReasons() after confirmed delete = %+v, want empty", reasons)
+	}
+}
+
+func TestSettingsDeleteCanceledWithN(t *testing.T) {
+	a := openTestAppSettingsDatabaseTab(t)
+	a.settings.catalogTable.Select(1, 0)
+	a.settings.startDelete()
+
+	nKey := tcell.NewEventKey(tcell.KeyRune, 'n', tcell.ModNone)
+	a.settings.handleKey(nKey)
+
+	if a.settings.dbMode != dbModeTable {
+		t.Errorf("dbMode after canceling = %d, want dbModeTable", a.settings.dbMode)
+	}
+	reasons, err := a.metaDB.ListMarkReasons()
+	if err != nil {
+		t.Fatalf("ListMarkReasons: %v", err)
+	}
+	if len(reasons) != 1 {
+		t.Errorf("ListMarkReasons() after canceled delete = %+v, want the row still present", reasons)
+	}
+}
+
+// TestSettingsDeleteSwallowsUnrelatedKeysWhileConfirming guards against
+// a stray keystroke leaking through to the hidden table (or worse,
+// re-triggering another action) while a confirm prompt is up.
+func TestSettingsDeleteSwallowsUnrelatedKeysWhileConfirming(t *testing.T) {
+	a := openTestAppSettingsDatabaseTab(t)
+	a.settings.catalogTable.Select(1, 0)
+	a.settings.startDelete()
+
+	xKey := tcell.NewEventKey(tcell.KeyRune, 'x', tcell.ModNone)
+	if consumed := a.settings.handleKey(xKey); !consumed {
+		t.Error("handleKey(unrelated rune) during a confirm prompt should still report it consumed the event")
+	}
+	if a.settings.dbMode != dbModeConfirmDelete {
+		t.Error("dbMode should remain dbModeConfirmDelete after an unrelated key")
 	}
 }
 
@@ -219,23 +362,23 @@ func TestEscWhileSettingsOpenRestoresOriginalFocus(t *testing.T) {
 	}
 }
 
-// TestSettingsAddMarkReasonDoesNotAffectQueueRatingKeys is a light
-// sanity check that typing digits into the new-reason field (which
-// share runes with the Queue's own '1'-'5' rating shortcut) is treated
-// as literal text, not routed into handleRateSelectedTrack -- since
-// settings.handleKey only claims Tab/Backtab/Down/Up, everything else
-// (including digit runes) must fall through to the focused InputField.
-func TestSettingsAddMarkReasonAcceptsDigitsAsLiteralText(t *testing.T) {
+// TestSettingsSwitchTabResetsDatabaseSubMode guards against a stale
+// in-progress add/confirm lingering if the user Tabs away from Database
+// and back -- switchTab always resets dbMode to dbModeTable.
+func TestSettingsSwitchTabResetsDatabaseSubMode(t *testing.T) {
 	a := openTestAppSettingsDatabaseTab(t)
-
-	a.settings.newReasonInput.SetText("skip 2 tracks")
-	a.settings.submitNewMarkReason()
-
-	reasons, err := a.metaDB.ListMarkReasons()
-	if err != nil {
-		t.Fatalf("ListMarkReasons: %v", err)
+	a.settings.startAdd()
+	if a.settings.dbMode != dbModeAdd {
+		t.Fatal("setup: dbMode should be dbModeAdd")
 	}
-	if len(reasons) != 2 || reasons[1].Reason != "skip 2 tracks" {
-		t.Errorf("ListMarkReasons() = %+v, want %q added verbatim", reasons, "skip 2 tracks")
+
+	a.settings.handleKey(tabKeyEvent()) // -> Config
+	a.settings.handleKey(tabKeyEvent()) // -> Database again
+
+	if a.settings.dbMode != dbModeTable {
+		t.Errorf("dbMode after leaving and returning to Database = %d, want dbModeTable", a.settings.dbMode)
+	}
+	if a.tv.GetFocus() != a.settings.catalogTable {
+		t.Errorf("focus after returning to Database = %T, want the catalog table", a.tv.GetFocus())
 	}
 }
