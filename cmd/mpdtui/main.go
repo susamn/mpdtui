@@ -56,7 +56,16 @@ func main() {
 	case *miniMode:
 		err = mini.Run(client, metaDB)
 	default:
-		err = ui.Run(client, config.LoadMusicDir(), metaDB)
+		summary := ui.ConfigSummary{
+			MPDHost:              cfg.Host,
+			MPDPort:              cfg.Port,
+			MPDPasswordSet:       cfg.Password != "",
+			MusicDir:             config.LoadMusicDir(),
+			TrackMetadataEnabled: config.LoadTrackMetadataEnabled(),
+			ConfigFilePath:       config.ConfigFile(),
+			DBFilePath:           config.DBFile(),
+		}
+		err = ui.Run(client, config.LoadMusicDir(), metaDB, summary)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mpdtui: %v\n", err)

@@ -83,6 +83,11 @@ single-line inline player for a shell or tmux pane.
   and a mark-with-reason flag (e.g. "mark for deletion"), stored in a
   SQLite database separate from MPD's own library; see
   [Track metadata](#track-metadata) for setup
+- **Settings** (`e`) — a two-tab overlay: a read-only Config tab (MPD
+  connection, `music_dir`, `track_metadata` status) and a Database tab --
+  a table-selector wizard over the mark-reason/tag catalogs, with a
+  proper bordered edit box to add entries and confirm-before-delete,
+  without touching the SQLite file by hand
 - **Library stats** — live total tracks (green) / artists (sky blue) /
   playlists (cyan), shown alongside the Queue search box, refreshed on
   library/playlist changes; its own border shows the running mpdtui
@@ -169,6 +174,7 @@ Press `?` inside the full UI for the in-app keybinding list.
 | `y` | Lyrics viewer for the currently playing track (needs `music_dir` set, see [Lyrics](#lyrics) below) -- `j`/`k`/`g`/`G`/Ctrl-F/Ctrl-B to scroll, `y` or `Esc` to close. Transport controls (`Space`/`s`/`n`/`p`/`,`/`.`/`-`/`=`/`z`/`x`/`c`/`Z`) keep working while it's open |
 | `v` | Cycle Now Playing visualizations (right half of the Now Playing bar) |
 | `L` | Locate the currently playing track: selects it in the Queue and moves focus there, from any panel, and also reveals it in the Library tree (expanding every folder along its path and selecting it there, without moving focus away from Queue). The Queue-selecting part also happens automatically, whenever the playing track actually changes (explicit play action or natural auto-advance alike) -- except while an overlay is open, or on startup; the Library reveal is only on the explicit keypress |
+| `e` | Settings: a two-tab overlay -- **Config** (read-only: MPD host/port, `music_dir`, `track_metadata` status and file paths) and **Database** (browse/add/delete `mark_reason`/`tags` catalog rows, only when `track_metadata` is active; otherwise explains why it isn't). `Tab`/`Backtab` switches tabs; on Database, `Left`/`Right` switches which catalog table, `j`/`k`/`g`/`G` navigates rows, `a` adds (bordered edit box), `d` deletes (`y`/`n` to confirm); `Esc` closes |
 | `?` | Help overlay |
 | `q` | Quit |
 
@@ -288,11 +294,42 @@ lowercased) -- so minor path differences don't create duplicate rows, but
 each directory still stays distinct (a track named the same as another in
 a different folder is still tracked separately).
 
-There's currently no in-app way to edit the mark-reason catalog or the
-tag catalog -- add rows to the `mark_reason`/`tags` tables directly (e.g.
-via the `sqlite3` CLI against `~/.config/mpdtui/mpdtui.db`) if you want
-more than the seeded defaults ("mark for deletion"; "bengali"/"hindi"/
-"english" for tags, not yet exposed in the UI).
+Add or delete mark-reason/tag catalog entries in-app via the Settings
+overlay (`e`, Database tab) -- see [Settings](#settings) below.
+*Renaming* an existing entry still needs the `sqlite3` CLI directly
+against `~/.config/mpdtui/mpdtui.db`; only add/delete are exposed in the
+UI so far.
+
+## Settings
+
+`e` opens a two-tab overlay, `Tab`/`Backtab` switches between tabs,
+`Esc` closes it:
+
+- **Config** -- read-only, shown as a bordered Setting/Value table
+  (matching the Database tab's own look). Shows exactly what mpdtui
+  resolved at startup: MPD host/port (and whether a password is set,
+  never the password itself), `music_dir` (or a note that it's not
+  configured), and `track_metadata`'s status plus the config/database
+  file paths. There's no way to edit any of this from here -- it's a
+  snapshot for reference, not a settings form; change the underlying
+  environment variables or `~/.config/mpdtui/config` and restart mpdtui
+  instead.
+- **Database** -- a small table-selector wizard over the `mark_reason`/
+  `tags` catalog tables (see [Track metadata](#track-metadata) above),
+  only shown when `track_metadata` is active (otherwise this tab just
+  explains that it isn't, matching every other track-metadata feature in
+  this app):
+  - `Left`/`Right` switches which catalog table you're looking at (Mark
+    Reasons / Tags), highlighted in the sub-tab bar
+  - The rows themselves are a normal selectable table -- `j`/`k`/`g`/`G`
+    to navigate, same as every other table in mpdtui
+  - `a` opens a small bordered edit box to type a new entry; `Enter`
+    adds it and returns to the table, updated immediately
+  - `d` deletes the currently selected row, after a `y`/`n` confirmation
+    (matching Playlists' own delete confirmation) -- deleting a
+    mark-reason or tag that's still applied to tracks clears it from
+    them first, rather than leaving a dangling reference
+  - No `sqlite3` CLI needed for either add or delete anymore
 
 ## Test
 

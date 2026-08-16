@@ -246,3 +246,150 @@ func TestNormalizedMatchDespitePunctuationDifferences(t *testing.T) {
 		t.Errorf("rating via a punctuation-different path = %d, want 4 (should still match the same normalized row)", track.Rating)
 	}
 }
+
+func TestAddMarkReasonAppendsAfterSeededRow(t *testing.T) {
+	db := openTestDB(t)
+
+	id, err := db.AddMarkReason("mark for move")
+	if err != nil {
+		t.Fatalf("AddMarkReason: %v", err)
+	}
+	if id != 2 {
+		t.Errorf("AddMarkReason id = %d, want 2 (after the seeded id 1)", id)
+	}
+
+	reasons, err := db.ListMarkReasons()
+	if err != nil {
+		t.Fatalf("ListMarkReasons: %v", err)
+	}
+	if len(reasons) != 2 || reasons[1].Reason != "mark for move" {
+		t.Errorf("ListMarkReasons() = %+v, want the new reason appended", reasons)
+	}
+}
+
+// TestAddMarkReasonRejectsDuplicate guards the UNIQUE constraint on
+// mark_reason.reason -- callers (the Settings overlay) rely on this
+// erroring rather than silently creating a second row for the same text.
+func TestAddMarkReasonRejectsDuplicate(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := db.AddMarkReason("mark for deletion"); err == nil {
+		t.Error("AddMarkReason(duplicate of the seeded reason) = nil error, want a UNIQUE constraint error")
+	}
+}
+
+func TestAddTagAppendsAfterSeededRows(t *testing.T) {
+	db := openTestDB(t)
+
+	id, err := db.AddTag("spanish")
+	if err != nil {
+		t.Fatalf("AddTag: %v", err)
+	}
+	if id != 4 {
+		t.Errorf("AddTag id = %d, want 4 (after the seeded ids 1-3)", id)
+	}
+
+	tags, err := db.ListTags()
+	if err != nil {
+		t.Fatalf("ListTags: %v", err)
+	}
+	if len(tags) != 4 || tags[3].Tagname != "spanish" {
+		t.Errorf("ListTags() = %+v, want the new tag appended", tags)
+	}
+}
+
+func TestAddTagRejectsDuplicate(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := db.AddTag("hindi"); err == nil {
+		t.Error("AddTag(duplicate of a seeded tag) = nil error, want a UNIQUE constraint error")
+	}
+}
+
+func TestDeleteMarkReasonRemovesRow(t *testing.T) {
+	db := openTestDB(t)
+	id, err := db.AddMarkReason("mark for move")
+	if err != nil {
+		t.Fatalf("AddMarkReason: %v", err)
+	}
+	if err := db.DeleteMarkReason(id); err != nil {
+		t.Fatalf("DeleteMarkReason: %v", err)
+	}
+	reasons, err := db.ListMarkReasons()
+	if err != nil {
+		t.Fatalf("ListMarkReasons: %v", err)
+	}
+	for _, r := range reasons {
+		if r.ID == id {
+			t.Errorf("ListMarkReasons() still contains deleted id %d: %+v", id, reasons)
+		}
+	}
+}
+
+// TestDeleteMarkReasonClearsReferencingTracks guards the orphan-
+// reference fix DeleteMarkReason exists for: without clearing tracks'
+// mark column first, Get would start erroring (dangling FK) for any
+// track that still had the deleted reason set.
+func TestDeleteMarkReasonClearsReferencingTracks(t *testing.T) {
+	db := openTestDB(t)
+	seededID := int64(1) // "mark for deletion", seeded by Open
+
+	if err := db.SetMark("artist/track.mp3", &seededID); err != nil {
+		t.Fatalf("SetMark: %v", err)
+	}
+	if err := db.DeleteMarkReason(seededID); err != nil {
+		t.Fatalf("DeleteMarkReason: %v", err)
+	}
+
+	track, err := db.Get("artist/track.mp3")
+	if err != nil {
+		t.Fatalf("Get after deleting the referenced mark reason returned an error (dangling reference): %v", err)
+	}
+	if track.Mark != nil {
+		t.Errorf("track.Mark after deleting the referenced reason = %+v, want nil (cleared)", track.Mark)
+	}
+}
+
+func TestDeleteTagRemovesRow(t *testing.T) {
+	db := openTestDB(t)
+	id, err := db.AddTag("spanish")
+	if err != nil {
+		t.Fatalf("AddTag: %v", err)
+	}
+	if err := db.DeleteTag(id); err != nil {
+		t.Fatalf("DeleteTag: %v", err)
+	}
+	tags, err := db.ListTags()
+	if err != nil {
+		t.Fatalf("ListTags: %v", err)
+	}
+	for _, tg := range tags {
+		if tg.ID == id {
+			t.Errorf("ListTags() still contains deleted id %d: %+v", id, tags)
+		}
+	}
+}
+
+// TestDeleteTagClearsReferencingTrackTags mirrors
+// TestDeleteMarkReasonClearsReferencingTracks for the tags/track_tags
+// join table: a track's Tags list must no longer include the deleted
+// tag afterward, not error or leave a dangling join row.
+func TestDeleteTagClearsReferencingTrackTags(t *testing.T) {
+	db := openTestDB(t)
+	seededID := int64(1) // "bengali", seeded by Open
+
+	if err := db.SetTags("artist/track.mp3", []int64{seededID}); err != nil {
+		t.Fatalf("SetTags: %v", err)
+	}
+	if err := db.DeleteTag(seededID); err != nil {
+		t.Fatalf("DeleteTag: %v", err)
+	}
+
+	track, err := db.Get("artist/track.mp3")
+	if err != nil {
+		t.Fatalf("Get after deleting a referenced tag returned an error: %v", err)
+	}
+	for _, tg := range track.Tags {
+		if tg.ID == seededID {
+			t.Errorf("track.Tags after deleting the referenced tag = %+v, still contains it", track.Tags)
+		}
+	}
+}

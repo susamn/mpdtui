@@ -270,6 +270,70 @@ func (db *DB) SetTags(file string, tagIDs []int64) error {
 	return tx.Commit()
 }
 
+// AddMarkReason inserts a new mark_reason catalog row, auto-assigning
+// its id -- the in-app counterpart to editing the database by hand
+// (previously the only way to add one, per this package's own doc
+// comment on seedMarkReasons). reason must be non-empty and not already
+// present (the column is UNIQUE); either violation returns the
+// underlying sqlite error unchanged rather than a wrapped one, since
+// there's nothing this layer can usefully add. Returns the new row's id.
+func (db *DB) AddMarkReason(reason string) (int64, error) {
+	res, err := db.sql.Exec(`INSERT INTO mark_reason (reason) VALUES (?)`, reason)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// AddTag inserts a new tags catalog row the same way AddMarkReason does.
+func (db *DB) AddTag(tagname string) (int64, error) {
+	res, err := db.sql.Exec(`INSERT INTO tags (tagname) VALUES (?)`, tagname)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// DeleteMarkReason removes a mark_reason catalog row. First clears it
+// (SET mark = NULL) from any track that still references it, in the
+// same transaction -- without that, Get's own markReasonByID lookup for
+// such a track would start failing on a dangling reference (sql.
+// ErrNoRows) instead of returning a valid Track, breaking rendering
+// anywhere that track shows up (Queue's Mark column, mini mode, Now
+// Playing) until the mark happened to be reset by hand.
+func (db *DB) DeleteMarkReason(id int64) error {
+	tx, err := db.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`UPDATE tracks SET mark = NULL WHERE mark = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM mark_reason WHERE id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// DeleteTag removes a tags catalog row, first deleting any track_tags
+// rows referencing it -- the same orphan-reference reasoning as
+// DeleteMarkReason, via the join table rather than a direct column.
+func (db *DB) DeleteTag(id int64) error {
+	tx, err := db.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM track_tags WHERE tag_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM tags WHERE id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // ListMarkReasons returns every row in mark_reason, ordered by id.
 func (db *DB) ListMarkReasons() ([]MarkReason, error) {
 	rows, err := db.sql.Query(`SELECT id, reason FROM mark_reason ORDER BY id`)
