@@ -82,9 +82,10 @@ single-line inline player for a shell or tmux pane.
   and a mark-with-reason flag (e.g. "mark for deletion"), stored in a
   SQLite database separate from MPD's own library; see
   [Track metadata](#track-metadata) for setup
-- **Library stats** — live total tracks/artists/playlists, shown
-  alongside the Queue search box, refreshed on library/playlist changes;
-  its own border shows the running mpdtui version, right-aligned
+- **Library stats** — live total tracks (green) / artists (sky blue) /
+  playlists (cyan), shown alongside the Queue search box, refreshed on
+  library/playlist changes; its own border shows the running mpdtui
+  version, right-aligned
 - **Now Playing bar** — a vibrant play/pause/stop glyph (bright
   green/yellow/red), title (bold WhatsApp green) - artist (bold sky
   blue), live progress (cyan bar), volume (colored along a
