@@ -246,3 +246,60 @@ func TestNormalizedMatchDespitePunctuationDifferences(t *testing.T) {
 		t.Errorf("rating via a punctuation-different path = %d, want 4 (should still match the same normalized row)", track.Rating)
 	}
 }
+
+func TestAddMarkReasonAppendsAfterSeededRow(t *testing.T) {
+	db := openTestDB(t)
+
+	id, err := db.AddMarkReason("mark for move")
+	if err != nil {
+		t.Fatalf("AddMarkReason: %v", err)
+	}
+	if id != 2 {
+		t.Errorf("AddMarkReason id = %d, want 2 (after the seeded id 1)", id)
+	}
+
+	reasons, err := db.ListMarkReasons()
+	if err != nil {
+		t.Fatalf("ListMarkReasons: %v", err)
+	}
+	if len(reasons) != 2 || reasons[1].Reason != "mark for move" {
+		t.Errorf("ListMarkReasons() = %+v, want the new reason appended", reasons)
+	}
+}
+
+// TestAddMarkReasonRejectsDuplicate guards the UNIQUE constraint on
+// mark_reason.reason -- callers (the Settings overlay) rely on this
+// erroring rather than silently creating a second row for the same text.
+func TestAddMarkReasonRejectsDuplicate(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := db.AddMarkReason("mark for deletion"); err == nil {
+		t.Error("AddMarkReason(duplicate of the seeded reason) = nil error, want a UNIQUE constraint error")
+	}
+}
+
+func TestAddTagAppendsAfterSeededRows(t *testing.T) {
+	db := openTestDB(t)
+
+	id, err := db.AddTag("spanish")
+	if err != nil {
+		t.Fatalf("AddTag: %v", err)
+	}
+	if id != 4 {
+		t.Errorf("AddTag id = %d, want 4 (after the seeded ids 1-3)", id)
+	}
+
+	tags, err := db.ListTags()
+	if err != nil {
+		t.Fatalf("ListTags: %v", err)
+	}
+	if len(tags) != 4 || tags[3].Tagname != "spanish" {
+		t.Errorf("ListTags() = %+v, want the new tag appended", tags)
+	}
+}
+
+func TestAddTagRejectsDuplicate(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := db.AddTag("hindi"); err == nil {
+		t.Error("AddTag(duplicate of a seeded tag) = nil error, want a UNIQUE constraint error")
+	}
+}

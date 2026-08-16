@@ -270,6 +270,30 @@ func (db *DB) SetTags(file string, tagIDs []int64) error {
 	return tx.Commit()
 }
 
+// AddMarkReason inserts a new mark_reason catalog row, auto-assigning
+// its id -- the in-app counterpart to editing the database by hand
+// (previously the only way to add one, per this package's own doc
+// comment on seedMarkReasons). reason must be non-empty and not already
+// present (the column is UNIQUE); either violation returns the
+// underlying sqlite error unchanged rather than a wrapped one, since
+// there's nothing this layer can usefully add. Returns the new row's id.
+func (db *DB) AddMarkReason(reason string) (int64, error) {
+	res, err := db.sql.Exec(`INSERT INTO mark_reason (reason) VALUES (?)`, reason)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// AddTag inserts a new tags catalog row the same way AddMarkReason does.
+func (db *DB) AddTag(tagname string) (int64, error) {
+	res, err := db.sql.Exec(`INSERT INTO tags (tagname) VALUES (?)`, tagname)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
 // ListMarkReasons returns every row in mark_reason, ordered by id.
 func (db *DB) ListMarkReasons() ([]MarkReason, error) {
 	rows, err := db.sql.Query(`SELECT id, reason FROM mark_reason ORDER BY id`)

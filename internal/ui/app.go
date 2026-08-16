@@ -46,6 +46,13 @@ type App struct {
 	// assume it's always present.
 	metaDB *metadata.DB
 
+	// cfg is a read-only snapshot of the settings resolved at startup
+	// (see ConfigSummary), shown in the Settings overlay's Config tab
+	// ('e'). Never mutated after Run constructs App -- internal/ui has
+	// no way to edit any of it, by design (see the 'e' request itself:
+	// "config data... i cannot modify").
+	cfg ConfigSummary
+
 	// runAsync runs a unit of (typically metaDB) work in the background
 	// and applies its result on the UI goroutine -- see runAsyncDefault,
 	// which build() wires this to. A field rather than calling
@@ -68,6 +75,7 @@ type App struct {
 	trackInfo    *trackInfoCard
 	lyricsViewer *lyricsViewer
 	markPicker   *markPicker
+	settings     *settingsView
 	visualizer   *visualizerPanel
 
 	// currentSong is refreshNowPlaying's own last-fetched CurrentSong,
@@ -111,13 +119,15 @@ type App struct {
 // play-count/rating/mark/tags database (see internal/metadata) when
 // non-nil; pass nil to leave it inactive. Run itself never opens or
 // closes metaDB -- that's the caller's (cmd/mpdtui's) responsibility,
-// same as the MPD client.
-func Run(client *mpdclient.Client, musicDir string, metaDB *metadata.DB) error {
+// same as the MPD client. cfg is a read-only snapshot shown in the
+// Settings overlay's Config tab ('e') -- see ConfigSummary.
+func Run(client *mpdclient.Client, musicDir string, metaDB *metadata.DB, cfg ConfigSummary) error {
 	a := &App{
 		tv:                tview.NewApplication(),
 		client:            client,
 		musicDir:          musicDir,
 		metaDB:            metaDB,
+		cfg:               cfg,
 		playCountedSongID: -1,
 		done:              make(chan struct{}),
 	}
@@ -190,6 +200,7 @@ func (a *App) build() {
 	a.trackInfo = newTrackInfoCard(a)
 	a.lyricsViewer = newLyricsViewer(a)
 	a.markPicker = newMarkPicker(a)
+	a.settings = newSettingsView(a)
 	a.visualizer = newVisualizerPanel(a)
 
 	a.hintBar = tview.NewTextView().SetDynamicColors(true)

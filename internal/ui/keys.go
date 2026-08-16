@@ -18,6 +18,19 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			a.closeOverlay()
 			return nil
 		}
+		// The Settings overlay ('e') spans two tabs with several of its
+		// own focusable widgets (a read-only text view, two input
+		// fields), unlike every other overlay here which assumes one
+		// fixed primitive -- routed separately rather than folded into
+		// noTextInputOverlays below. handleKey only claims Tab/Backtab/
+		// Down/Up; anything else (typing, Enter, Backspace) falls
+		// through to whatever's actually focused.
+		if a.settings.focused() {
+			if a.settings.handleKey(event) {
+				return nil
+			}
+			return event
+		}
 		// noTextInputOverlays: none of these three have anything to type
 		// (a track-info/lyrics display, or a plain selection list), so
 		// 'q' can safely still quit while any of them is open -- unlike
@@ -102,6 +115,9 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			return nil
 		case 'm':
 			a.handleOpenMarkPicker()
+			return nil
+		case 'e':
+			a.openSettings()
 			return nil
 		case '?':
 			a.openHelp()

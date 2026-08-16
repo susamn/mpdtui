@@ -164,6 +164,12 @@ const helpText = `[::b]Global[-:-:-]
                  work while it's open
   v              cycle Now Playing visualizations
   L              locate the currently playing track in the Queue
+  e              settings: Config tab (read-only: MPD host/port,
+                 music_dir, track_metadata status) and Database tab
+                 (add new mark_reason/tags catalog rows, when
+                 track_metadata is active) -- Tab/Backtab switches
+                 tabs, Down/Up moves between the two add-new fields,
+                 Esc closes
   ?              this help
   q              quit
 
