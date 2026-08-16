@@ -1,10 +1,15 @@
 package mpdclient
 
 import (
+	"errors"
 	"time"
 
 	"github.com/fhs/gompd/v2/mpd"
 )
+
+// ErrTrackAlreadyInPlaylist is returned by AddTrackToPlaylist when uri is
+// already present in the target playlist.
+var ErrTrackAlreadyInPlaylist = errors.New("track already in playlist")
 
 // Playlists returns every stored (saved) playlist.
 func (c *Client) Playlists() ([]Playlist, error) {
@@ -54,6 +59,48 @@ func (c *Client) PlaylistLoad(name string) error {
 // without clearing it or starting playback.
 func (c *Client) PlaylistAppend(name string) error {
 	return callErr(c, func(conn *mpd.Client) error { return conn.PlaylistLoad(name, -1, -1) })
+}
+
+// AddTrackToPlaylist appends uri to the stored playlist name, writing
+// directly into that playlist's own .m3u file via MPD's "playlistadd"
+// command -- unlike PlaylistAppend/PlaylistLoad, which only ever read a
+// stored playlist's contents into the queue, never touching the file
+// itself. Returns ErrTrackAlreadyInPlaylist, without touching the file at
+// all, if uri is already one of the playlist's tracks -- "playlistadd"
+// has no dedup of its own and would otherwise happily write a second line
+// for the same track. The duplicate check is deliberately its own call()
+// (a plain "listplaylist" read), not folded into the same closure as the
+// mutation: call()'s reconnect-and-retry-once logic re-invokes fn on any
+// non-nil error, and ErrTrackAlreadyInPlaylist is an outcome, not a
+// connection failure worth retrying. name not existing yet is treated as
+// zero existing tracks rather than an error -- "playlistadd" creates a
+// brand-new NAME.m3u the same as it would for any other add, so adding
+// the very first track to a not-yet-existing playlist must still work.
+func (c *Client) AddTrackToPlaylist(name, uri string) error {
+	existing, err := call(c, func(conn *mpd.Client) ([]string, error) {
+		attrs, err := conn.Command("listplaylist %s", name).AttrsList("file")
+		if err != nil {
+			var mpdErr mpd.Error
+			if errors.As(err, &mpdErr) && mpdErr.Code == mpd.ErrorNoExist {
+				return nil, nil
+			}
+			return nil, err
+		}
+		files := make([]string, len(attrs))
+		for i, a := range attrs {
+			files[i] = a["file"]
+		}
+		return files, nil
+	})
+	if err != nil {
+		return err
+	}
+	for _, f := range existing {
+		if f == uri {
+			return ErrTrackAlreadyInPlaylist
+		}
+	}
+	return callErr(c, func(conn *mpd.Client) error { return conn.PlaylistAdd(name, uri) })
 }
 
 // PlaylistDelete deletes the stored playlist name.

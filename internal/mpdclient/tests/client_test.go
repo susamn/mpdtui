@@ -3,6 +3,7 @@
 package tests
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -153,6 +154,55 @@ func TestPlaylistTrackCounts(t *testing.T) {
 	}
 	if got, want := counts[name], len(tracks); got != want {
 		t.Errorf("PlaylistTrackCounts()[%q] = %d, want %d (PlaylistTracks' actual length)", name, got, want)
+	}
+}
+
+// TestAddTrackToPlaylistWritesFileAndRejectsDuplicate uses a disposable,
+// throwaway-named playlist (deleted in cleanup either way) rather than
+// touching any of the library's real playlists -- proves AddTrackToPlaylist
+// actually writes the stored playlist's .m3u file (via PlaylistTracks,
+// listplaylistinfo, reading it straight back from MPD) on the first add,
+// then that a second add of the same track is rejected with
+// ErrTrackAlreadyInPlaylist and leaves the file untouched (still exactly
+// one entry), rather than MPD's playlistadd silently writing a duplicate
+// line.
+func TestAddTrackToPlaylistWritesFileAndRejectsDuplicate(t *testing.T) {
+	c := dialOrSkip(t)
+
+	songs, err := c.AllSongs()
+	if err != nil {
+		t.Fatalf("AllSongs: %v", err)
+	}
+	if len(songs) == 0 {
+		t.Skip("library has no tracks to add to a playlist")
+	}
+	track := songs[0].File
+
+	const testPlaylist = "zz_mpdtui_test_add_track_to_playlist"
+	t.Cleanup(func() { c.PlaylistDelete(testPlaylist) })
+	c.PlaylistDelete(testPlaylist) // best-effort: clear any stale leftover from a prior failed run
+
+	if err := c.AddTrackToPlaylist(testPlaylist, track); err != nil {
+		t.Fatalf("AddTrackToPlaylist (first add, new playlist): %v", err)
+	}
+	tracks, err := c.PlaylistTracks(testPlaylist)
+	if err != nil {
+		t.Fatalf("PlaylistTracks after first add: %v", err)
+	}
+	if len(tracks) != 1 || tracks[0].File != track {
+		t.Fatalf("PlaylistTracks after first add = %+v, want exactly [%q]", tracks, track)
+	}
+
+	err = c.AddTrackToPlaylist(testPlaylist, track)
+	if !errors.Is(err, mpdclient.ErrTrackAlreadyInPlaylist) {
+		t.Errorf("AddTrackToPlaylist (duplicate) = %v, want ErrTrackAlreadyInPlaylist", err)
+	}
+	tracks, err = c.PlaylistTracks(testPlaylist)
+	if err != nil {
+		t.Fatalf("PlaylistTracks after duplicate attempt: %v", err)
+	}
+	if len(tracks) != 1 {
+		t.Errorf("PlaylistTracks after rejected duplicate = %+v, want the file still untouched (len 1)", tracks)
 	}
 }
 
