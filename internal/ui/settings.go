@@ -493,6 +493,19 @@ func (s *settingsView) handleKey(event *tcell.EventKey) bool {
 	return false
 }
 
+// allowsGlobalKeys reports whether 'q'-quit and the transport cluster
+// should stay live while this view has focus. True for the Config table
+// and the Database tab's catalog table -- both just navigable displays,
+// no different from trackInfoCard/lyricsViewer/markPicker, which already
+// get this treatment in globalInputCapture. False only while addInput is
+// actually accepting typed text (dbModeAdd): a mark reason or tag like
+// "single" contains letters ('s') that double as transport shortcuts, so
+// those must stay literal there. dbModeConfirmDelete doesn't need a case
+// here -- handleKey already swallows every key but y/n itself.
+func (s *settingsView) allowsGlobalKeys() bool {
+	return !(s.activeTab == settingsTabDatabase && s.dbMode == dbModeAdd)
+}
+
 // focused reports whether any of this view's own focusable widgets
 // currently has application focus -- used by globalInputCapture to
 // decide whether to route a key through handleKey instead of the

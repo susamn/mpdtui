@@ -410,3 +410,85 @@ func TestSettingsSwitchTabResetsDatabaseSubMode(t *testing.T) {
 		t.Errorf("focus after returning to Database = %T, want the catalog table", a.tv.GetFocus())
 	}
 }
+
+// TestQKeyWhileSettingsConfigTabOpenIsConsumed proves 'q' still quits
+// while Settings is open and focused on the (read-only) Config table --
+// the bug report this guards against was that being inside Settings at
+// all blocked every global key, even on widgets with nothing to type.
+func TestQKeyWhileSettingsConfigTabOpenIsConsumed(t *testing.T) {
+	a := newTestApp()
+	a.openSettings()
+
+	qKey := tcell.NewEventKey(tcell.KeyRune, 'q', tcell.ModNone)
+	if result := a.globalInputCapture(qKey); result != nil {
+		t.Errorf("'q' while Settings' Config tab is open should be consumed (quit), got %v", result)
+	}
+}
+
+// TestQKeyWhileSettingsCatalogTableOpenIsConsumed is the Database tab's
+// counterpart -- the catalog table is just as read-only/browsable as the
+// Config table, so 'q' should quit there too.
+func TestQKeyWhileSettingsCatalogTableOpenIsConsumed(t *testing.T) {
+	a := openTestAppSettingsDatabaseTab(t)
+
+	qKey := tcell.NewEventKey(tcell.KeyRune, 'q', tcell.ModNone)
+	if result := a.globalInputCapture(qKey); result != nil {
+		t.Errorf("'q' while the Database catalog table is focused should be consumed (quit), got %v", result)
+	}
+}
+
+// TestQKeyWhileAddingSettingsEntryIsNotConsumed proves the fix stays
+// scoped: while addInput actually has focus and is accepting typed text
+// (dbModeAdd), 'q' must stay literal -- a mark reason or tag could
+// legitimately contain the letter 'q'.
+func TestQKeyWhileAddingSettingsEntryIsNotConsumed(t *testing.T) {
+	a := openTestAppSettingsDatabaseTab(t)
+	a.settings.startAdd()
+
+	qKey := tcell.NewEventKey(tcell.KeyRune, 'q', tcell.ModNone)
+	if result := a.globalInputCapture(qKey); result == nil {
+		t.Error("'q' while typing a new Settings entry should not quit -- it must reach addInput as literal text")
+	}
+	if a.tv.GetFocus() != a.settings.addInput {
+		t.Error("focus should still be addInput after 'q' while adding")
+	}
+}
+
+// TestTransportKeysNotConsumedWhileAddingSettingsEntry is the transport-
+// key counterpart to TestQKeyWhileAddingSettingsEntryIsNotConsumed: a
+// mark reason or tag like "single" or "stereo" contains 's', which
+// doubles as the stop shortcut, so it must stay literal while addInput
+// has focus. Offline-safe -- no a.client call happens, since
+// allowsGlobalKeys() is false here, so handleTransportKey is never
+// reached.
+func TestTransportKeysNotConsumedWhileAddingSettingsEntry(t *testing.T) {
+	a := openTestAppSettingsDatabaseTab(t)
+	a.settings.startAdd()
+
+	space := tcell.NewEventKey(tcell.KeyRune, ' ', tcell.ModNone)
+	if result := a.globalInputCapture(space); result == nil {
+		t.Error("Space while typing a new Settings entry should not be consumed by the transport-key passthrough")
+	}
+	sKey := tcell.NewEventKey(tcell.KeyRune, 's', tcell.ModNone)
+	if result := a.globalInputCapture(sKey); result == nil {
+		t.Error("'s' while typing a new Settings entry should not be consumed by the transport-key passthrough")
+	}
+}
+
+// TestTransportKeysStayLiveWhileSettingsOpenNeedsLiveMPD needs a real
+// client, since handleTransportKey's whole point is calling one -- see
+// TestTransportKeysStayLiveWhileLyricsViewerOpenNeedsLiveMPD's own doc
+// comment for why a small, reversible live side effect is an accepted
+// cost here.
+func TestTransportKeysStayLiveWhileSettingsOpenNeedsLiveMPD(t *testing.T) {
+	c := dialOrSkip(t)
+	a := &App{tv: tview.NewApplication(), client: c}
+	a.build()
+	a.openSettings()
+
+	space := tcell.NewEventKey(tcell.KeyRune, ' ', tcell.ModNone)
+	if result := a.globalInputCapture(space); result != nil {
+		t.Errorf("Space while Settings' Config tab is open should be consumed (routed to togglePlayPause), got %v", result)
+	}
+	a.globalInputCapture(space) // toggle back, restoring whatever state playback was already in
+}

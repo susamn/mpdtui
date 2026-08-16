@@ -19,15 +19,29 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			return nil
 		}
 		// The Settings overlay ('e') spans two tabs with several of its
-		// own focusable widgets (a read-only text view, two input
-		// fields), unlike every other overlay here which assumes one
-		// fixed primitive -- routed separately rather than folded into
-		// noTextInputOverlays below. handleKey only claims Tab/Backtab/
-		// Down/Up; anything else (typing, Enter, Backspace) falls
-		// through to whatever's actually focused.
+		// own focusable widgets (two read-only tables, an input field, a
+		// confirm prompt), unlike every other overlay here which assumes
+		// one fixed primitive -- routed separately rather than folded
+		// into noTextInputOverlays below. handleKey only claims
+		// Tab/Backtab/Left/Right/'a'/'d'/'y'/'n'; anything else (typing,
+		// Enter, Backspace) falls through to whatever's actually focused.
 		if a.settings.focused() {
 			if a.settings.handleKey(event) {
 				return nil
+			}
+			// 'q' and the transport cluster stay live while Settings is
+			// open, same as trackInfoCard/lyricsViewer/markPicker below --
+			// except while addInput is actually accepting typed text
+			// (allowsGlobalKeys is false there), since a mark reason or
+			// tag like "single" needs 'q'/'s'/etc. to stay literal.
+			if event.Key() == tcell.KeyRune && a.settings.allowsGlobalKeys() {
+				if event.Rune() == 'q' {
+					a.tv.Stop()
+					return nil
+				}
+				if a.handleTransportKey(event.Rune()) {
+					return nil
+				}
 			}
 			return event
 		}
