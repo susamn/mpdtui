@@ -74,28 +74,33 @@ single-line inline player for a shell or tmux pane.
   `music_dir` is configured and actually exists; otherwise the Queue
   looks exactly as it would without the lyrics feature -- see
   [Lyrics](#lyrics)
-- **Lyrics** (`y`) — a teal-bordered viewer, positioned over the Queue's
-  own Year-through-Type columns, for the currently playing track's
-  lyrics, read from a `.txt` sidecar file next to the track on disk; see
+- **Lyrics** (`y`) — a viewer (bordered the same green as a focused
+  panel, muted-yellow text), positioned over the Queue's own
+  Year-through-Type columns, for the currently playing track's lyrics,
+  read from a `.txt` sidecar file next to the track on disk; see
   [Lyrics](#lyrics) for setup
 - **Track metadata** (`1`-`5`, `m`) — local play count, 1-5 star rating,
   and a mark-with-reason flag (e.g. "mark for deletion"), stored in a
   SQLite database separate from MPD's own library; see
   [Track metadata](#track-metadata) for setup
-- **Library stats** — live total tracks/artists/playlists, shown
-  alongside the Queue search box, refreshed on library/playlist changes;
-  its own border shows the running mpdtui version, right-aligned
-- **Now Playing bar** — live progress, volume, repeat/random/single/consume
-  flags, updated instantly via MPD's `idle` protocol (stays in sync even
-  when playback changes from another client, e.g. `mpc`); its right half
-  shows a small playback-driven visualization (`v` to cycle, currently a
-  dancing equalizer scaled by actual volume)
-- **Lightweight inline mode** (`-mini`) — a small bordered box, sized to
-  its own content rather than stretched to the terminal width, of live
-  status lines (queue/playlist counts in sky blue, now playing with the
-  track in WhatsApp green, a block-style progress bar in cyan, plus
-  local rating in gold/play count/mark when track metadata is active),
-  no alt-screen takeover, for tmux status panes or a quick glance
+- **Library stats** — live total tracks (green) / artists (sky blue) /
+  playlists (cyan), shown alongside the Queue search box, refreshed on
+  library/playlist changes; its own border shows the running mpdtui
+  version, right-aligned
+- **Now Playing bar** — a vibrant play/pause/stop glyph (bright
+  green/yellow/red), title (bold WhatsApp green) - artist (bold sky
+  blue), live progress (cyan bar), volume (colored along a
+  green-to-red gradient by level), repeat/random/single/consume flags
+  (bold, green when on/red when off), and the current track's local
+  rating and play count (when `track_metadata` is active) -- updated
+  instantly via MPD's `idle` protocol (stays in sync even when
+  playback changes from another client, e.g. `mpc`); its right half
+  shows a small playback-driven visualization (`v` to cycle, currently
+  a dancing equalizer scaled by
+  actual volume)
+- **Lightweight inline mode** (`-mini`) — two live status lines (queue/
+  playlist counts, then track/progress), no alt-screen takeover, for
+  tmux status panes or a quick glance
 - **Fuzzy pickers** (`-p` / `-t`) — fzf-style playlist/track search from
   the shell, no panels involved
 - Confirmation prompts on destructive actions (clear queue, delete playlist)

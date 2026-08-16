@@ -46,12 +46,20 @@ type lyricsViewer struct {
 	app *App
 }
 
-// lyricsColor is teal, distinguishing the viewer's border/title from
-// every other panel/overlay's own color (green for the focused-panel
-// border, yellow for Now Playing's, default elsewhere) -- a deliberate
-// visual cue that this is a different kind of thing (floating over part
-// of the Queue panel, not a panel or a centered popup itself).
-var lyricsColor = tcell.ColorTeal
+// lyricsColor matches colorActiveBorder, the same green a focused
+// panel's (Library/Playlists/Queue) border and title use -- explicit
+// request ("make the lyrics viewer border just like the border of the
+// player panels... when they are selected"), replacing an earlier
+// distinct teal that set this viewer visually apart from every panel.
+var lyricsColor = colorActiveBorder
+
+// lyricsTextColor tints the actual lyrics text a muted (not bright)
+// gold/yellow -- explicit request. A tview color tag string, not a
+// tcell.Color: applied via SetText's own markup (see render), not
+// SetTextColor, since only part of the TextView's content (the real
+// lyrics, not the "Nothing playing"/"No lyrics found" placeholders) is
+// meant to be this color.
+const lyricsTextColor = "#DAA520"
 
 func newLyricsViewer(app *App) *lyricsViewer {
 	v := tview.NewTextView().SetDynamicColors(true)
@@ -166,7 +174,12 @@ func (v *lyricsViewer) render(song mpdclient.Song) {
 			v.SetText(fmt.Sprintf("[::d]No lyrics found for %s[-:-:-]", song.DisplayName()))
 			return
 		}
-		v.SetText(text)
+		// tview.Escape guards against lyrics content that happens to
+		// contain "[...]" (e.g. a "[Chorus]"/"[x2]" annotation, common
+		// in real lyrics files) -- SetDynamicColors(true) means any such
+		// substring would otherwise be misparsed as a style tag and
+		// silently vanish instead of rendering as literal text.
+		v.SetText(fmt.Sprintf("[%s]%s[-]", lyricsTextColor, tview.Escape(text)))
 	}
 }
 

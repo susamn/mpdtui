@@ -127,9 +127,21 @@ func (q *queuePanel) refreshStats() {
 		q.app.showError(err)
 		return
 	}
+	// Values reuse the same colors those concepts already have elsewhere
+	// in the app rather than inventing new ones: Tracks in
+	// nowPlayingTrackColor (WhatsApp green, matching every other "track"
+	// -- Queue's Title cell, Now Playing's title), Artists in
+	// nowPlayingArtistColor (sky blue, matching Now Playing's artist),
+	// Playlists in nowPlayingBarColor (cyan) -- no established "playlist"
+	// color existed yet, so this reuses the one remaining accent color
+	// already in use elsewhere (the progress bar) rather than adding a
+	// fourth. Labels stay bold and uncolored, matching FlagText's own
+	// "color the value, not the label" convention.
 	q.stats.SetText(fmt.Sprintf(
-		"[::b]Tracks:[-] %d  [::b]Artists:[-] %d  [::b]Playlists:[-] %d",
-		stats.Tracks, stats.Artists, stats.Playlists,
+		"[::b]Tracks:[-] [%s::b]%d[-:-:-]  [::b]Artists:[-] [%s::b]%d[-:-:-]  [::b]Playlists:[-] [%s::b]%d[-:-:-]",
+		nowPlayingTrackColor, stats.Tracks,
+		nowPlayingArtistColor, stats.Artists,
+		nowPlayingBarColor, stats.Playlists,
 	))
 }
 

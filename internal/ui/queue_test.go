@@ -534,4 +534,14 @@ func TestQueueRefreshStatsShowsLibraryTotals(t *testing.T) {
 			t.Errorf("stats text = %q, missing %q", text, want)
 		}
 	}
+
+	// Each value is colored (see refreshStats's own comment on why these
+	// specific colors), reusing the same constants Now Playing uses for
+	// the same concepts.
+	raw := a.queue.stats.GetText(false)
+	for _, want := range []string{"[" + nowPlayingTrackColor + "::b]", "[" + nowPlayingArtistColor + "::b]", "[" + nowPlayingBarColor + "::b]"} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("raw stats text = %q, missing color tag %q", raw, want)
+		}
+	}
 }
