@@ -197,7 +197,9 @@ Press `?` inside the full UI for the in-app keybinding list.
 | Queue | `m` | Mark the selected track with a reason, or clear an existing mark, from a small popup -- `j`/`k`/`g`/`G` to navigate, `Enter` to apply, `Esc` to cancel. Transport controls keep working while it's open |
 
 **Mini mode** (`-mini`): `Space` play/pause, `n`/`p` next/prev, `s` stop,
-`-`/`=` volume, `q`/`Ctrl-C` quit.
+`-`/`=` volume, `1`-`5` rate whatever's currently playing (needs
+`track_metadata` set, see [Track metadata](#track-metadata)), `q`/`Ctrl-C`
+quit.
 
 ## Lyrics
 
@@ -261,17 +263,24 @@ confirmation immediately, and the relevant column repaints as soon as
 the write lands, without ever blocking a keypress on disk I/O.
 
 - **Rating** (`1`-`5`, Queue panel): rates whichever track is currently
-  *selected* in the Queue -- not necessarily the one playing.
-- **Play count** (**Plays** column): tracked automatically, no
-  keybinding. A track counts as played once you've listened to at least
-  50% of it (by elapsed/duration, not just "it started"), counted once
-  per queue song id so ticking past the halfway point on every refresh,
-  or seeking back across it, doesn't inflate the count.
+  *selected* in the Queue -- not necessarily the one playing. In `-mini`
+  mode, which has no separate selection, `1`-`5` instead rates whatever's
+  currently playing.
+- **Play count** (**Plays** column in the full UI): tracked
+  automatically, no keybinding. A track counts as played once you've
+  listened to at least 50% of it (by elapsed/duration, not just "it
+  started"), counted once per queue song id so ticking past the halfway
+  point on every refresh, or seeking back across it, doesn't inflate the
+  count. `-mini` mode tracks this independently the same way -- if you
+  run both a full-UI and a `-mini` instance against the same MPD server
+  at once, a single play-through can be double-counted.
 - **Mark** (`m`, Queue panel): opens a small popup listing mark reasons
   (e.g. "mark for deletion") for the selected track, plus a "(clear
   mark)" entry to unmark it. This is bookkeeping only -- mpdtui never
   deletes or moves a file itself, marking one just records your own
-  intent for you to act on later.
+  intent for you to act on later. `-mini` mode shows the currently
+  playing track's mark (if any) but has no way to set one -- that needs
+  the full UI's popup.
 
 Tracks are matched by their file path, normalized the same way lyrics
 sidecar files are (special characters stripped per path segment,

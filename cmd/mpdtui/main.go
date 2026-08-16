@@ -54,7 +54,7 @@ func main() {
 	case *trackPicker:
 		err = picker.RunTrackPicker(client)
 	case *miniMode:
-		err = mini.Run(client)
+		err = mini.Run(client, metaDB)
 	default:
 		err = ui.Run(client, config.LoadMusicDir(), metaDB)
 	}
