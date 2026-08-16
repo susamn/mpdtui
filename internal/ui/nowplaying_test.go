@@ -20,6 +20,9 @@ func TestRenderNowPlayingShowsRatingWhenMetaDBActive(t *testing.T) {
 	if err := a.metaDB.Rate("artist/track.mp3", 4); err != nil {
 		t.Fatalf("Rate: %v", err)
 	}
+	if err := a.metaDB.IncrementPlayCount("artist/track.mp3"); err != nil {
+		t.Fatalf("IncrementPlayCount: %v", err)
+	}
 	a.renderNowPlaying(mpdclient.Status{}, mpdclient.Song{File: "artist/track.mp3", Title: "Track"})
 	got := a.nowPlaying.GetText(true)
 	if !strings.Contains(got, "rating") {
@@ -27,6 +30,34 @@ func TestRenderNowPlayingShowsRatingWhenMetaDBActive(t *testing.T) {
 	}
 	if !strings.Contains(got, "★★★★☆") {
 		t.Errorf("Now Playing text = %q, want the 4-star rating shown", got)
+	}
+	if !strings.Contains(got, "played 1x") {
+		t.Errorf("Now Playing text = %q, want the play count shown", got)
+	}
+}
+
+func TestNowPlayingTrackTextColorsArtistAndTitleSeparately(t *testing.T) {
+	got := nowPlayingTrackText(mpdclient.Song{Artist: "Ajay-Atul", Title: "Vaat Disu De"})
+	want := "[#87CEEB::b]Ajay-Atul[-:-:-] - [#25D366::b]Vaat Disu De[-:-:-]"
+	if got != want {
+		t.Errorf("nowPlayingTrackText(artist+title) = %q, want %q", got, want)
+	}
+}
+
+func TestNowPlayingTrackTextTitleOnly(t *testing.T) {
+	got := nowPlayingTrackText(mpdclient.Song{Title: "Vaat Disu De"})
+	want := "[#25D366::b]Vaat Disu De[-:-:-]"
+	if got != want {
+		t.Errorf("nowPlayingTrackText(title only) = %q, want %q", got, want)
+	}
+}
+
+func TestNowPlayingTrackTextFallsBackToFileThenNothingPlaying(t *testing.T) {
+	if got, want := nowPlayingTrackText(mpdclient.Song{File: "artist/track.mp3"}), "artist/track.mp3"; got != want {
+		t.Errorf("nowPlayingTrackText(file only) = %q, want %q (uncolored)", got, want)
+	}
+	if got, want := nowPlayingTrackText(mpdclient.Song{}), "(nothing playing)"; got != want {
+		t.Errorf("nowPlayingTrackText(empty) = %q, want %q", got, want)
 	}
 }
 

@@ -85,12 +85,13 @@ single-line inline player for a shell or tmux pane.
 - **Library stats** — live total tracks/artists/playlists, shown
   alongside the Queue search box, refreshed on library/playlist changes;
   its own border shows the running mpdtui version, right-aligned
-- **Now Playing bar** — live progress (cyan bar), volume (colored along
-  a green-to-red gradient by level), repeat/random/single/consume flags
+- **Now Playing bar** — artist (bold sky blue) - title (bold WhatsApp
+  green), live progress (cyan bar), volume (colored along a
+  green-to-red gradient by level), repeat/random/single/consume flags
   (bold, green when on/red when off), and the current track's local
-  rating (gold, when `track_metadata` is active) -- updated instantly
-  via MPD's `idle` protocol (stays in sync even when playback changes
-  from another client, e.g. `mpc`); its right half shows a small
+  rating and play count (when `track_metadata` is active) -- updated
+  instantly via MPD's `idle` protocol (stays in sync even when playback
+  changes from another client, e.g. `mpc`); its right half shows a small
   playback-driven visualization (`v` to cycle, currently a dancing
   equalizer scaled by actual volume)
 - **Lightweight inline mode** (`-mini`) — two live status lines (queue/
