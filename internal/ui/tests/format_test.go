@@ -51,6 +51,23 @@ func TestStateGlyph(t *testing.T) {
 	}
 }
 
+// TestStateGlyphColor covers the glyph's *color* separately from its
+// character (StateGlyph, above) -- green for Play/Pause, red for Stop,
+// explicit direction to color the existing glyphs rather than swap them
+// for something else.
+func TestStateGlyphColor(t *testing.T) {
+	cases := map[mpdclient.State]string{
+		mpdclient.StatePlay:  "#25D366",
+		mpdclient.StatePause: "#25D366",
+		mpdclient.StateStop:  "red",
+	}
+	for state, want := range cases {
+		if got := ui.StateGlyphColor(state); got != want {
+			t.Errorf("StateGlyphColor(%v) = %q, want %q", state, got, want)
+		}
+	}
+}
+
 func TestOnOff(t *testing.T) {
 	if ui.OnOff(true) != "on" || ui.OnOff(false) != "off" {
 		t.Fatal("OnOff mismatch")

@@ -60,6 +60,20 @@ func StateGlyph(s mpdclient.State) string {
 	}
 }
 
+// StateGlyphColor returns the tview color tag value for s's own
+// StateGlyph -- green for Play/Pause, red for Stop (and any other
+// state), per explicit direction ("green play and pause and red stop
+// icon here, not the real icon... i just want colors"): the glyph
+// character itself is unchanged, only its color.
+func StateGlyphColor(s mpdclient.State) string {
+	switch s {
+	case mpdclient.StatePlay, mpdclient.StatePause:
+		return "#25D366"
+	default:
+		return "red"
+	}
+}
+
 // OnOff renders b as "on"/"off".
 func OnOff(b bool) string {
 	if b {

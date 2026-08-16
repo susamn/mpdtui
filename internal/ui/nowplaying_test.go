@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -38,7 +39,8 @@ func TestRenderNowPlayingShowsRatingWhenMetaDBActive(t *testing.T) {
 
 func TestNowPlayingTrackTextColorsArtistAndTitleSeparately(t *testing.T) {
 	got := nowPlayingTrackText(mpdclient.Song{Artist: "Ajay-Atul", Title: "Vaat Disu De"})
-	want := "[#87CEEB::b]Ajay-Atul[-:-:-] - [#25D366::b]Vaat Disu De[-:-:-]"
+	want := fmt.Sprintf("[%s::b]%s[-:-:-] - [%s::b]%s[-:-:-]",
+		nowPlayingArtistColor, toFullwidth("Ajay-Atul"), nowPlayingTrackColor, toFullwidth("Vaat Disu De"))
 	if got != want {
 		t.Errorf("nowPlayingTrackText(artist+title) = %q, want %q", got, want)
 	}
@@ -46,18 +48,39 @@ func TestNowPlayingTrackTextColorsArtistAndTitleSeparately(t *testing.T) {
 
 func TestNowPlayingTrackTextTitleOnly(t *testing.T) {
 	got := nowPlayingTrackText(mpdclient.Song{Title: "Vaat Disu De"})
-	want := "[#25D366::b]Vaat Disu De[-:-:-]"
+	want := fmt.Sprintf("[%s::b]%s[-:-:-]", nowPlayingTrackColor, toFullwidth("Vaat Disu De"))
 	if got != want {
 		t.Errorf("nowPlayingTrackText(title only) = %q, want %q", got, want)
 	}
 }
 
+// TestNowPlayingTrackTextFallsBackToFileThenNothingPlaying covers the
+// two fallbacks that stay plain (normal-width, uncolored) rather than
+// going through toFullwidth/coloring: a bare filename (no Artist/Title
+// tags at all) and nothing playing.
 func TestNowPlayingTrackTextFallsBackToFileThenNothingPlaying(t *testing.T) {
 	if got, want := nowPlayingTrackText(mpdclient.Song{File: "artist/track.mp3"}), "artist/track.mp3"; got != want {
 		t.Errorf("nowPlayingTrackText(file only) = %q, want %q (uncolored)", got, want)
 	}
 	if got, want := nowPlayingTrackText(mpdclient.Song{}), "(nothing playing)"; got != want {
 		t.Errorf("nowPlayingTrackText(empty) = %q, want %q", got, want)
+	}
+}
+
+// TestToFullwidthConvertsAsciiOnly covers toFullwidth's own core
+// mapping directly: the fixed +0xFEE0 offset for printable ASCII, the
+// dedicated fullwidth space, and non-ASCII runes (accented letters)
+// passing through unchanged since there's no equivalent mapping for
+// them via this trick.
+func TestToFullwidthConvertsAsciiOnly(t *testing.T) {
+	if got, want := toFullwidth("AB"), "ＡＢ"; got != want {
+		t.Errorf("toFullwidth(%q) = %q, want %q", "AB", got, want)
+	}
+	if got, want := toFullwidth("A B"), "Ａ　Ｂ"; got != want {
+		t.Errorf("toFullwidth(%q) = %q, want %q (fullwidth space in the middle)", "A B", got, want)
+	}
+	if got, want := toFullwidth("Céline"), "Ｃéｌｉｎｅ"; got != want {
+		t.Errorf("toFullwidth(%q) = %q, want %q (é passes through, ASCII letters convert)", "Céline", got, want)
 	}
 }
 
