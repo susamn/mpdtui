@@ -63,7 +63,10 @@ single-line inline player for a shell or tmux pane.
   minutes in the background or on demand with `R`. Load, append, save,
   delete stored playlists; `o` cycles between most-recently-updated and
   alphabetical
-- **Queue** — reorder, remove, clear, jump to any track; a pinned header
+- **Queue** — reorder, remove, clear, jump to any track, add the selected
+  track to an existing playlist (`a`, fuzzy-search by name in a popup --
+  writes directly into that playlist's own file, rejecting a track
+  already in it rather than writing a duplicate); a pinned header
   row (Title/Album/Artist/Year/Genre/Composer/Type/Duration -- plus Lyr,
   see below) stays visible while scrolling. Title is bold and colored
   WhatsApp green; Title/Album/Artist/Genre/Composer are truncated
@@ -196,6 +199,7 @@ Press `?` inside the full UI for the in-app keybinding list.
 | Playlists | `o` | Cycle sort: most recently updated / name |
 | Playlists | `Esc` | Clear active filter |
 | Queue | `Enter` | Play selected track |
+| Queue | `a` | Add selected track to an existing playlist: fuzzy-search its name in a popup (type to filter, `j`/`k`/`g`/`G`/`Up`/`Down` to navigate, `Enter` to add). Writes directly into that playlist's own file; rejected with an error, no duplicate written, if the track is already in it |
 | Queue | `d` | Remove selected track |
 | Queue | `J` / `K` | Move selected track down / up |
 | Queue | `/` | Search: focuses the always-visible "Search track:" box above the queue, Enter jumps to first match (Esc cancels) |

@@ -405,6 +405,8 @@ func (a *App) handleAdd() {
 			return
 		}
 		a.appendPlaylist(name)
+	case a.queue.table:
+		a.openAddToPlaylistPicker()
 	default:
 		a.invalidKey("a")
 	}

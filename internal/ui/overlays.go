@@ -197,6 +197,11 @@ const helpText = `[::b]Global[-:-:-]
 
 [::b]Queue panel[-:-:-]
   Enter          play selected track
+  a              add selected track to an existing playlist: fuzzy-search
+                 by name in a popup (type to filter, j/k/g/G or Up/Down
+                 to navigate, Enter to add) -- writes straight into that
+                 playlist's own file; rejected with an error if the track
+                 is already in it
   d              remove selected track
   J / K          move selected track down / up
   /              search: jump to first match (Esc cancels)
