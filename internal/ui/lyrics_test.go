@@ -83,6 +83,54 @@ func TestLyricsViewerRenderShowsLyricsContent(t *testing.T) {
 	}
 }
 
+// TestLyricsViewerRenderColorsAndEscapesContent covers both the muted-
+// yellow coloring and the reason it needs tview.Escape: a lyrics file
+// containing a "[Chorus]"-style annotation (a real, common pattern in
+// lyrics files) would otherwise be misparsed as a style tag by
+// SetDynamicColors(true) and silently vanish instead of rendering as
+// literal text.
+func TestLyricsViewerRenderColorsAndEscapesContent(t *testing.T) {
+	dir := t.TempDir()
+	trackDir := filepath.Join(dir, "artist")
+	if err := os.MkdirAll(trackDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(trackDir, "Track.txt"), []byte("[Chorus]\nline one"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	a := newTestAppWithMusicDir(dir)
+	a.lyricsViewer.render(mpdclient.Song{Title: "Track", Artist: "Artist", File: "artist/Track.mp3"})
+
+	raw := a.lyricsViewer.GetText(false)
+	if !strings.Contains(raw, "["+lyricsTextColor+"]") {
+		t.Errorf("raw viewer text = %q, want it wrapped in the %q color tag", raw, lyricsTextColor)
+	}
+
+	stripped := a.lyricsViewer.GetText(true) // tags applied/stripped, as actually rendered
+	if !strings.Contains(stripped, "[Chorus]") {
+		t.Errorf("rendered viewer text = %q, want literal %q (not swallowed as a style tag)", stripped, "[Chorus]")
+	}
+	if !strings.Contains(stripped, "line one") {
+		t.Errorf("rendered viewer text = %q, want it to contain the lyrics content", stripped)
+	}
+}
+
+// TestNewLyricsViewerBorderMatchesFocusedPanelColor covers the border
+// (tview.Box exposes a GetBorderColor getter); the title color has no
+// equivalent getter in tview's API, so lyricsColor's own value (set on
+// both via the same var in newLyricsViewer) stands in as the assertion
+// for "title matches too".
+func TestNewLyricsViewerBorderMatchesFocusedPanelColor(t *testing.T) {
+	a := newTestApp()
+	if got := a.lyricsViewer.GetBorderColor(); got != colorActiveBorder {
+		t.Errorf("lyrics viewer border color = %v, want colorActiveBorder (%v), matching a focused panel's own border", got, colorActiveBorder)
+	}
+	if lyricsColor != colorActiveBorder {
+		t.Errorf("lyricsColor = %v, want colorActiveBorder (%v)", lyricsColor, colorActiveBorder)
+	}
+}
+
 func TestOpenLyricsViewerUsesCurrentSongWithoutFetching(t *testing.T) {
 	a := newTestApp() // no MPD client at all -- proves this never calls client.CurrentSong
 	a.tv.SetFocus(a.library.tree)
