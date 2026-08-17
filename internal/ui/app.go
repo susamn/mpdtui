@@ -84,6 +84,11 @@ type App struct {
 	// the same reason, since refreshNowPlaying already re-renders it
 	// unconditionally on every tick.
 	currentSong mpdclient.Song
+	// currentStatus mirrors currentSong -- refreshNowPlaying's own
+	// last-fetched Status, so openLyricsViewer can seed the synced-lyrics
+	// highlight to the actual current playback position immediately on
+	// open, rather than waiting up to one ~500ms tick for it to catch up.
+	currentStatus mpdclient.Status
 
 	// playCountedSongID is the queue song id maybeTrackPlayCount has
 	// already incremented the play count for, so ticking past the
@@ -380,6 +385,7 @@ func (a *App) refreshNowPlaying() {
 	}
 	a.renderNowPlaying(st, song)
 	a.currentSong = song
+	a.currentStatus = st
 
 	// Computed before setCurrent overwrites queue.currentID with the new
 	// value.
@@ -389,6 +395,7 @@ func (a *App) refreshNowPlaying() {
 	a.albumArt.onTrackChanged(song.File)
 	a.trackInfo.render(song, st)
 	a.maybeRefreshLyricsViewer(song, trackChanged)
+	a.maybeUpdateLyricsHighlight(st)
 	a.maybeTrackPlayCount(st, song)
 	a.visualizer.tick(st)
 
@@ -400,13 +407,27 @@ func (a *App) refreshNowPlaying() {
 // overlay -- so a track auto-advancing while the viewer is open shows the
 // new track's lyrics without needing to close and reopen it. Deliberately
 // NOT called unconditionally the way trackInfo.render is (cheap string
-// formatting of data already fetched this tick): lyrics.Read does real
-// filesystem I/O, so re-running it on every ~500ms tick regardless of
+// formatting of data already fetched this tick): lyrics.Read/ReadLRC does
+// real filesystem I/O, so re-running it on every ~500ms tick regardless of
 // whether the viewer is even visible would be wasted work for a feature
 // most ticks won't have it open at all.
 func (a *App) maybeRefreshLyricsViewer(song mpdclient.Song, trackChanged bool) {
 	if trackChanged && a.mode == modeOverlay && a.tv.GetFocus() == a.lyricsViewer {
 		a.lyricsViewer.render(song)
+	}
+}
+
+// maybeUpdateLyricsHighlight moves the highlighted line in the lyrics
+// viewer to match st.Elapsed, when the viewer is open -- unlike
+// maybeRefreshLyricsViewer's full reload, this runs on every refresh tick
+// (not just trackChanged): updateHighlight is pure in-memory
+// recomputation (lyrics.CurrentLineIndex over whatever synced lines
+// render already loaded), no filesystem I/O, and no-ops entirely if the
+// current track has no synced (.lrc) lyrics loaded or the highlighted
+// line hasn't actually moved since the last tick.
+func (a *App) maybeUpdateLyricsHighlight(st mpdclient.Status) {
+	if a.mode == modeOverlay && a.tv.GetFocus() == a.lyricsViewer {
+		a.lyricsViewer.updateHighlight(st.Elapsed)
 	}
 }
 

@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -44,6 +46,23 @@ var lyricsTickColor = tcell.ColorSkyblue
 type lyricsViewer struct {
 	*tview.TextView
 	app *App
+	// syncedLines is the currently loaded track's parsed .lrc content, or
+	// nil if it has no synced lyrics loaded (either no .lrc exists for
+	// it, or the viewer is showing plain-text lyrics/a placeholder
+	// instead). Set once by render (real filesystem I/O -- only on a
+	// track change or open, see maybeRefreshLyricsViewer's own doc
+	// comment), then read every refresh tick by updateHighlight (pure
+	// in-memory recomputation, no I/O) to move the highlighted line
+	// without re-reading anything off disk.
+	syncedLines []lyrics.LyricLine
+	// currentLine is the index into syncedLines currently highlighted, or
+	// -1 (nothing highlighted yet -- render's own initial state, before
+	// the first updateHighlight call). Tracked so updateHighlight can
+	// skip repainting when the line hasn't actually changed since the
+	// last tick, which is most ticks: two consecutive lines are rarely
+	// less than a second apart, so most 500ms ticks land between two
+	// timestamps rather than crossing one.
+	currentLine int
 }
 
 // lyricsColor matches colorActiveBorder, the same green a focused
@@ -61,13 +80,28 @@ var lyricsColor = colorActiveBorder
 // meant to be this color.
 const lyricsTextColor = "#DAA520"
 
+// lyricsSyncedHighlightColor is the background used to highlight
+// whichever line is currently playing in synced (.lrc) lyrics -- reuses
+// nowPlayingTrackColor's own WhatsApp green (nowplaying.go) rather than
+// inventing a new color, so "this is the active/now" reads consistently
+// with the rest of the app (Now Playing bar's own track-title color, the
+// track info card's lyrics-present tick).
+const lyricsSyncedHighlightColor = nowPlayingTrackColor
+
+// lyricsSyncedScrollLookback keeps this many already-sung lines visible
+// above the highlighted one when auto-scrolling, rather than pinning the
+// current line to the very top of the viewport -- reads more like a
+// karaoke display (a little "where we just were" context still visible)
+// than a jumpy line-at-a-time reveal.
+const lyricsSyncedScrollLookback = 3
+
 func newLyricsViewer(app *App) *lyricsViewer {
 	v := tview.NewTextView().SetDynamicColors(true)
 	v.SetBorder(true).SetTitle(" Lyrics (j/k/g/G to scroll) ")
 	v.SetBorderColor(lyricsColor).SetTitleColor(lyricsColor)
 	v.SetBorderPadding(1, 1, 2, 2)
 	v.SetScrollable(true)
-	return &lyricsViewer{TextView: v, app: app}
+	return &lyricsViewer{TextView: v, app: app, currentLine: -1}
 }
 
 // lyricsViewerBottomMargin is how many of the Queue table's own data rows
@@ -154,13 +188,25 @@ func (v *lyricsViewer) Draw(screen tcell.Screen) {
 // off disk every time (see internal/lyrics) -- so lyrics added after the
 // track was queued still show up without needing a requeue or restart --
 // or a placeholder if there's nothing playing, no music directory is
-// configured, or there's no matching lyrics file.
+// configured, or there's no matching lyrics file. Prefers synced (.lrc)
+// lyrics over plain text when both exist for a track (explicit request:
+// "auto hint the currently played line"), falling back to plain text
+// unchanged when there's no .lrc. Resets syncedLines/currentLine every
+// call, since this always means a new track (or a fresh open) -- the
+// caller (openLyricsViewer/maybeRefreshLyricsViewer) is expected to call
+// updateHighlight right after, to paint the correct initial highlight for
+// synced content rather than leaving it unhighlighted until the next
+// refresh tick.
 func (v *lyricsViewer) render(song mpdclient.Song) {
+	v.syncedLines = nil
+	v.currentLine = -1
 	v.ScrollToBeginning()
 	switch {
 	case song.DisplayName() == "":
+		v.SetTitle(lyricsViewerTitle)
 		v.SetText("[::d]Nothing playing[-:-:-]")
 	case v.app.musicDir == "":
+		v.SetTitle(lyricsViewerTitle)
 		// Hardcoded rather than computed via internal/config.ConfigFile:
 		// internal/ui doesn't depend on internal/config (see
 		// DEPENDENCY.md -- only cmd/mpdtui and mpdclient do), and adding
@@ -169,6 +215,13 @@ func (v *lyricsViewer) render(song mpdclient.Song) {
 		// $XDG_CONFIG_HOME is the rare exception), isn't worth it.
 		v.SetText("[::d]No music directory configured -- set music_dir in ~/.config/mpdtui/config[-:-:-]")
 	default:
+		if lines, ok := lyrics.ReadLRC(v.app.musicDir, song.File); ok {
+			v.syncedLines = lines
+			v.SetTitle(lyricsViewerSyncedTitle)
+			v.renderSyncedLines()
+			return
+		}
+		v.SetTitle(lyricsViewerTitle)
 		text, ok := lyrics.Read(v.app.musicDir, song.File)
 		if !ok {
 			v.SetText(fmt.Sprintf("[::d]No lyrics found for %s[-:-:-]", song.DisplayName()))
@@ -181,6 +234,77 @@ func (v *lyricsViewer) render(song mpdclient.Song) {
 		// silently vanish instead of rendering as literal text.
 		v.SetText(fmt.Sprintf("[%s]%s[-]", lyricsTextColor, tview.Escape(text)))
 	}
+}
+
+// lyricsViewerTitle/lyricsViewerSyncedTitle: the title flips to mention
+// "synced" whenever the currently loaded track has .lrc lyrics, so it's
+// obvious at a glance whether the highlight you're seeing is real
+// (timestamp-driven) or you're just looking at plain, unsynced text.
+const (
+	lyricsViewerTitle       = " Lyrics (j/k/g/G to scroll) "
+	lyricsViewerSyncedTitle = " Lyrics — synced (j/k/g/G to scroll) "
+)
+
+// renderSyncedLines repaints the viewer from v.syncedLines, coloring the
+// line at v.currentLine with a solid background band (not just a
+// different text color) so the "now singing" line is immediately
+// findable by eye, not just subtly different from the rest -- explicit
+// "auto hint" request. Blank lines render as a single space rather than
+// truly empty, so every entry in syncedLines still produces exactly one
+// rendered line -- keeping v.currentLine a valid row index for
+// scrollToCurrentLine (ScrollTo operates on rendered rows, not slice
+// indices, and the two would drift apart the moment a blank line
+// collapsed to zero rendered rows).
+func (v *lyricsViewer) renderSyncedLines() {
+	var b strings.Builder
+	for i, line := range v.syncedLines {
+		text := tview.Escape(line.Text) // see render's own doc comment on why this is needed
+		if text == "" {
+			text = " "
+		}
+		if i == v.currentLine {
+			fmt.Fprintf(&b, "[white:%s:b]%s[-:-:-]\n", lyricsSyncedHighlightColor, text)
+		} else {
+			fmt.Fprintf(&b, "[%s]%s[-]\n", lyricsTextColor, text)
+		}
+	}
+	v.SetText(b.String())
+}
+
+// updateHighlight moves the highlighted line to whichever one is current
+// at elapsed (see lyrics.CurrentLineIndex), when the currently loaded
+// track has synced lyrics -- a no-op (doesn't touch v.SetText at all) if
+// nothing's synced, or if the current line hasn't actually changed since
+// the last call, so most refresh ticks (landing between two timestamps)
+// do genuinely nothing here.
+func (v *lyricsViewer) updateHighlight(elapsed time.Duration) {
+	if v.syncedLines == nil {
+		return
+	}
+	idx := lyrics.CurrentLineIndex(v.syncedLines, elapsed)
+	if idx == v.currentLine {
+		return
+	}
+	v.currentLine = idx
+	v.renderSyncedLines()
+	v.scrollToCurrentLine()
+}
+
+// scrollToCurrentLine keeps the highlighted line in view, offset by
+// lyricsSyncedScrollLookback lines of already-passed context rather than
+// pinning it to the very top of the viewport. currentLine == -1 (before
+// the first timestamp -- e.g. an instrumental intro) scrolls to the top
+// instead, showing the lyrics from the beginning rather than nothing.
+func (v *lyricsViewer) scrollToCurrentLine() {
+	if v.currentLine < 0 {
+		v.ScrollToBeginning()
+		return
+	}
+	top := v.currentLine - lyricsSyncedScrollLookback
+	if top < 0 {
+		top = 0
+	}
+	v.ScrollTo(top, 0)
 }
 
 // openLyricsViewer is 'y': opens the lyrics viewer for whichever track is
@@ -196,5 +320,6 @@ func (v *lyricsViewer) render(song mpdclient.Song) {
 // updated state instead of fetching on demand.
 func (a *App) openLyricsViewer() {
 	a.lyricsViewer.render(a.currentSong)
+	a.lyricsViewer.updateHighlight(a.currentStatus.Elapsed)
 	a.showOverlay("lyrics", a.lyricsViewer, a.lyricsViewer)
 }

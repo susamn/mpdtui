@@ -166,7 +166,11 @@ const helpText = `[::b]Global[-:-:-]
                  music_dir set in ~/.config/mpdtui/config); j/k/g/G/
                  Ctrl-F/Ctrl-B to scroll, 'y' or Esc to close --
                  transport controls (Space/s/n/p/,/./-/=/z/x/c/Z) still
-                 work while it's open
+                 work while it's open. If a same-named .lrc file sits
+                 next to a plain .txt one, the viewer shows synced
+                 lyrics instead: the currently-singing line is
+                 highlighted and auto-scrolled live as the track plays
+                 ("Lyrics — synced" in the title)
   v              cycle Now Playing visualizations
   L              locate the currently playing track in the Queue
   e              settings: Config tab (read-only: MPD host/port,
