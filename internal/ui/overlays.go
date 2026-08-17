@@ -174,9 +174,10 @@ const helpText = `[::b]Global[-:-:-]
                  badge for whichever format is currently shown; 't'
                  cycles between whichever formats exist for the track,
                  sticking across track changes. Before an .lrc's first
-                 timestamp (an instrumental intro), a blinking
-                 "Starting....." shows in place of the lyrics list --
-                 .lrc only, plain .txt is unaffected
+                 timestamp (an instrumental intro), a big blinking
+                 block-letter "STARTING" banner plus "....." shows in
+                 place of the lyrics list -- .lrc only, plain .txt is
+                 unaffected
   v              cycle Now Playing visualizations
   L              locate the currently playing track in the Queue
   e              settings: Config tab (read-only: MPD host/port,

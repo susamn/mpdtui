@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -196,9 +197,34 @@ func TestLyricsViewerRenderResetsSyncedStateOnTrackChange(t *testing.T) {
 	}
 }
 
-// --- "Starting....." intro (LRC only, before the first timestamp) ---
+// --- "STARTING....." intro banner (LRC only, before the first timestamp) ---
 
-func TestLyricsViewerRenderSyncedShowsStartingTextBeforeFirstLine(t *testing.T) {
+func TestLyricsStartingBannerLinesSpellsStartingCorrectly(t *testing.T) {
+	lines := lyricsStartingBannerLines(lyricsStartingWord)
+	// Every glyph in this font is exactly 5 rows tall by construction
+	// (lyricsStartingGlyphs); spot-check the array actually has 5
+	// entries and none are empty (a typo'd glyph map entry would
+	// silently produce a blank row here instead of a compile error).
+	for i, line := range lines {
+		if line == "" {
+			t.Errorf("banner row %d is empty, want block-letter content", i)
+		}
+	}
+	// Every row must be the same visual (rune, not byte) width --
+	// otherwise the letters don't actually line up into a single
+	// rectangular banner. Rune count, not len(), since block characters
+	// (█, 3 bytes in UTF-8) and spaces (1 byte) mix within a row -- two
+	// rows with the same rune count can have different byte lengths
+	// depending on how many of each they contain.
+	width := utf8.RuneCountInString(lines[0])
+	for i, line := range lines {
+		if got := utf8.RuneCountInString(line); got != width {
+			t.Errorf("banner row %d has rune width %d, want %d (all rows must line up)", i, got, width)
+		}
+	}
+}
+
+func TestLyricsViewerRenderSyncedShowsStartingBannerBeforeFirstLine(t *testing.T) {
 	dir := t.TempDir()
 	writeLRCFixture(t, dir, "artist", "Track.lrc", "[00:45.00]first real line")
 	a := newTestAppWithMusicDir(dir)
@@ -206,20 +232,25 @@ func TestLyricsViewerRenderSyncedShowsStartingTextBeforeFirstLine(t *testing.T) 
 	a.lyricsViewer.render(mpdclient.Song{Title: "Track", File: "artist/Track.mp3"})
 
 	got := a.lyricsViewer.GetText(true)
-	if !strings.Contains(got, lyricsStartingText) {
-		t.Errorf("viewer text right after render (before any updateHighlight) = %q, want %q", got, lyricsStartingText)
+	if !strings.Contains(got, lyricsStartingDots) {
+		t.Errorf("viewer text right after render (before any updateHighlight) = %q, want the %q dots line", got, lyricsStartingDots)
+	}
+	bannerFirstRow := lyricsStartingBannerLines(lyricsStartingWord)[0]
+	if !strings.Contains(got, bannerFirstRow) {
+		t.Errorf("viewer text = %q, want the block-letter banner's first row %q present", got, bannerFirstRow)
 	}
 	if strings.Contains(got, "first real line") {
 		t.Errorf("viewer text = %q, want the actual lyrics NOT shown yet (still before the first timestamp)", got)
 	}
 }
 
-// TestLyricsViewerRenderSyncedStartingTextBlinks checks the raw (tag-
-// intact) text for a lowercase 'l' in the attribute slot -- tview's own
-// blink-attribute character (see renderSyncedLines' doc comment on why
-// lowercase, not uppercase 'L', which would clear the attribute instead
-// of setting it).
-func TestLyricsViewerRenderSyncedStartingTextBlinks(t *testing.T) {
+// TestLyricsViewerRenderSyncedStartingBannerBlinksAndDisablesWrap checks
+// the raw (tag-intact) text for a lowercase 'l' in the attribute slot --
+// tview's own blink-attribute character (see renderSyncedLines' doc
+// comment on why lowercase, not uppercase 'L', which would clear the
+// attribute instead of setting it) -- and that wrap is off while the
+// banner (which must clip, not wrap, on a narrow viewer) is showing.
+func TestLyricsViewerRenderSyncedStartingBannerBlinksAndDisablesWrap(t *testing.T) {
 	dir := t.TempDir()
 	writeLRCFixture(t, dir, "artist", "Track.lrc", "[00:45.00]first real line")
 	a := newTestAppWithMusicDir(dir)
@@ -228,44 +259,44 @@ func TestLyricsViewerRenderSyncedStartingTextBlinks(t *testing.T) {
 
 	raw := a.lyricsViewer.GetText(false)
 	if !strings.Contains(raw, ":bl]") {
-		t.Errorf("raw viewer text = %q, want a \"bl\" (bold+blink) attribute tag on the starting text", raw)
+		t.Errorf("raw viewer text = %q, want a \"bl\" (bold+blink) attribute tag on the banner", raw)
 	}
 }
 
-func TestLyricsViewerUpdateHighlightReplacesStartingTextOnceStarted(t *testing.T) {
+func TestLyricsViewerUpdateHighlightReplacesStartingBannerOnceStarted(t *testing.T) {
 	dir := t.TempDir()
 	writeLRCFixture(t, dir, "artist", "Track.lrc", "[00:10.00]first real line")
 	a := newTestAppWithMusicDir(dir)
 	a.lyricsViewer.render(mpdclient.Song{Title: "Track", File: "artist/Track.mp3"})
 
 	a.lyricsViewer.updateHighlight(5 * time.Second) // still before 10s
-	if got := a.lyricsViewer.GetText(true); !strings.Contains(got, lyricsStartingText) {
-		t.Fatalf("setup: text before the first timestamp = %q, want %q", got, lyricsStartingText)
+	if got := a.lyricsViewer.GetText(true); !strings.Contains(got, lyricsStartingDots) {
+		t.Fatalf("setup: text before the first timestamp = %q, want the %q dots line", got, lyricsStartingDots)
 	}
 
 	a.lyricsViewer.updateHighlight(11 * time.Second) // past 10s now
 	got := a.lyricsViewer.GetText(true)
-	if strings.Contains(got, lyricsStartingText) {
-		t.Errorf("viewer text after the first timestamp = %q, want %q gone", got, lyricsStartingText)
+	if strings.Contains(got, lyricsStartingDots) {
+		t.Errorf("viewer text after the first timestamp = %q, want the starting banner gone", got)
 	}
 	if !strings.Contains(got, "first real line") {
 		t.Errorf("viewer text after the first timestamp = %q, want the real lyrics showing", got)
 	}
 }
 
-// TestLyricsViewerRenderPlainTextNeverShowsStartingText covers "this
+// TestLyricsViewerRenderPlainTextNeverShowsStartingBanner covers "this
 // will only happen for LRC file" -- a .txt-only track must never show
 // the synced-only intro, even though both share the same "nothing
 // highlighted yet" starting state conceptually.
-func TestLyricsViewerRenderPlainTextNeverShowsStartingText(t *testing.T) {
+func TestLyricsViewerRenderPlainTextNeverShowsStartingBanner(t *testing.T) {
 	dir := t.TempDir()
 	writeLRCFixture(t, dir, "artist", "Track.txt", "plain line")
 	a := newTestAppWithMusicDir(dir)
 
 	a.lyricsViewer.render(mpdclient.Song{Title: "Track", File: "artist/Track.mp3"})
 
-	if got := a.lyricsViewer.GetText(true); strings.Contains(got, lyricsStartingText) {
-		t.Errorf("viewer text for a .txt-only track = %q, want no %q intro", got, lyricsStartingText)
+	if got := a.lyricsViewer.GetText(true); strings.Contains(got, lyricsStartingDots) {
+		t.Errorf("viewer text for a .txt-only track = %q, want no starting banner", got)
 	}
 }
 

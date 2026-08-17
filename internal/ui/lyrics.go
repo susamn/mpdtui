@@ -349,6 +349,13 @@ func (v *lyricsViewer) render(song mpdclient.Song) {
 	v.syncedLines = nil
 	v.currentLine = -1
 	v.ScrollToBeginning()
+	// Wrap defaults back on for every render call; renderSyncedLines is
+	// the only place that ever turns it off, and only for as long as the
+	// "STARTING" banner (which must clip, not wrap) is actually showing --
+	// otherwise a track change away from a still-before-first-line LRC
+	// track (wrap left off) to a plain .txt one would leave long lines
+	// unable to wrap here.
+	v.SetWrap(true)
 	switch {
 	case song.DisplayName() == "":
 		v.currentFormat = lyricsFormatNone
@@ -417,14 +424,59 @@ func (v *lyricsViewer) cycleFormat() {
 	v.app.showMessage("lyrics: switched to " + v.preferredFormat.label())
 }
 
-// lyricsStartingText is shown, blinking, in place of the lyrics list
-// while elapsed hasn't reached the first synced line's own timestamp yet
-// (an instrumental intro) -- explicit request, LRC-only by construction:
+// lyricsStartingWord/lyricsStartingDots make up the "Starting....." intro
+// shown, as a big block-letter banner, in place of the lyrics list while
+// elapsed hasn't reached the first synced line's own timestamp yet (an
+// instrumental intro) -- explicit request, LRC-only by construction:
 // renderSyncedLines is never called for plain-text (.txt) content, which
 // has no timestamps to be "before" in the first place. Followed by a
 // blank line before real lyrics content would ever start, per the
 // request's own layout.
-const lyricsStartingText = "Starting....."
+const (
+	lyricsStartingWord = "STARTING"
+	lyricsStartingDots = "....."
+)
+
+// lyricsStartingGlyphs is a small 5-row block-letter font, just enough
+// characters to spell lyricsStartingWord -- explicit "5 times the size"
+// request. A terminal character grid has no actual font-size concept
+// (tview style tags only ever cover color/bold/italic/blink/etc, never
+// size -- an earlier, same-codebase attempt at "bigger text" via
+// fullwidth Unicode characters, roughly double-width/same-height, was
+// tried and explicitly disliked once seen; see this file's own git
+// history / ARCHITECTURE.md's Now Playing section), so genuinely bigger
+// means drawing each letter out of multiple rows and columns of block
+// characters instead, the same idea a "figlet"/banner-style renderer
+// uses -- not a technique unique to this app, just the only one that
+// actually changes apparent size rather than just width.
+var lyricsStartingGlyphs = map[byte][5]string{
+	'S': {"█████", "█    ", "█████", "    █", "█████"},
+	'T': {"█████", "  █  ", "  █  ", "  █  ", "  █  "},
+	'A': {" ███ ", "█   █", "█████", "█   █", "█   █"},
+	'R': {"████ ", "█   █", "████ ", "█ █  ", "█  █ "},
+	'I': {"███", " █ ", " █ ", " █ ", "███"},
+	'N': {"█   █", "██  █", "█ █ █", "█  ██", "█   █"},
+	'G': {" ████", "█    ", "█ ███", "█   █", " ████"},
+}
+
+// lyricsStartingBannerLines renders word (assumed all-uppercase and
+// entirely covered by lyricsStartingGlyphs -- only ever called with
+// lyricsStartingWord) as 5 lines of block characters, one blank column
+// of gap between adjacent letters.
+func lyricsStartingBannerLines(word string) [5]string {
+	var lines [5]string
+	for row := range lines {
+		var b strings.Builder
+		for i := 0; i < len(word); i++ {
+			if i > 0 {
+				b.WriteByte(' ')
+			}
+			b.WriteString(lyricsStartingGlyphs[word[i]][row])
+		}
+		lines[row] = b.String()
+	}
+	return lines
+}
 
 // renderSyncedLines repaints the viewer from v.syncedLines, coloring the
 // line at v.currentLine with a solid background band (not just a
@@ -436,16 +488,28 @@ const lyricsStartingText = "Starting....."
 // scrollToCurrentLine (ScrollTo operates on rendered rows, not slice
 // indices, and the two would drift apart the moment a blank line
 // collapsed to zero rendered rows). v.currentLine == -1 (before the
-// first timestamp) shows lyricsStartingText instead of the list itself
-// -- 'l' is tview's own blink-attribute tag character (lowercase sets
-// the attribute; see rivo/tview's strings.go attrs map -- uppercase
-// would clear it instead, the same lowercase-sets/uppercase-clears
-// convention already relied on for bold ("::b") elsewhere in this file).
+// first timestamp) shows the block-letter "STARTING" banner plus the
+// blinking "....." dots instead of the list itself -- 'l' is tview's own
+// blink-attribute tag character (lowercase sets the attribute; see
+// rivo/tview's strings.go attrs map -- uppercase would clear it instead,
+// the same lowercase-sets/uppercase-clears convention already relied on
+// for bold ("::b") elsewhere in this file). Word wrap is disabled while
+// showing the banner (restored once real lyrics render): a banner row
+// that's wider than the viewer's current width must clip cleanly on the
+// right rather than wrapping onto the next row, which would slide part
+// of one letter row into the next and break every glyph below it.
 func (v *lyricsViewer) renderSyncedLines() {
 	if v.currentLine < 0 {
-		v.SetText(fmt.Sprintf("[%s::bl]%s[-:-:-]\n\n", lyricsLRCColor, lyricsStartingText))
+		v.SetWrap(false)
+		var b strings.Builder
+		for _, line := range lyricsStartingBannerLines(lyricsStartingWord) {
+			fmt.Fprintf(&b, "[%s::bl]%s[-:-:-]\n", lyricsLRCColor, line)
+		}
+		fmt.Fprintf(&b, "[%s::bl]%s[-:-:-]\n\n", lyricsLRCColor, lyricsStartingDots)
+		v.SetText(b.String())
 		return
 	}
+	v.SetWrap(true)
 	var b strings.Builder
 	for i, line := range v.syncedLines {
 		text := tview.Escape(line.Text) // see render's own doc comment on why this is needed
