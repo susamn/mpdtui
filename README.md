@@ -178,7 +178,7 @@ Press `?` inside the full UI for the in-app keybinding list.
 | `f` | Global search from any panel -- type `a`/`al`/`p`/`t` + a term (artist/album/playlist/track); matches appear live as an fzf-style hint list. Up/Down (or Ctrl-P/Ctrl-N) move the highlight while typing; `Tab` (or `f` to return) switches focus to the hint list for `j`/`k`/`g`/`G` navigation, within the popup only. `Enter` acts on the highlight and closes the popup (track adds+plays, playlist loads+plays, artist/album jump into that group in the Library); from the hint list, `a` instead adds without playing (track) or appends (playlist) and leaves the popup open, so several tracks can be queued back-to-back. Stays open with "no X found" if nothing matches |
 | `F` | Clear any active search/filter, in every panel at once (Library search, Playlists filter) -- unlike a panel's own `Esc`, works regardless of which panel is currently focused |
 | `i` | Track info card for the currently playing track -- Track/Album/Artist/Genre/Year, colored "LRC"/"TXT" text for whichever lyrics format(s) are found (needs `music_dir` set), live audio quality (bitrate, sample rate/bit depth/channels), and, when `track_metadata` is active, a Rating/Plays/Mark/Tags table. A small fixed-size card anchored to the bottom-right quadrant of the Queue panel |
-| `y` | Lyrics viewer for the currently playing track (needs `music_dir` set, see [Lyrics](#lyrics) below) -- `j`/`k`/`g`/`G`/Ctrl-F/Ctrl-B to scroll, `y` or `Esc` to close. Transport controls (`Space`/`s`/`n`/`p`/`,`/`.`/`-`/`=`/`z`/`x`/`c`/`Z`) keep working while it's open. Shows synced (`.lrc`) lyrics with the current line auto-highlighted and scrolled into view when available, otherwise plain `.txt`. `t` switches between whichever formats exist for the track; the choice sticks across track changes |
+| `y` | Lyrics viewer for the currently playing track (needs `music_dir` set, see [Lyrics](#lyrics) below) -- `j`/`k`/`g`/`G`/Ctrl-F/Ctrl-B to scroll, `y` or `Esc` to close. Transport controls (`Space`/`s`/`n`/`p`/`,`/`.`/`-`/`=`/`z`/`x`/`c`/`Z`) keep working while it's open. Shows synced (`.lrc`) lyrics with the current line auto-highlighted and scrolled into view when available, otherwise plain `.txt`; a colored LRC/TXT badge sits top-right in the title. `t` switches between whichever formats exist for the track (choice sticks across track changes); before an `.lrc`'s first timestamp, a blinking "Starting....." shows instead of the lyrics list |
 | `v` | Cycle Now Playing visualizations (right half of the Now Playing bar) |
 | `L` | Locate the currently playing track: selects it in the Queue and moves focus there, from any panel, and also reveals it in the Library tree (expanding every folder along its path and selecting it there, without moving focus away from Queue). The Queue-selecting part also happens automatically, whenever the playing track actually changes (explicit play action or natural auto-advance alike) -- except while an overlay is open, or on startup; the Library reveal is only on the explicit keypress |
 | `e` | Settings: a two-tab overlay -- **Config** (read-only: MPD host/port, `music_dir`, `track_metadata` status and file paths) and **Database** (browse/add/delete `mark_reason`/`tags` catalog rows, only when `track_metadata` is active; otherwise explains why it isn't). `Tab`/`Backtab` switches tabs; on Database, `Left`/`Right` switches which catalog table, `j`/`k`/`g`/`G` navigates rows, `a` adds (bordered edit box), `d` deletes (`y`/`n` to confirm); `Esc` closes |
@@ -260,21 +260,26 @@ are recognized and ignored rather than shown as lyrics. Free synced
 lyrics for a lot of music are available from sites like
 [lrclib.net](https://lrclib.net).
 
-When a `.lrc` exists for the currently playing track, the viewer's title
-says "Lyrics — synced" and the line matching the current playback
-position is highlighted (a solid background band) and kept in view as
-playback advances, auto-scrolling a few lines ahead of pinning it to the
-very top. If only a `.txt` exists, or the `.lrc` has no lines mpdtui can
-parse a timestamp from, it falls back to plain, unhighlighted text
-exactly as before -- nothing about the plain-text path changes.
+When a `.lrc` exists for the currently playing track, a colored "LRC"
+badge appears in the top-right corner of the viewer's title, and the
+line matching the current playback position is highlighted (a solid
+background band) and kept in view as playback advances, auto-scrolling
+a few lines ahead of pinning it to the very top. Before the `.lrc`'s
+first timestamp -- an instrumental intro -- a blinking `Starting.....`
+shows in place of the lyrics list, with a blank line beneath it, until
+the first real line's timestamp arrives; this is `.lrc`-only, plain
+`.txt` is never affected. If only a `.txt` exists, or the `.lrc` has no
+lines mpdtui can parse a timestamp from, it falls back to plain,
+unhighlighted text exactly as before (badge shows "TXT" instead).
 
 If a track has both a `.txt` and a `.lrc`, press `t` (while the viewer
 is open) to switch between them -- synced is preferred by default, `t`
-toggles to plain and back. The choice sticks across track changes (not
-reset per song), so switching once keeps applying as you skip through
-the queue, falling back gracefully on any individual track that doesn't
-have your preferred format. A future word-level/enhanced-LRC format
-(sometimes called A2) would slot into the same `t` cycle once supported.
+toggles to plain and back, and the title's badge flips to match. The
+choice sticks across track changes (not reset per song), so switching
+once keeps applying as you skip through the queue, falling back
+gracefully on any individual track that doesn't have your preferred
+format. A future word-level/enhanced-LRC format (sometimes called A2)
+would slot into the same `t` cycle once supported.
 
 Which format(s) exist for a track is also visible without opening the
 viewer at all: the Queue's Lyr column shows a green tick for `.lrc`, an

@@ -82,6 +82,14 @@ type lyricsViewer struct {
 	// is lyricsFormatLRC, matching this feature's original default
 	// (prefer synced lyrics when available).
 	preferredFormat lyricsFormat
+	// currentFormat is what's actually on screen right now -- set by
+	// render on every call (unlike preferredFormat, which render only
+	// ever reads), read by updateTitle to paint the right-aligned format
+	// badge. Distinct from preferredFormat specifically so a preference
+	// that isn't available for the current track (resolveLyricsFormat's
+	// own fallback) shows the format that's genuinely displayed, not the
+	// one that was merely asked for.
+	currentFormat lyricsFormat
 }
 
 // lyricsFormat is a lyrics sidecar format the viewer can show, in a
@@ -176,11 +184,18 @@ const lyricsSyncedScrollLookback = 3
 
 func newLyricsViewer(app *App) *lyricsViewer {
 	v := tview.NewTextView().SetDynamicColors(true)
-	v.SetBorder(true).SetTitle(" Lyrics (j/k/g/G to scroll) ")
+	v.SetBorder(true)
+	// AlignLeft: the title is a single hand-built string with the format
+	// badge's own padding baked in (see lyricsViewerTitleText) -- tview's
+	// own alignment would shift the whole already-padded string rather
+	// than doing anything useful with it.
+	v.SetTitleAlign(tview.AlignLeft)
 	v.SetBorderColor(lyricsColor).SetTitleColor(lyricsColor)
 	v.SetBorderPadding(1, 1, 2, 2)
 	v.SetScrollable(true)
-	return &lyricsViewer{TextView: v, app: app, currentLine: -1}
+	lv := &lyricsViewer{TextView: v, app: app, currentLine: -1, currentFormat: lyricsFormatNone}
+	lv.updateTitle()
+	return lv
 }
 
 // lyricsViewerBottomMargin is how many of the Queue table's own data rows
@@ -254,13 +269,64 @@ func (v *lyricsViewer) positionOverQueueColumns() {
 }
 
 // Draw repositions the viewer over the Queue table's Year-through-Type
-// column band (see positionOverQueueColumns) on every frame, then
-// delegates to the embedded TextView to actually paint it -- mirrors
-// trackInfoCard.Draw's own "reposition from a sibling primitive's current
-// layout, then paint" pattern.
+// column band (see positionOverQueueColumns) and recomputes the border
+// title (see updateTitle) on every frame, then delegates to the embedded
+// TextView to actually paint it -- mirrors trackInfoCard.Draw's own
+// "reposition from a sibling primitive's current layout, then paint"
+// pattern. The title needs the same per-frame treatment as the position:
+// its right-aligned format badge has to stay flush against the border as
+// the viewer resizes with the terminal.
 func (v *lyricsViewer) Draw(screen tcell.Screen) {
 	v.positionOverQueueColumns()
+	v.updateTitle()
 	v.TextView.Draw(screen)
+}
+
+// lyricsViewerLeftTitle is the left-anchored, always-shown portion of
+// the border title -- scroll and format-switch key hints.
+const lyricsViewerLeftTitle = " Lyrics (j/k/g/G to scroll, t to switch format) "
+
+// lyricsViewerTitleText builds the lyrics viewer's border title:
+// lyricsViewerLeftTitle on the left, plus, when format is a real loaded
+// format (not lyricsFormatNone), a colored "LRC"/"TXT" badge pushed
+// flush against the box's own right edge -- explicit request ("put the
+// lyrics type top right (colored)"). Built as a single left-aligned
+// string with the right segment's own padding baked in, since
+// tview.Box only supports one title with one alignment -- there's no
+// built-in way to left-align part of a title and right-align another
+// part of the same title. width is the box's own current rendered width
+// (GetRect()'s w), passed in fresh every frame (see Draw) so the badge
+// stays correctly positioned as the viewer resizes with the terminal.
+// Split out as a pure function (mirrors lyricsViewerRect/resolveLyricsFormat's
+// own testability-first split) so the padding arithmetic is testable
+// without a real tview.Box.
+func lyricsViewerTitleText(format lyricsFormat, width int) string {
+	var badge string
+	switch format {
+	case lyricsFormatLRC:
+		badge = fmt.Sprintf("[%s::b]LRC[-:-:-] ", lyricsLRCColor)
+	case lyricsFormatTxt:
+		badge = fmt.Sprintf("[%s::b]TXT[-:-:-] ", lyricsTxtColor)
+	default:
+		return lyricsViewerLeftTitle
+	}
+	// width-2 mirrors tview's own Box.Draw title budget (it prints the
+	// title into b.width-2, leaving the two border corner cells alone).
+	pad := width - 2 - tview.TaggedStringWidth(lyricsViewerLeftTitle) - tview.TaggedStringWidth(badge)
+	if pad < 1 {
+		pad = 1
+	}
+	return lyricsViewerLeftTitle + strings.Repeat(" ", pad) + badge
+}
+
+// updateTitle recomputes and applies the border title from
+// v.currentFormat and the viewer's own current width -- called every
+// frame (see Draw), not just from render, so the right-aligned badge
+// stays flush against the border as the viewer resizes with the
+// terminal, not just at the moment a track last changed.
+func (v *lyricsViewer) updateTitle() {
+	_, _, w, _ := v.GetRect()
+	v.SetTitle(lyricsViewerTitleText(v.currentFormat, w))
 }
 
 // render loads and shows the lyrics for the currently playing song, fresh
@@ -285,10 +351,10 @@ func (v *lyricsViewer) render(song mpdclient.Song) {
 	v.ScrollToBeginning()
 	switch {
 	case song.DisplayName() == "":
-		v.SetTitle(lyricsViewerTitle)
+		v.currentFormat = lyricsFormatNone
 		v.SetText("[::d]Nothing playing[-:-:-]")
 	case v.app.musicDir == "":
-		v.SetTitle(lyricsViewerTitle)
+		v.currentFormat = lyricsFormatNone
 		// Hardcoded rather than computed via internal/config.ConfigFile:
 		// internal/ui doesn't depend on internal/config (see
 		// DEPENDENCY.md -- only cmd/mpdtui and mpdclient do), and adding
@@ -298,14 +364,13 @@ func (v *lyricsViewer) render(song mpdclient.Song) {
 		v.SetText("[::d]No music directory configured -- set music_dir in ~/.config/mpdtui/config[-:-:-]")
 	default:
 		available := lyricsAvailableFormats(v.app.musicDir, song.File)
-		switch resolveLyricsFormat(v.preferredFormat, available) {
+		v.currentFormat = resolveLyricsFormat(v.preferredFormat, available)
+		switch v.currentFormat {
 		case lyricsFormatLRC:
 			lines, _ := lyrics.ReadLRC(v.app.musicDir, song.File)
 			v.syncedLines = lines
-			v.SetTitle(lyricsViewerSyncedTitle)
 			v.renderSyncedLines()
 		case lyricsFormatTxt:
-			v.SetTitle(lyricsViewerTitle)
 			text, _ := lyrics.Read(v.app.musicDir, song.File)
 			// tview.Escape guards against lyrics content that happens to
 			// contain "[...]" (e.g. a "[Chorus]"/"[x2]" annotation,
@@ -315,7 +380,6 @@ func (v *lyricsViewer) render(song mpdclient.Song) {
 			// literal text.
 			v.SetText(fmt.Sprintf("[%s]%s[-]", lyricsTextColor, tview.Escape(text)))
 		default:
-			v.SetTitle(lyricsViewerTitle)
 			v.SetText(fmt.Sprintf("[::d]No lyrics found for %s[-:-:-]", song.DisplayName()))
 		}
 	}
@@ -353,14 +417,14 @@ func (v *lyricsViewer) cycleFormat() {
 	v.app.showMessage("lyrics: switched to " + v.preferredFormat.label())
 }
 
-// lyricsViewerTitle/lyricsViewerSyncedTitle: the title flips to mention
-// "synced" whenever the currently loaded track has .lrc lyrics, so it's
-// obvious at a glance whether the highlight you're seeing is real
-// (timestamp-driven) or you're just looking at plain, unsynced text.
-const (
-	lyricsViewerTitle       = " Lyrics (j/k/g/G to scroll) "
-	lyricsViewerSyncedTitle = " Lyrics — synced (j/k/g/G to scroll) "
-)
+// lyricsStartingText is shown, blinking, in place of the lyrics list
+// while elapsed hasn't reached the first synced line's own timestamp yet
+// (an instrumental intro) -- explicit request, LRC-only by construction:
+// renderSyncedLines is never called for plain-text (.txt) content, which
+// has no timestamps to be "before" in the first place. Followed by a
+// blank line before real lyrics content would ever start, per the
+// request's own layout.
+const lyricsStartingText = "Starting....."
 
 // renderSyncedLines repaints the viewer from v.syncedLines, coloring the
 // line at v.currentLine with a solid background band (not just a
@@ -371,8 +435,17 @@ const (
 // rendered line -- keeping v.currentLine a valid row index for
 // scrollToCurrentLine (ScrollTo operates on rendered rows, not slice
 // indices, and the two would drift apart the moment a blank line
-// collapsed to zero rendered rows).
+// collapsed to zero rendered rows). v.currentLine == -1 (before the
+// first timestamp) shows lyricsStartingText instead of the list itself
+// -- 'l' is tview's own blink-attribute tag character (lowercase sets
+// the attribute; see rivo/tview's strings.go attrs map -- uppercase
+// would clear it instead, the same lowercase-sets/uppercase-clears
+// convention already relied on for bold ("::b") elsewhere in this file).
 func (v *lyricsViewer) renderSyncedLines() {
+	if v.currentLine < 0 {
+		v.SetText(fmt.Sprintf("[%s::bl]%s[-:-:-]\n\n", lyricsLRCColor, lyricsStartingText))
+		return
+	}
 	var b strings.Builder
 	for i, line := range v.syncedLines {
 		text := tview.Escape(line.Text) // see render's own doc comment on why this is needed

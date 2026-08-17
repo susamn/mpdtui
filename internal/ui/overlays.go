@@ -169,10 +169,14 @@ const helpText = `[::b]Global[-:-:-]
                  work while it's open. If a same-named .lrc file sits
                  next to a plain .txt one, the viewer shows synced
                  lyrics instead: the currently-singing line is
-                 highlighted and auto-scrolled live as the track plays
-                 ("Lyrics — synced" in the title). 't' switches between
-                 whichever lyrics formats exist for the track (.txt,
-                 .lrc); the choice sticks across track changes
+                 highlighted and auto-scrolled live as the track plays.
+                 The title's top-right corner shows a colored LRC/TXT
+                 badge for whichever format is currently shown; 't'
+                 cycles between whichever formats exist for the track,
+                 sticking across track changes. Before an .lrc's first
+                 timestamp (an instrumental intro), a blinking
+                 "Starting....." shows in place of the lyrics list --
+                 .lrc only, plain .txt is unaffected
   v              cycle Now Playing visualizations
   L              locate the currently playing track in the Queue
   e              settings: Config tab (read-only: MPD host/port,

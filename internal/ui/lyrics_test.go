@@ -142,6 +142,10 @@ func TestLyricsViewerRenderPrefersLRCOverPlainText(t *testing.T) {
 	if a.lyricsViewer.syncedLines == nil {
 		t.Fatal("syncedLines is nil, want the .lrc content loaded (it should win over the .txt)")
 	}
+	// Past the fixture's only timestamp (1s), so the real line is showing
+	// rather than the "Starting....." intro (see
+	// TestLyricsViewerRenderSyncedShowsStartingTextBeforeFirstLine).
+	a.lyricsViewer.updateHighlight(2 * time.Second)
 	got := a.lyricsViewer.GetText(true)
 	if !strings.Contains(got, "synced line") {
 		t.Errorf("viewer text = %q, want the .lrc content", got)
@@ -149,8 +153,8 @@ func TestLyricsViewerRenderPrefersLRCOverPlainText(t *testing.T) {
 	if strings.Contains(got, "plain line") {
 		t.Errorf("viewer text = %q, want the .txt content NOT shown (.lrc should win)", got)
 	}
-	if got := a.lyricsViewer.GetTitle(); got != lyricsViewerSyncedTitle {
-		t.Errorf("title = %q, want %q", got, lyricsViewerSyncedTitle)
+	if a.lyricsViewer.currentFormat != lyricsFormatLRC {
+		t.Errorf("currentFormat = %v, want lyricsFormatLRC", a.lyricsViewer.currentFormat)
 	}
 }
 
@@ -167,8 +171,8 @@ func TestLyricsViewerRenderFallsBackToPlainTextWithoutLRC(t *testing.T) {
 	if got := a.lyricsViewer.GetText(true); !strings.Contains(got, "plain line") {
 		t.Errorf("viewer text = %q, want the plain .txt content", got)
 	}
-	if got := a.lyricsViewer.GetTitle(); got != lyricsViewerTitle {
-		t.Errorf("title = %q, want the plain (non-synced) title %q", got, lyricsViewerTitle)
+	if a.lyricsViewer.currentFormat != lyricsFormatTxt {
+		t.Errorf("currentFormat = %v, want lyricsFormatTxt", a.lyricsViewer.currentFormat)
 	}
 }
 
@@ -189,6 +193,122 @@ func TestLyricsViewerRenderResetsSyncedStateOnTrackChange(t *testing.T) {
 	}
 	if a.lyricsViewer.currentLine != -1 {
 		t.Errorf("currentLine after a track change = %d, want reset to -1", a.lyricsViewer.currentLine)
+	}
+}
+
+// --- "Starting....." intro (LRC only, before the first timestamp) ---
+
+func TestLyricsViewerRenderSyncedShowsStartingTextBeforeFirstLine(t *testing.T) {
+	dir := t.TempDir()
+	writeLRCFixture(t, dir, "artist", "Track.lrc", "[00:45.00]first real line")
+	a := newTestAppWithMusicDir(dir)
+
+	a.lyricsViewer.render(mpdclient.Song{Title: "Track", File: "artist/Track.mp3"})
+
+	got := a.lyricsViewer.GetText(true)
+	if !strings.Contains(got, lyricsStartingText) {
+		t.Errorf("viewer text right after render (before any updateHighlight) = %q, want %q", got, lyricsStartingText)
+	}
+	if strings.Contains(got, "first real line") {
+		t.Errorf("viewer text = %q, want the actual lyrics NOT shown yet (still before the first timestamp)", got)
+	}
+}
+
+// TestLyricsViewerRenderSyncedStartingTextBlinks checks the raw (tag-
+// intact) text for a lowercase 'l' in the attribute slot -- tview's own
+// blink-attribute character (see renderSyncedLines' doc comment on why
+// lowercase, not uppercase 'L', which would clear the attribute instead
+// of setting it).
+func TestLyricsViewerRenderSyncedStartingTextBlinks(t *testing.T) {
+	dir := t.TempDir()
+	writeLRCFixture(t, dir, "artist", "Track.lrc", "[00:45.00]first real line")
+	a := newTestAppWithMusicDir(dir)
+
+	a.lyricsViewer.render(mpdclient.Song{Title: "Track", File: "artist/Track.mp3"})
+
+	raw := a.lyricsViewer.GetText(false)
+	if !strings.Contains(raw, ":bl]") {
+		t.Errorf("raw viewer text = %q, want a \"bl\" (bold+blink) attribute tag on the starting text", raw)
+	}
+}
+
+func TestLyricsViewerUpdateHighlightReplacesStartingTextOnceStarted(t *testing.T) {
+	dir := t.TempDir()
+	writeLRCFixture(t, dir, "artist", "Track.lrc", "[00:10.00]first real line")
+	a := newTestAppWithMusicDir(dir)
+	a.lyricsViewer.render(mpdclient.Song{Title: "Track", File: "artist/Track.mp3"})
+
+	a.lyricsViewer.updateHighlight(5 * time.Second) // still before 10s
+	if got := a.lyricsViewer.GetText(true); !strings.Contains(got, lyricsStartingText) {
+		t.Fatalf("setup: text before the first timestamp = %q, want %q", got, lyricsStartingText)
+	}
+
+	a.lyricsViewer.updateHighlight(11 * time.Second) // past 10s now
+	got := a.lyricsViewer.GetText(true)
+	if strings.Contains(got, lyricsStartingText) {
+		t.Errorf("viewer text after the first timestamp = %q, want %q gone", got, lyricsStartingText)
+	}
+	if !strings.Contains(got, "first real line") {
+		t.Errorf("viewer text after the first timestamp = %q, want the real lyrics showing", got)
+	}
+}
+
+// TestLyricsViewerRenderPlainTextNeverShowsStartingText covers "this
+// will only happen for LRC file" -- a .txt-only track must never show
+// the synced-only intro, even though both share the same "nothing
+// highlighted yet" starting state conceptually.
+func TestLyricsViewerRenderPlainTextNeverShowsStartingText(t *testing.T) {
+	dir := t.TempDir()
+	writeLRCFixture(t, dir, "artist", "Track.txt", "plain line")
+	a := newTestAppWithMusicDir(dir)
+
+	a.lyricsViewer.render(mpdclient.Song{Title: "Track", File: "artist/Track.mp3"})
+
+	if got := a.lyricsViewer.GetText(true); strings.Contains(got, lyricsStartingText) {
+		t.Errorf("viewer text for a .txt-only track = %q, want no %q intro", got, lyricsStartingText)
+	}
+}
+
+// --- Border title: left hint + right-aligned format badge ---
+
+func TestLyricsViewerTitleTextNoBadgeWhenFormatNone(t *testing.T) {
+	if got := lyricsViewerTitleText(lyricsFormatNone, 60); got != lyricsViewerLeftTitle {
+		t.Errorf("lyricsViewerTitleText(None, 60) = %q, want the plain left title %q", got, lyricsViewerLeftTitle)
+	}
+}
+
+func TestLyricsViewerTitleTextIncludesColoredBadge(t *testing.T) {
+	got := lyricsViewerTitleText(lyricsFormatLRC, 60)
+	if !strings.Contains(got, "["+lyricsLRCColor+"::b]LRC[-:-:-]") {
+		t.Errorf("lyricsViewerTitleText(LRC, 60) = %q, want a colored LRC badge", got)
+	}
+
+	got = lyricsViewerTitleText(lyricsFormatTxt, 60)
+	if !strings.Contains(got, "["+lyricsTxtColor+"::b]TXT[-:-:-]") {
+		t.Errorf("lyricsViewerTitleText(Txt, 60) = %q, want a colored TXT badge", got)
+	}
+}
+
+// TestLyricsViewerTitleTextBadgeFlushRight checks the padding arithmetic
+// directly: the badge's own visual (tag-stripped) width plus everything
+// before it must land exactly at width-2 (tview's own title budget,
+// mirroring Box.Draw's "b.width-2" print width), for a width comfortably
+// larger than the content.
+func TestLyricsViewerTitleTextBadgeFlushRight(t *testing.T) {
+	const width = 80
+	got := lyricsViewerTitleText(lyricsFormatLRC, width)
+	if taggedWidth := tview.TaggedStringWidth(got); taggedWidth != width-2 {
+		t.Errorf("lyricsViewerTitleText(LRC, %d) visual width = %d, want exactly %d (flush against the border)", width, taggedWidth, width-2)
+	}
+}
+
+func TestLyricsViewerTitleTextNarrowWidthStillProducesSomeGap(t *testing.T) {
+	// Deliberately narrower than the left title + badge would need --
+	// must not panic or produce a negative-repeat-count string, just
+	// clamp to a minimal 1-space gap.
+	got := lyricsViewerTitleText(lyricsFormatLRC, 10)
+	if !strings.Contains(got, lyricsViewerLeftTitle) || !strings.Contains(got, "LRC") {
+		t.Errorf("lyricsViewerTitleText(LRC, 10) = %q, want both the left title and the badge still present", got)
 	}
 }
 
