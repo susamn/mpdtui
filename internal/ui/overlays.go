@@ -157,11 +157,11 @@ const helpText = `[::b]Global[-:-:-]
                  "buble" matches "Bublé"
   F              clear any active search/filter, in every panel at once
   i              track info card for the currently playing track --
-                 Track/Album/Artist/Genre/Year, a green tick if a lyrics
-                 file is found for it (needs music_dir set), live audio
-                 quality (bitrate, sample rate/bit depth/channels), and,
-                 when track_metadata is active, a Rating/Plays/Mark/Tags
-                 table
+                 Track/Album/Artist/Genre/Year, colored "LRC"/"TXT" text
+                 for whichever lyrics format(s) are found for it (needs
+                 music_dir set), live audio quality (bitrate, sample
+                 rate/bit depth/channels), and, when track_metadata is
+                 active, a Rating/Plays/Mark/Tags table
   y              lyrics viewer for the currently playing track (needs
                  music_dir set in ~/.config/mpdtui/config); j/k/g/G/
                  Ctrl-F/Ctrl-B to scroll, 'y' or Esc to close --
@@ -224,8 +224,10 @@ const helpText = `[::b]Global[-:-:-]
                  existing mark), from a small popup: j/k/g/G to
                  navigate, Enter to apply, Esc to cancel -- transport
                  controls still work while it's open
-  📝 in the narrow "Lyr" column means that track has a matching
-  lyrics file (see 'y'); rechecked live every time the Queue repopulates.
-  The Lyr column itself is only shown when music_dir is configured and
-  exists -- otherwise the Queue looks the same as without this feature
+  The narrow "Lyr" column shows a colored tick per lyrics format the
+  track has a matching sidecar for (see 'y'): green for synced (.lrc),
+  orange for plain (.txt), both together if both exist -- rechecked live
+  every time the Queue repopulates. Only shown at all when music_dir is
+  configured and exists -- otherwise the Queue looks the same as without
+  this feature
 `

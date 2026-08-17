@@ -126,7 +126,7 @@ func TestTrackInfoCardRenderOmitsLyricsLineWithoutMusicDir(t *testing.T) {
 	}
 }
 
-func TestTrackInfoCardRenderLyricsTickPresent(t *testing.T) {
+func TestTrackInfoCardRenderShowsTxtBadge(t *testing.T) {
 	dir := t.TempDir()
 	trackDir := filepath.Join(dir, "artist")
 	if err := os.MkdirAll(trackDir, 0o755); err != nil {
@@ -139,20 +139,68 @@ func TestTrackInfoCardRenderLyricsTickPresent(t *testing.T) {
 	a := newTestAppWithMusicDir(dir)
 	a.trackInfo.render(mpdclient.Song{Title: "Track", Artist: "Artist", File: "artist/Track.mp3"}, mpdclient.Status{})
 	got := a.trackInfo.identity.GetText(true)
-	if !strings.Contains(got, lyricsTick) {
-		t.Errorf("render(...) with a matching lyrics file = %q, want the tick glyph present", got)
+	if !strings.Contains(got, "TXT") {
+		t.Errorf("render(...) with a matching .txt file = %q, want the TXT badge present", got)
+	}
+	if strings.Contains(got, "LRC") {
+		t.Errorf("render(...) with only a .txt file = %q, want no LRC badge", got)
 	}
 }
 
-func TestTrackInfoCardRenderLyricsTickAbsentWhenNoMatch(t *testing.T) {
+func TestTrackInfoCardRenderShowsLRCBadge(t *testing.T) {
+	dir := t.TempDir()
+	trackDir := filepath.Join(dir, "artist")
+	if err := os.MkdirAll(trackDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(trackDir, "Track.lrc"), []byte("[00:01.00]la la la"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	a := newTestAppWithMusicDir(dir)
+	a.trackInfo.render(mpdclient.Song{Title: "Track", Artist: "Artist", File: "artist/Track.mp3"}, mpdclient.Status{})
+	got := a.trackInfo.identity.GetText(true)
+	if !strings.Contains(got, "LRC") {
+		t.Errorf("render(...) with a matching .lrc file = %q, want the LRC badge present", got)
+	}
+	if strings.Contains(got, "TXT") {
+		t.Errorf("render(...) with only a .lrc file = %q, want no TXT badge", got)
+	}
+}
+
+// TestTrackInfoCardRenderShowsBothBadges covers the explicit request:
+// "we need to add same in track info card, rather than tick we can have
+// colored text: LRC, TXT" -- both shown together when both exist.
+func TestTrackInfoCardRenderShowsBothBadges(t *testing.T) {
+	dir := t.TempDir()
+	trackDir := filepath.Join(dir, "artist")
+	if err := os.MkdirAll(trackDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(trackDir, "Track.lrc"), []byte("[00:01.00]la la la"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(trackDir, "Track.txt"), []byte("la la la"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	a := newTestAppWithMusicDir(dir)
+	a.trackInfo.render(mpdclient.Song{Title: "Track", Artist: "Artist", File: "artist/Track.mp3"}, mpdclient.Status{})
+	got := a.trackInfo.identity.GetText(true)
+	if !strings.Contains(got, "LRC") || !strings.Contains(got, "TXT") {
+		t.Errorf("render(...) with both .lrc and .txt = %q, want both badges present", got)
+	}
+}
+
+func TestTrackInfoCardRenderNoBadgeWhenNoMatch(t *testing.T) {
 	a := newTestAppWithMusicDir(t.TempDir())
 	a.trackInfo.render(mpdclient.Song{Title: "Track", Artist: "Artist", File: "artist/Track.mp3"}, mpdclient.Status{})
 	got := a.trackInfo.identity.GetText(true)
-	if strings.Contains(got, lyricsTick) {
-		t.Errorf("render(...) with no matching lyrics = %q, want no tick glyph", got)
+	if strings.Contains(got, "LRC") || strings.Contains(got, "TXT") {
+		t.Errorf("render(...) with no matching lyrics = %q, want no format badge", got)
 	}
 	if !strings.Contains(got, "📝") {
-		t.Errorf("render(...) = %q, want the lyrics line's icon still present (just no tick)", got)
+		t.Errorf("render(...) = %q, want the lyrics line's icon still present (just no badge)", got)
 	}
 }
 

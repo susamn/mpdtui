@@ -17,18 +17,28 @@ import (
 // (queue.go's render) rather than prefixed to the Title cell -- that was
 // the first cut, but reads as cluttering Title rather than as a distinct
 // badge. Originally an emoji icon (📝); replaced with a plain colored
-// tick (lyricsTickColor), matching the Mark column's own "colored ticks,
-// no icons" convention. The column carries no queueColumnGap padding
-// (unlike every other Queue column): its only content is ever this tick
-// or "", so tview.Table's own auto-sizing-to-content already makes it
-// exactly as wide as the tick and no wider, with no extra code needed to
-// enforce that.
+// tick, matching the Mark column's own "colored ticks, no icons"
+// convention. The column carries no queueColumnGap padding (unlike
+// every other Queue column): its content is always the header's own
+// width ("Lyr", 3 runes) or narrower -- one tick, two space-separated
+// ticks when both formats exist, or "" -- so tview.Table's own
+// auto-sizing-to-content already makes the column exactly as wide as it
+// needs to be, with no extra code to enforce that.
 const lyricsTick = "✓"
 
-// lyricsTickColor tints lyricsTick sky blue -- distinct from the Mark
-// column's own tick colors (markTickColors, cycled by mark reason), so
-// the two badge columns don't read as the same signal at a glance.
-var lyricsTickColor = tcell.ColorSkyblue
+// lyricsLRCColor/lyricsTxtColor color a lyrics format's own badge --
+// green for LRC (reuses nowPlayingTrackColor's WhatsApp green, the same
+// "this is the synced/active one" association the lyrics viewer's own
+// highlight already uses) and orange for TXT (reuses markTickColors'
+// own orange RGB, #FFA500, rather than inventing a new one) -- explicit
+// request ("green for LRC and Orange for TXT"). Used both in the Queue
+// table's Lyr column (colored tick(s), via embedded tview color tags
+// since a single TableCell can otherwise only carry one SetTextColor for
+// its whole text) and the track info card (colored "LRC"/"TXT" text).
+const (
+	lyricsLRCColor = nowPlayingTrackColor
+	lyricsTxtColor = "#FFA500"
+)
 
 // lyricsViewer shows the currently playing track's lyrics. It's
 // positioned over the Queue table's own Year-through-Type column band

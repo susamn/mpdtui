@@ -72,10 +72,11 @@ single-line inline player for a shell or tmux pane.
   WhatsApp green; Title/Album/Artist/Genre/Composer are truncated
   (30/20/40/9/14 characters) with "..." if longer; Type shows a
   color-coded format badge (MP3/FLAC/M4A/...); Type and Duration are
-  right-aligned. A narrow Lyr column, right after Title, shows a sky-blue
-  tick for any track with a matching lyrics file -- only present at all when
-  `music_dir` is configured and actually exists; otherwise the Queue
-  looks exactly as it would without the lyrics feature -- see
+  right-aligned. A narrow Lyr column, right after Title, shows a colored
+  tick per lyrics format found for the track -- green for synced (`.lrc`),
+  orange for plain (`.txt`), both together if both exist -- only present
+  at all when `music_dir` is configured and actually exists; otherwise
+  the Queue looks exactly as it would without the lyrics feature -- see
   [Lyrics](#lyrics)
 - **Lyrics** (`y`) — a viewer (bordered the same green as a focused
   panel, muted-yellow text), positioned over the Queue's own
@@ -176,7 +177,7 @@ Press `?` inside the full UI for the in-app keybinding list.
 | `/` | Search (contextual: filters Library/Playlists, jumps to a match in Queue) |
 | `f` | Global search from any panel -- type `a`/`al`/`p`/`t` + a term (artist/album/playlist/track); matches appear live as an fzf-style hint list. Up/Down (or Ctrl-P/Ctrl-N) move the highlight while typing; `Tab` (or `f` to return) switches focus to the hint list for `j`/`k`/`g`/`G` navigation, within the popup only. `Enter` acts on the highlight and closes the popup (track adds+plays, playlist loads+plays, artist/album jump into that group in the Library); from the hint list, `a` instead adds without playing (track) or appends (playlist) and leaves the popup open, so several tracks can be queued back-to-back. Stays open with "no X found" if nothing matches |
 | `F` | Clear any active search/filter, in every panel at once (Library search, Playlists filter) -- unlike a panel's own `Esc`, works regardless of which panel is currently focused |
-| `i` | Track info card for the currently playing track -- Track/Album/Artist/Genre/Year, a green tick if a matching lyrics file is found (needs `music_dir` set), live audio quality (bitrate, sample rate/bit depth/channels), and, when `track_metadata` is active, a Rating/Plays/Mark/Tags table. A small fixed-size card anchored to the bottom-right quadrant of the Queue panel |
+| `i` | Track info card for the currently playing track -- Track/Album/Artist/Genre/Year, colored "LRC"/"TXT" text for whichever lyrics format(s) are found (needs `music_dir` set), live audio quality (bitrate, sample rate/bit depth/channels), and, when `track_metadata` is active, a Rating/Plays/Mark/Tags table. A small fixed-size card anchored to the bottom-right quadrant of the Queue panel |
 | `y` | Lyrics viewer for the currently playing track (needs `music_dir` set, see [Lyrics](#lyrics) below) -- `j`/`k`/`g`/`G`/Ctrl-F/Ctrl-B to scroll, `y` or `Esc` to close. Transport controls (`Space`/`s`/`n`/`p`/`,`/`.`/`-`/`=`/`z`/`x`/`c`/`Z`) keep working while it's open. Shows synced (`.lrc`) lyrics with the current line auto-highlighted and scrolled into view when available, otherwise plain `.txt`. `t` switches between whichever formats exist for the track; the choice sticks across track changes |
 | `v` | Cycle Now Playing visualizations (right half of the Now Playing bar) |
 | `L` | Locate the currently playing track: selects it in the Queue and moves focus there, from any panel, and also reveals it in the Library tree (expanding every folder along its path and selecting it there, without moving focus away from Queue). The Queue-selecting part also happens automatically, whenever the playing track actually changes (explicit play action or natural auto-advance alike) -- except while an overlay is open, or on startup; the Library reveal is only on the explicit keypress |
@@ -274,6 +275,12 @@ reset per song), so switching once keeps applying as you skip through
 the queue, falling back gracefully on any individual track that doesn't
 have your preferred format. A future word-level/enhanced-LRC format
 (sometimes called A2) would slot into the same `t` cycle once supported.
+
+Which format(s) exist for a track is also visible without opening the
+viewer at all: the Queue's Lyr column shows a green tick for `.lrc`, an
+orange tick for `.txt` (both together if both exist), and the track info
+card (`i`) shows the same colors as text -- "LRC" and/or "TXT" -- right
+next to the rest of the track's details.
 
 ## Track metadata
 
