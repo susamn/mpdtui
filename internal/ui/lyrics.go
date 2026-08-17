@@ -63,6 +63,75 @@ type lyricsViewer struct {
 	// less than a second apart, so most 500ms ticks land between two
 	// timestamps rather than crossing one.
 	currentLine int
+	// preferredFormat is the user's sticky lyrics-format choice, cycled
+	// with 't' (explicit request: "an option to switch txt, lrc, or in
+	// future A2") -- only ever changed by cycleFormat, an explicit user
+	// action, never by render's own per-track fallback (see
+	// resolveLyricsFormat), so a manual choice persists across track
+	// changes instead of needing to be re-toggled every track. Zero value
+	// is lyricsFormatLRC, matching this feature's original default
+	// (prefer synced lyrics when available).
+	preferredFormat lyricsFormat
+}
+
+// lyricsFormat is a lyrics sidecar format the viewer can show, in a
+// fixed priority order (lyricsFormatLRC first) used both as render's
+// default preference and as the cycle order for 't'.
+type lyricsFormat int
+
+const (
+	lyricsFormatLRC lyricsFormat = iota
+	lyricsFormatTxt
+	// A future lyricsFormatA2 (word-level/enhanced LRC) slots in here --
+	// lyricsAvailableFormats/resolveLyricsFormat/cycleFormat are all
+	// already written generically over a []lyricsFormat, needing no
+	// changes beyond adding the new constant and its own Find/Read pair
+	// in internal/lyrics once that format is actually supported.
+	lyricsFormatNone // sentinel: nothing available for this track at all
+)
+
+func (f lyricsFormat) label() string {
+	switch f {
+	case lyricsFormatLRC:
+		return "synced (.lrc)"
+	case lyricsFormatTxt:
+		return "plain text (.txt)"
+	default:
+		return "none"
+	}
+}
+
+// lyricsAvailableFormats reports which formats actually exist for file,
+// in lyricsFormat's own priority order -- both render's default fallback
+// and cycleFormat's cycle set come from this, so neither one can ever
+// offer/select a format that doesn't really have a file backing it.
+func lyricsAvailableFormats(musicDir, file string) []lyricsFormat {
+	var out []lyricsFormat
+	if _, ok := lyrics.FindLRC(musicDir, file); ok {
+		out = append(out, lyricsFormatLRC)
+	}
+	if _, ok := lyrics.Find(musicDir, file); ok {
+		out = append(out, lyricsFormatTxt)
+	}
+	return out
+}
+
+// resolveLyricsFormat picks which of available to actually display,
+// given the sticky preferred format: preferred itself if it's among
+// available, else available's own first (priority-ordered) entry, else
+// lyricsFormatNone if nothing's available for this track at all. A pure
+// function of its two arguments -- no I/O, no receiver -- so render's
+// per-track fallback logic is testable without a real lyricsViewer.
+func resolveLyricsFormat(preferred lyricsFormat, available []lyricsFormat) lyricsFormat {
+	for _, f := range available {
+		if f == preferred {
+			return f
+		}
+	}
+	if len(available) > 0 {
+		return available[0]
+	}
+	return lyricsFormatNone
 }
 
 // lyricsColor matches colorActiveBorder, the same green a focused
@@ -188,15 +257,18 @@ func (v *lyricsViewer) Draw(screen tcell.Screen) {
 // off disk every time (see internal/lyrics) -- so lyrics added after the
 // track was queued still show up without needing a requeue or restart --
 // or a placeholder if there's nothing playing, no music directory is
-// configured, or there's no matching lyrics file. Prefers synced (.lrc)
-// lyrics over plain text when both exist for a track (explicit request:
-// "auto hint the currently played line"), falling back to plain text
-// unchanged when there's no .lrc. Resets syncedLines/currentLine every
-// call, since this always means a new track (or a fresh open) -- the
-// caller (openLyricsViewer/maybeRefreshLyricsViewer) is expected to call
-// updateHighlight right after, to paint the correct initial highlight for
-// synced content rather than leaving it unhighlighted until the next
-// refresh tick.
+// configured, or there's no matching lyrics file. Which format actually
+// gets shown, when more than one exists for a track, is resolved by
+// resolveLyricsFormat against v.preferredFormat (defaults to synced,
+// explicit request: "auto hint the currently played line"; changeable
+// with 't', see cycleFormat) -- render itself never writes to
+// preferredFormat, only reads it, so a manual choice survives even a
+// track that happens not to have the preferred format available.
+// Resets syncedLines/currentLine every call, since this always means a
+// new track (or a fresh open) -- the caller (openLyricsViewer/
+// maybeRefreshLyricsViewer) is expected to call updateHighlight right
+// after, to paint the correct initial highlight for synced content
+// rather than leaving it unhighlighted until the next refresh tick.
 func (v *lyricsViewer) render(song mpdclient.Song) {
 	v.syncedLines = nil
 	v.currentLine = -1
@@ -215,25 +287,60 @@ func (v *lyricsViewer) render(song mpdclient.Song) {
 		// $XDG_CONFIG_HOME is the rare exception), isn't worth it.
 		v.SetText("[::d]No music directory configured -- set music_dir in ~/.config/mpdtui/config[-:-:-]")
 	default:
-		if lines, ok := lyrics.ReadLRC(v.app.musicDir, song.File); ok {
+		available := lyricsAvailableFormats(v.app.musicDir, song.File)
+		switch resolveLyricsFormat(v.preferredFormat, available) {
+		case lyricsFormatLRC:
+			lines, _ := lyrics.ReadLRC(v.app.musicDir, song.File)
 			v.syncedLines = lines
 			v.SetTitle(lyricsViewerSyncedTitle)
 			v.renderSyncedLines()
-			return
-		}
-		v.SetTitle(lyricsViewerTitle)
-		text, ok := lyrics.Read(v.app.musicDir, song.File)
-		if !ok {
+		case lyricsFormatTxt:
+			v.SetTitle(lyricsViewerTitle)
+			text, _ := lyrics.Read(v.app.musicDir, song.File)
+			// tview.Escape guards against lyrics content that happens to
+			// contain "[...]" (e.g. a "[Chorus]"/"[x2]" annotation,
+			// common in real lyrics files) -- SetDynamicColors(true)
+			// means any such substring would otherwise be misparsed as
+			// a style tag and silently vanish instead of rendering as
+			// literal text.
+			v.SetText(fmt.Sprintf("[%s]%s[-]", lyricsTextColor, tview.Escape(text)))
+		default:
+			v.SetTitle(lyricsViewerTitle)
 			v.SetText(fmt.Sprintf("[::d]No lyrics found for %s[-:-:-]", song.DisplayName()))
-			return
 		}
-		// tview.Escape guards against lyrics content that happens to
-		// contain "[...]" (e.g. a "[Chorus]"/"[x2]" annotation, common
-		// in real lyrics files) -- SetDynamicColors(true) means any such
-		// substring would otherwise be misparsed as a style tag and
-		// silently vanish instead of rendering as literal text.
-		v.SetText(fmt.Sprintf("[%s]%s[-]", lyricsTextColor, tview.Escape(text)))
 	}
+}
+
+// cycleFormat is 't', while the lyrics viewer has focus: switches
+// preferredFormat to the next format actually available for the
+// currently playing track (wrapping around) and re-renders immediately.
+// A no-op, flashed rather than silent, if there's nothing to switch
+// between -- zero or one format available for this track. Explicit
+// request: "an option to switch txt, lrc, or in future A2".
+func (v *lyricsViewer) cycleFormat() {
+	song := v.app.currentSong
+	available := lyricsAvailableFormats(v.app.musicDir, song.File)
+	switch len(available) {
+	case 0:
+		v.app.showMessage("no lyrics available to switch between for this track")
+		return
+	case 1:
+		v.app.showMessage("only one lyrics format (" + available[0].label() + ") available for this track")
+		return
+	}
+
+	current := resolveLyricsFormat(v.preferredFormat, available)
+	idx := 0
+	for i, f := range available {
+		if f == current {
+			idx = i
+			break
+		}
+	}
+	v.preferredFormat = available[(idx+1)%len(available)]
+	v.render(song)
+	v.updateHighlight(v.app.currentStatus.Elapsed)
+	v.app.showMessage("lyrics: switched to " + v.preferredFormat.label())
 }
 
 // lyricsViewerTitle/lyricsViewerSyncedTitle: the title flips to mention

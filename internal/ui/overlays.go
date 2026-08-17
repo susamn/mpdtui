@@ -170,7 +170,9 @@ const helpText = `[::b]Global[-:-:-]
                  next to a plain .txt one, the viewer shows synced
                  lyrics instead: the currently-singing line is
                  highlighted and auto-scrolled live as the track plays
-                 ("Lyrics — synced" in the title)
+                 ("Lyrics — synced" in the title). 't' switches between
+                 whichever lyrics formats exist for the track (.txt,
+                 .lrc); the choice sticks across track changes
   v              cycle Now Playing visualizations
   L              locate the currently playing track in the Queue
   e              settings: Config tab (read-only: MPD host/port,
