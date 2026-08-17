@@ -157,16 +157,27 @@ const helpText = `[::b]Global[-:-:-]
                  "buble" matches "Bublé"
   F              clear any active search/filter, in every panel at once
   i              track info card for the currently playing track --
-                 Track/Album/Artist/Genre/Year, a green tick if a lyrics
-                 file is found for it (needs music_dir set), live audio
-                 quality (bitrate, sample rate/bit depth/channels), and,
-                 when track_metadata is active, a Rating/Plays/Mark/Tags
-                 table
+                 Track/Album/Artist/Genre/Year, colored "LRC"/"TXT" text
+                 for whichever lyrics format(s) are found for it (needs
+                 music_dir set), live audio quality (bitrate, sample
+                 rate/bit depth/channels), and, when track_metadata is
+                 active, a Rating/Plays/Mark/Tags table
   y              lyrics viewer for the currently playing track (needs
                  music_dir set in ~/.config/mpdtui/config); j/k/g/G/
                  Ctrl-F/Ctrl-B to scroll, 'y' or Esc to close --
                  transport controls (Space/s/n/p/,/./-/=/z/x/c/Z) still
-                 work while it's open
+                 work while it's open. If a same-named .lrc file sits
+                 next to a plain .txt one, the viewer shows synced
+                 lyrics instead: the currently-singing line is
+                 highlighted and auto-scrolled live as the track plays.
+                 The title's top-right corner shows a colored LRC/TXT
+                 badge for whichever format is currently shown; 't'
+                 cycles between whichever formats exist for the track,
+                 sticking across track changes. Before an .lrc's first
+                 timestamp (an instrumental intro), a big blinking
+                 block-letter "STARTING" banner plus "....." shows in
+                 place of the lyrics list -- .lrc only, plain .txt is
+                 unaffected
   v              cycle Now Playing visualizations
   L              locate the currently playing track in the Queue
   e              settings: Config tab (read-only: MPD host/port,
@@ -218,8 +229,10 @@ const helpText = `[::b]Global[-:-:-]
                  existing mark), from a small popup: j/k/g/G to
                  navigate, Enter to apply, Esc to cancel -- transport
                  controls still work while it's open
-  📝 in the narrow "Lyr" column means that track has a matching
-  lyrics file (see 'y'); rechecked live every time the Queue repopulates.
-  The Lyr column itself is only shown when music_dir is configured and
-  exists -- otherwise the Queue looks the same as without this feature
+  The narrow "Lyr" column shows a colored tick per lyrics format the
+  track has a matching sidecar for (see 'y'): green for synced (.lrc),
+  orange for plain (.txt), both adjacent (no gap) if both exist --
+  rechecked live every time the Queue repopulates. Only shown at all
+  when music_dir is configured and exists -- otherwise the Queue looks
+  the same as without this feature
 `

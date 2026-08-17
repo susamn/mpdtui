@@ -90,7 +90,15 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			// search/filter/save-playlist input still needs 's'/Space to
 			// stay literal typed text, so this stays scoped to just these
 			// two rather than a blanket rule.
+			//
+			// 't' is lyricsViewer-only (cycles txt/lrc/future-A2 lyrics
+			// format, see cycleFormat) -- checked first since it isn't one
+			// of handleTransportKey's own runes, but scoped identically.
 			focus := a.tv.GetFocus()
+			if focus == a.lyricsViewer && event.Rune() == 't' {
+				a.lyricsViewer.cycleFormat()
+				return nil
+			}
 			if (focus == a.lyricsViewer || focus == a.markPicker) && a.handleTransportKey(event.Rune()) {
 				return nil
 			}

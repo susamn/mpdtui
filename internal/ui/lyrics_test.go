@@ -1,10 +1,13 @@
 package ui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -113,6 +116,522 @@ func TestLyricsViewerRenderColorsAndEscapesContent(t *testing.T) {
 	}
 	if !strings.Contains(stripped, "line one") {
 		t.Errorf("rendered viewer text = %q, want it to contain the lyrics content", stripped)
+	}
+}
+
+// --- Synced (.lrc) lyrics ---
+
+func writeLRCFixture(t *testing.T, musicDir, relDir, name, content string) {
+	t.Helper()
+	trackDir := filepath.Join(musicDir, relDir)
+	if err := os.MkdirAll(trackDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(trackDir, name), []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+}
+
+func TestLyricsViewerRenderPrefersLRCOverPlainText(t *testing.T) {
+	dir := t.TempDir()
+	writeLRCFixture(t, dir, "artist", "Track.lrc", "[00:01.00]synced line")
+	writeLRCFixture(t, dir, "artist", "Track.txt", "plain line")
+
+	a := newTestAppWithMusicDir(dir)
+	a.lyricsViewer.render(mpdclient.Song{Title: "Track", File: "artist/Track.mp3"})
+
+	if a.lyricsViewer.syncedLines == nil {
+		t.Fatal("syncedLines is nil, want the .lrc content loaded (it should win over the .txt)")
+	}
+	// Past the fixture's only timestamp (1s), so the real line is showing
+	// rather than the "Starting....." intro (see
+	// TestLyricsViewerRenderSyncedShowsStartingTextBeforeFirstLine).
+	a.lyricsViewer.updateHighlight(2 * time.Second)
+	got := a.lyricsViewer.GetText(true)
+	if !strings.Contains(got, "synced line") {
+		t.Errorf("viewer text = %q, want the .lrc content", got)
+	}
+	if strings.Contains(got, "plain line") {
+		t.Errorf("viewer text = %q, want the .txt content NOT shown (.lrc should win)", got)
+	}
+	if a.lyricsViewer.currentFormat != lyricsFormatLRC {
+		t.Errorf("currentFormat = %v, want lyricsFormatLRC", a.lyricsViewer.currentFormat)
+	}
+}
+
+func TestLyricsViewerRenderFallsBackToPlainTextWithoutLRC(t *testing.T) {
+	dir := t.TempDir()
+	writeLRCFixture(t, dir, "artist", "Track.txt", "plain line")
+
+	a := newTestAppWithMusicDir(dir)
+	a.lyricsViewer.render(mpdclient.Song{Title: "Track", File: "artist/Track.mp3"})
+
+	if a.lyricsViewer.syncedLines != nil {
+		t.Errorf("syncedLines = %+v, want nil (no .lrc file exists)", a.lyricsViewer.syncedLines)
+	}
+	if got := a.lyricsViewer.GetText(true); !strings.Contains(got, "plain line") {
+		t.Errorf("viewer text = %q, want the plain .txt content", got)
+	}
+	if a.lyricsViewer.currentFormat != lyricsFormatTxt {
+		t.Errorf("currentFormat = %v, want lyricsFormatTxt", a.lyricsViewer.currentFormat)
+	}
+}
+
+func TestLyricsViewerRenderResetsSyncedStateOnTrackChange(t *testing.T) {
+	dir := t.TempDir()
+	writeLRCFixture(t, dir, "artist", "Synced.lrc", "[00:01.00]line")
+	writeLRCFixture(t, dir, "artist", "Plain.txt", "line")
+
+	a := newTestAppWithMusicDir(dir)
+	a.lyricsViewer.render(mpdclient.Song{Title: "Synced", File: "artist/Synced.mp3"})
+	if a.lyricsViewer.syncedLines == nil {
+		t.Fatal("setup: expected synced lines loaded for the first track")
+	}
+
+	a.lyricsViewer.render(mpdclient.Song{Title: "Plain", File: "artist/Plain.mp3"})
+	if a.lyricsViewer.syncedLines != nil {
+		t.Error("syncedLines after switching to a track with no .lrc = non-nil, want reset to nil")
+	}
+	if a.lyricsViewer.currentLine != -1 {
+		t.Errorf("currentLine after a track change = %d, want reset to -1", a.lyricsViewer.currentLine)
+	}
+}
+
+// --- "STARTING....." intro banner (LRC only, before the first timestamp) ---
+
+func TestLyricsStartingBannerLinesSpellsStartingCorrectly(t *testing.T) {
+	lines := lyricsStartingBannerLines(lyricsStartingWord)
+	// Every glyph in this font is exactly 5 rows tall by construction
+	// (lyricsStartingGlyphs); spot-check the array actually has 5
+	// entries and none are empty (a typo'd glyph map entry would
+	// silently produce a blank row here instead of a compile error).
+	for i, line := range lines {
+		if line == "" {
+			t.Errorf("banner row %d is empty, want block-letter content", i)
+		}
+	}
+	// Every row must be the same visual (rune, not byte) width --
+	// otherwise the letters don't actually line up into a single
+	// rectangular banner. Rune count, not len(), since block characters
+	// (█, 3 bytes in UTF-8) and spaces (1 byte) mix within a row -- two
+	// rows with the same rune count can have different byte lengths
+	// depending on how many of each they contain.
+	width := utf8.RuneCountInString(lines[0])
+	for i, line := range lines {
+		if got := utf8.RuneCountInString(line); got != width {
+			t.Errorf("banner row %d has rune width %d, want %d (all rows must line up)", i, got, width)
+		}
+	}
+}
+
+func TestLyricsViewerRenderSyncedShowsStartingBannerBeforeFirstLine(t *testing.T) {
+	dir := t.TempDir()
+	writeLRCFixture(t, dir, "artist", "Track.lrc", "[00:45.00]first real line")
+	a := newTestAppWithMusicDir(dir)
+
+	a.lyricsViewer.render(mpdclient.Song{Title: "Track", File: "artist/Track.mp3"})
+
+	got := a.lyricsViewer.GetText(true)
+	if !strings.Contains(got, lyricsStartingDots) {
+		t.Errorf("viewer text right after render (before any updateHighlight) = %q, want the %q dots line", got, lyricsStartingDots)
+	}
+	bannerFirstRow := lyricsStartingBannerLines(lyricsStartingWord)[0]
+	if !strings.Contains(got, bannerFirstRow) {
+		t.Errorf("viewer text = %q, want the block-letter banner's first row %q present", got, bannerFirstRow)
+	}
+	if strings.Contains(got, "first real line") {
+		t.Errorf("viewer text = %q, want the actual lyrics NOT shown yet (still before the first timestamp)", got)
+	}
+}
+
+// TestLyricsViewerRenderSyncedStartingBannerBlinksAndDisablesWrap checks
+// the raw (tag-intact) text for a lowercase 'l' in the attribute slot --
+// tview's own blink-attribute character (see renderSyncedLines' doc
+// comment on why lowercase, not uppercase 'L', which would clear the
+// attribute instead of setting it) -- and that wrap is off while the
+// banner (which must clip, not wrap, on a narrow viewer) is showing.
+func TestLyricsViewerRenderSyncedStartingBannerBlinksAndDisablesWrap(t *testing.T) {
+	dir := t.TempDir()
+	writeLRCFixture(t, dir, "artist", "Track.lrc", "[00:45.00]first real line")
+	a := newTestAppWithMusicDir(dir)
+
+	a.lyricsViewer.render(mpdclient.Song{Title: "Track", File: "artist/Track.mp3"})
+
+	raw := a.lyricsViewer.GetText(false)
+	if !strings.Contains(raw, ":bl]") {
+		t.Errorf("raw viewer text = %q, want a \"bl\" (bold+blink) attribute tag on the banner", raw)
+	}
+}
+
+func TestLyricsViewerUpdateHighlightReplacesStartingBannerOnceStarted(t *testing.T) {
+	dir := t.TempDir()
+	writeLRCFixture(t, dir, "artist", "Track.lrc", "[00:10.00]first real line")
+	a := newTestAppWithMusicDir(dir)
+	a.lyricsViewer.render(mpdclient.Song{Title: "Track", File: "artist/Track.mp3"})
+
+	a.lyricsViewer.updateHighlight(5 * time.Second) // still before 10s
+	if got := a.lyricsViewer.GetText(true); !strings.Contains(got, lyricsStartingDots) {
+		t.Fatalf("setup: text before the first timestamp = %q, want the %q dots line", got, lyricsStartingDots)
+	}
+
+	a.lyricsViewer.updateHighlight(11 * time.Second) // past 10s now
+	got := a.lyricsViewer.GetText(true)
+	if strings.Contains(got, lyricsStartingDots) {
+		t.Errorf("viewer text after the first timestamp = %q, want the starting banner gone", got)
+	}
+	if !strings.Contains(got, "first real line") {
+		t.Errorf("viewer text after the first timestamp = %q, want the real lyrics showing", got)
+	}
+}
+
+// TestLyricsViewerRenderPlainTextNeverShowsStartingBanner covers "this
+// will only happen for LRC file" -- a .txt-only track must never show
+// the synced-only intro, even though both share the same "nothing
+// highlighted yet" starting state conceptually.
+func TestLyricsViewerRenderPlainTextNeverShowsStartingBanner(t *testing.T) {
+	dir := t.TempDir()
+	writeLRCFixture(t, dir, "artist", "Track.txt", "plain line")
+	a := newTestAppWithMusicDir(dir)
+
+	a.lyricsViewer.render(mpdclient.Song{Title: "Track", File: "artist/Track.mp3"})
+
+	if got := a.lyricsViewer.GetText(true); strings.Contains(got, lyricsStartingDots) {
+		t.Errorf("viewer text for a .txt-only track = %q, want no starting banner", got)
+	}
+}
+
+// --- Border title: left hint + right-aligned format badge ---
+
+func TestLyricsViewerTitleTextNoBadgeWhenFormatNone(t *testing.T) {
+	if got := lyricsViewerTitleText(lyricsFormatNone, 60); got != lyricsViewerLeftTitle {
+		t.Errorf("lyricsViewerTitleText(None, 60) = %q, want the plain left title %q", got, lyricsViewerLeftTitle)
+	}
+}
+
+func TestLyricsViewerTitleTextIncludesColoredBadge(t *testing.T) {
+	got := lyricsViewerTitleText(lyricsFormatLRC, 60)
+	if !strings.Contains(got, "["+lyricsLRCColor+"::b]LRC[-:-:-]") {
+		t.Errorf("lyricsViewerTitleText(LRC, 60) = %q, want a colored LRC badge", got)
+	}
+
+	got = lyricsViewerTitleText(lyricsFormatTxt, 60)
+	if !strings.Contains(got, "["+lyricsTxtColor+"::b]TXT[-:-:-]") {
+		t.Errorf("lyricsViewerTitleText(Txt, 60) = %q, want a colored TXT badge", got)
+	}
+}
+
+// TestLyricsViewerTitleTextBadgeFlushRight checks the padding arithmetic
+// directly: the badge's own visual (tag-stripped) width plus everything
+// before it must land exactly at width-2 (tview's own title budget,
+// mirroring Box.Draw's "b.width-2" print width), for a width comfortably
+// larger than the content.
+func TestLyricsViewerTitleTextBadgeFlushRight(t *testing.T) {
+	const width = 80
+	got := lyricsViewerTitleText(lyricsFormatLRC, width)
+	if taggedWidth := tview.TaggedStringWidth(got); taggedWidth != width-2 {
+		t.Errorf("lyricsViewerTitleText(LRC, %d) visual width = %d, want exactly %d (flush against the border)", width, taggedWidth, width-2)
+	}
+}
+
+func TestLyricsViewerTitleTextNarrowWidthStillProducesSomeGap(t *testing.T) {
+	// Deliberately narrower than the left title + badge would need --
+	// must not panic or produce a negative-repeat-count string, just
+	// clamp to a minimal 1-space gap.
+	got := lyricsViewerTitleText(lyricsFormatLRC, 10)
+	if !strings.Contains(got, lyricsViewerLeftTitle) || !strings.Contains(got, "LRC") {
+		t.Errorf("lyricsViewerTitleText(LRC, 10) = %q, want both the left title and the badge still present", got)
+	}
+}
+
+// --- Format resolution/cycling ('t') ---
+
+func TestResolveLyricsFormatPrefersPreferredWhenAvailable(t *testing.T) {
+	got := resolveLyricsFormat(lyricsFormatTxt, []lyricsFormat{lyricsFormatLRC, lyricsFormatTxt})
+	if got != lyricsFormatTxt {
+		t.Errorf("resolveLyricsFormat(txt, [lrc,txt]) = %v, want lyricsFormatTxt", got)
+	}
+}
+
+func TestResolveLyricsFormatFallsBackToFirstAvailable(t *testing.T) {
+	// Preferred is txt, but only lrc is available for this track -- must
+	// fall back to what's actually there, not silently show nothing.
+	got := resolveLyricsFormat(lyricsFormatTxt, []lyricsFormat{lyricsFormatLRC})
+	if got != lyricsFormatLRC {
+		t.Errorf("resolveLyricsFormat(txt, [lrc]) = %v, want lyricsFormatLRC (fallback)", got)
+	}
+}
+
+func TestResolveLyricsFormatNoneWhenNothingAvailable(t *testing.T) {
+	got := resolveLyricsFormat(lyricsFormatLRC, nil)
+	if got != lyricsFormatNone {
+		t.Errorf("resolveLyricsFormat(lrc, nil) = %v, want lyricsFormatNone", got)
+	}
+}
+
+func TestLyricsAvailableFormatsBothPresent(t *testing.T) {
+	dir := t.TempDir()
+	writeLRCFixture(t, dir, "artist", "Track.lrc", "[00:01.00]synced")
+	writeLRCFixture(t, dir, "artist", "Track.txt", "plain")
+
+	got := lyricsAvailableFormats(dir, "artist/Track.mp3")
+	want := []lyricsFormat{lyricsFormatLRC, lyricsFormatTxt}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("lyricsAvailableFormats(...) = %v, want %v (lrc before txt)", got, want)
+	}
+}
+
+func TestLyricsAvailableFormatsNoneMatch(t *testing.T) {
+	dir := t.TempDir()
+	if got := lyricsAvailableFormats(dir, "artist/Track.mp3"); len(got) != 0 {
+		t.Errorf("lyricsAvailableFormats(no files) = %v, want empty", got)
+	}
+}
+
+func TestCycleFormatSwitchesBetweenAvailableFormats(t *testing.T) {
+	dir := t.TempDir()
+	writeLRCFixture(t, dir, "artist", "Track.lrc", "[00:01.00]synced line")
+	writeLRCFixture(t, dir, "artist", "Track.txt", "plain line")
+
+	a := newTestAppWithMusicDir(dir)
+	a.currentSong = mpdclient.Song{Title: "Track", File: "artist/Track.mp3"}
+	a.lyricsViewer.render(a.currentSong)
+	if a.lyricsViewer.preferredFormat != lyricsFormatLRC {
+		t.Fatalf("setup: preferredFormat = %v, want the default lyricsFormatLRC", a.lyricsViewer.preferredFormat)
+	}
+
+	a.lyricsViewer.cycleFormat()
+	if a.lyricsViewer.preferredFormat != lyricsFormatTxt {
+		t.Errorf("preferredFormat after cycleFormat = %v, want lyricsFormatTxt", a.lyricsViewer.preferredFormat)
+	}
+	got := a.lyricsViewer.GetText(true)
+	if !strings.Contains(got, "plain line") {
+		t.Errorf("viewer text after switching to txt = %q, want the plain content", got)
+	}
+	if a.lyricsViewer.syncedLines != nil {
+		t.Error("syncedLines after switching to txt = non-nil, want nil")
+	}
+
+	a.lyricsViewer.cycleFormat() // wraps back around to lrc
+	if a.lyricsViewer.preferredFormat != lyricsFormatLRC {
+		t.Errorf("preferredFormat after a second cycleFormat = %v, want it to wrap back to lyricsFormatLRC", a.lyricsViewer.preferredFormat)
+	}
+	if a.lyricsViewer.syncedLines == nil {
+		t.Error("syncedLines after cycling back to lrc = nil, want the synced content loaded again")
+	}
+}
+
+// TestCycleFormatPreferenceStickyAcrossTrackChange is the explicit "an
+// option to switch... " scenario: a manual choice must survive moving to
+// a different track, not just apply to the one track it was pressed on.
+func TestCycleFormatPreferenceStickyAcrossTrackChange(t *testing.T) {
+	dir := t.TempDir()
+	writeLRCFixture(t, dir, "artist", "First.lrc", "[00:01.00]first synced")
+	writeLRCFixture(t, dir, "artist", "First.txt", "first plain")
+	writeLRCFixture(t, dir, "artist", "Second.lrc", "[00:01.00]second synced")
+	writeLRCFixture(t, dir, "artist", "Second.txt", "second plain")
+
+	a := newTestAppWithMusicDir(dir)
+	a.currentSong = mpdclient.Song{Title: "First", File: "artist/First.mp3"}
+	a.lyricsViewer.render(a.currentSong)
+	a.lyricsViewer.cycleFormat() // switch to txt for the first track
+
+	a.lyricsViewer.render(mpdclient.Song{Title: "Second", File: "artist/Second.mp3"})
+	if a.lyricsViewer.preferredFormat != lyricsFormatTxt {
+		t.Errorf("preferredFormat after a track change = %v, want the sticky lyricsFormatTxt preference preserved", a.lyricsViewer.preferredFormat)
+	}
+	got := a.lyricsViewer.GetText(true)
+	if !strings.Contains(got, "second plain") {
+		t.Errorf("viewer text for the new track = %q, want plain text (the sticky preference)", got)
+	}
+}
+
+func TestCycleFormatNoopWithOnlyOneFormatAvailable(t *testing.T) {
+	dir := t.TempDir()
+	writeLRCFixture(t, dir, "artist", "Track.txt", "plain line")
+
+	a := newTestAppWithMusicDir(dir)
+	a.currentSong = mpdclient.Song{Title: "Track", File: "artist/Track.mp3"}
+	a.lyricsViewer.render(a.currentSong)
+	before := a.lyricsViewer.GetText(true)
+
+	a.lyricsViewer.cycleFormat()
+
+	if got := a.lyricsViewer.GetText(true); got != before {
+		t.Errorf("text changed after cycleFormat with only one format available: before %q, after %q", before, got)
+	}
+	if got := a.hintBar.GetText(true); !strings.Contains(got, "only one lyrics format") {
+		t.Errorf("hint bar = %q, want it to mention only one format is available", got)
+	}
+}
+
+func TestCycleFormatNoopWithNoLyricsAvailable(t *testing.T) {
+	dir := t.TempDir()
+	a := newTestAppWithMusicDir(dir)
+	a.currentSong = mpdclient.Song{Title: "Track", File: "artist/Track.mp3"}
+	a.lyricsViewer.render(a.currentSong)
+
+	a.lyricsViewer.cycleFormat()
+
+	if got := a.hintBar.GetText(true); !strings.Contains(got, "no lyrics available") {
+		t.Errorf("hint bar = %q, want it to say there's nothing to switch between", got)
+	}
+}
+
+func TestTKeyWhileLyricsViewerOpenCyclesFormat(t *testing.T) {
+	dir := t.TempDir()
+	writeLRCFixture(t, dir, "artist", "Track.lrc", "[00:01.00]synced line")
+	writeLRCFixture(t, dir, "artist", "Track.txt", "plain line")
+
+	a := newTestAppWithMusicDir(dir)
+	a.tv.SetFocus(a.queue.table)
+	a.currentSong = mpdclient.Song{Title: "Track", File: "artist/Track.mp3"}
+	a.openLyricsViewer()
+	if a.lyricsViewer.preferredFormat != lyricsFormatLRC {
+		t.Fatalf("setup: preferredFormat = %v, want lyricsFormatLRC", a.lyricsViewer.preferredFormat)
+	}
+
+	tKey := tcell.NewEventKey(tcell.KeyRune, 't', tcell.ModNone)
+	if result := a.globalInputCapture(tKey); result != nil {
+		t.Errorf("'t' while the lyrics viewer is open should be consumed, got %v", result)
+	}
+	if a.lyricsViewer.preferredFormat != lyricsFormatTxt {
+		t.Errorf("preferredFormat after 't' = %v, want lyricsFormatTxt", a.lyricsViewer.preferredFormat)
+	}
+}
+
+// TestTKeyNotConsumedWhileAnotherOverlayOpen proves the 't' cycle key is
+// scoped to the lyrics viewer specifically, not a blanket overlay rule --
+// offline-safe (no synced content loaded, so cycleFormat would just flash
+// "no lyrics available" if it were mistakenly reached; asserting the key
+// isn't consumed at all is the stronger check).
+func TestTKeyNotConsumedWhileAnotherOverlayOpen(t *testing.T) {
+	a := newTestApp()
+	a.tv.SetFocus(a.queue.table)
+	a.openHelp()
+
+	tKey := tcell.NewEventKey(tcell.KeyRune, 't', tcell.ModNone)
+	if result := a.globalInputCapture(tKey); result == nil {
+		t.Error("'t' while help (not the lyrics viewer) is open should not be consumed")
+	}
+}
+
+func TestLyricsViewerUpdateHighlightNoopWithoutSyncedLines(t *testing.T) {
+	dir := t.TempDir()
+	writeLRCFixture(t, dir, "artist", "Track.txt", "plain line")
+	a := newTestAppWithMusicDir(dir)
+	a.lyricsViewer.render(mpdclient.Song{Title: "Track", File: "artist/Track.mp3"})
+	before := a.lyricsViewer.GetText(false)
+
+	a.lyricsViewer.updateHighlight(time.Minute)
+
+	if got := a.lyricsViewer.GetText(false); got != before {
+		t.Errorf("updateHighlight with no synced lines changed the text: before %q, after %q", before, got)
+	}
+	if a.lyricsViewer.currentLine != -1 {
+		t.Errorf("currentLine = %d, want -1 (never set for plain-text content)", a.lyricsViewer.currentLine)
+	}
+}
+
+func TestLyricsViewerUpdateHighlightMovesToCurrentLine(t *testing.T) {
+	dir := t.TempDir()
+	writeLRCFixture(t, dir, "artist", "Track.lrc", "[00:10.00]first\n[00:20.00]second\n[00:30.00]third\n")
+	a := newTestAppWithMusicDir(dir)
+	a.lyricsViewer.render(mpdclient.Song{Title: "Track", File: "artist/Track.mp3"})
+
+	a.lyricsViewer.updateHighlight(5 * time.Second) // before the first line
+	if a.lyricsViewer.currentLine != -1 {
+		t.Errorf("currentLine before the first timestamp = %d, want -1", a.lyricsViewer.currentLine)
+	}
+
+	a.lyricsViewer.updateHighlight(15 * time.Second) // between first and second -- still first
+	if a.lyricsViewer.currentLine != 0 {
+		t.Errorf("currentLine at 15s = %d, want 0 (\"first\")", a.lyricsViewer.currentLine)
+	}
+	rendered := a.lyricsViewer.GetText(true)
+	if !strings.Contains(rendered, "first") {
+		t.Errorf("rendered text = %q, want it to still contain the highlighted line's text", rendered)
+	}
+
+	a.lyricsViewer.updateHighlight(25 * time.Second) // between second and third -- now second
+	if a.lyricsViewer.currentLine != 1 {
+		t.Errorf("currentLine at 25s = %d, want 1 (\"second\")", a.lyricsViewer.currentLine)
+	}
+}
+
+// TestLyricsViewerUpdateHighlightNoopWhenLineUnchanged checks the
+// early-return path directly via currentLine rather than trying to detect
+// a skipped SetText call -- two elapsed values landing on the same
+// current line must leave currentLine (and by extension the rendered
+// content) exactly as it was.
+func TestLyricsViewerUpdateHighlightNoopWhenLineUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	writeLRCFixture(t, dir, "artist", "Track.lrc", "[00:10.00]first\n[00:20.00]second\n")
+	a := newTestAppWithMusicDir(dir)
+	a.lyricsViewer.render(mpdclient.Song{Title: "Track", File: "artist/Track.mp3"})
+
+	a.lyricsViewer.updateHighlight(12 * time.Second)
+	if a.lyricsViewer.currentLine != 0 {
+		t.Fatalf("setup: currentLine = %d, want 0", a.lyricsViewer.currentLine)
+	}
+	before := a.lyricsViewer.GetText(false)
+
+	a.lyricsViewer.updateHighlight(15 * time.Second) // still within "first"'s window
+	if a.lyricsViewer.currentLine != 0 {
+		t.Errorf("currentLine after a same-line tick = %d, want unchanged 0", a.lyricsViewer.currentLine)
+	}
+	if got := a.lyricsViewer.GetText(false); got != before {
+		t.Errorf("text changed on a same-line tick: before %q, after %q", before, got)
+	}
+}
+
+func TestLyricsViewerScrollToCurrentLineKeepsLookbackContext(t *testing.T) {
+	dir := t.TempDir()
+	var raw strings.Builder
+	for i := 0; i < 20; i++ {
+		fmt.Fprintf(&raw, "[00:%02d.00]line %d\n", i, i)
+	}
+	writeLRCFixture(t, dir, "artist", "Track.lrc", raw.String())
+	a := newTestAppWithMusicDir(dir)
+	a.lyricsViewer.render(mpdclient.Song{Title: "Track", File: "artist/Track.mp3"})
+
+	a.lyricsViewer.updateHighlight(10 * time.Second) // line index 10
+	row, _ := a.lyricsViewer.GetScrollOffset()
+	if want := 10 - lyricsSyncedScrollLookback; row != want {
+		t.Errorf("scroll offset row = %d, want %d (currentLine - lookback)", row, want)
+	}
+}
+
+func TestOpenLyricsViewerSeedsHighlightFromCurrentStatus(t *testing.T) {
+	dir := t.TempDir()
+	writeLRCFixture(t, dir, "artist", "Track.lrc", "[00:10.00]first\n[00:20.00]second\n")
+	a := newTestAppWithMusicDir(dir)
+	a.currentSong = mpdclient.Song{Title: "Track", File: "artist/Track.mp3"}
+	a.currentStatus = mpdclient.Status{Elapsed: 25 * time.Second}
+
+	a.openLyricsViewer()
+
+	if a.lyricsViewer.currentLine != 1 {
+		t.Errorf("currentLine after opening mid-track = %d, want 1 (seeded from currentStatus.Elapsed immediately, not left at -1 until the next tick)", a.lyricsViewer.currentLine)
+	}
+}
+
+func TestMaybeUpdateLyricsHighlightOnlyWhenOpen(t *testing.T) {
+	dir := t.TempDir()
+	writeLRCFixture(t, dir, "artist", "Track.lrc", "[00:10.00]first\n[00:20.00]second\n")
+	a := newTestAppWithMusicDir(dir)
+	a.tv.SetFocus(a.queue.table)
+	a.currentSong = mpdclient.Song{Title: "Track", File: "artist/Track.mp3"}
+	a.lyricsViewer.render(a.currentSong)
+
+	a.maybeUpdateLyricsHighlight(mpdclient.Status{Elapsed: 25 * time.Second})
+	if a.lyricsViewer.currentLine != -1 {
+		t.Errorf("currentLine after a tick while the viewer isn't open = %d, want untouched -1", a.lyricsViewer.currentLine)
+	}
+
+	a.openLyricsViewer() // focuses the viewer
+	a.maybeUpdateLyricsHighlight(mpdclient.Status{Elapsed: 25 * time.Second})
+	if a.lyricsViewer.currentLine != 1 {
+		t.Errorf("currentLine after a tick while the viewer is open = %d, want 1", a.lyricsViewer.currentLine)
 	}
 }
 

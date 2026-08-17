@@ -8,7 +8,6 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
-	"mpdtui/internal/lyrics"
 	"mpdtui/internal/mpdclient"
 )
 
@@ -148,7 +147,7 @@ func (c *trackInfoCard) render(song mpdclient.Song, st mpdclient.Status) {
 		fmt.Sprintf("📅 %s", year),
 	}
 	if c.app.musicDir != "" {
-		lines = append(lines, fmt.Sprintf("📝 %s", lyricsPresentTick(c.app.musicDir, song.File)))
+		lines = append(lines, fmt.Sprintf("📝 %s", lyricsFormatBadges(c.app.musicDir, song.File)))
 	}
 	lines = append(lines, fmt.Sprintf("🎚️ %s", FormatAudioQuality(st.Bitrate, st.AudioFormat)))
 	c.identity.SetText(strings.Join(lines, "\n"))
@@ -158,17 +157,26 @@ func (c *trackInfoCard) render(song mpdclient.Song, st mpdclient.Status) {
 	}
 }
 
-// lyricsPresentTick renders a green checkmark (lyricsTick's own glyph,
-// recolored -- Queue's Lyr column uses sky blue, this card uses green per
-// explicit request) if file has a matching lyrics sidecar under musicDir
-// (see internal/lyrics), or "" otherwise -- tick-only, no separate "not
-// found" glyph, mirroring the Queue table's own Lyr column (a blank cell,
-// not a red X, when absent).
-func lyricsPresentTick(musicDir, file string) string {
-	if _, ok := lyrics.Find(musicDir, file); !ok {
-		return ""
+// lyricsFormatBadges renders colored text labels for whichever lyrics
+// formats exist for file under musicDir (see internal/lyrics) -- "LRC"
+// (green) and/or "TXT" (orange), space-separated when both are present,
+// "" if neither -- explicit request to show which format(s), not just a
+// single present/absent tick the way the Queue table's Lyr column used
+// to (and, for a single glance-able badge in a narrow column, still
+// does -- see lyricsCellText, queue.go). Reuses lyricsAvailableFormats
+// (lyrics.go) so this card and the Lyr column can never disagree about
+// what's actually available.
+func lyricsFormatBadges(musicDir, file string) string {
+	var labels []string
+	for _, f := range lyricsAvailableFormats(musicDir, file) {
+		switch f {
+		case lyricsFormatLRC:
+			labels = append(labels, fmt.Sprintf("[%s::b]LRC[-:-:-]", lyricsLRCColor))
+		case lyricsFormatTxt:
+			labels = append(labels, fmt.Sprintf("[%s::b]TXT[-:-:-]", lyricsTxtColor))
+		}
 	}
-	return fmt.Sprintf("[%s]%s[-]", nowPlayingTrackColor, lyricsTick)
+	return strings.Join(labels, " ")
 }
 
 // renderMeta fills the Rating/Plays/Mark/Tags metadata table for file --

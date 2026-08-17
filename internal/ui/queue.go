@@ -328,11 +328,13 @@ func (q *queuePanel) render(curID int) {
 	cols := newQueueColumns(lyricsActive, metadataActive)
 	q.cols = cols
 	setQueueHeader(q.table, cols)
-	// lyricsDirs caches internal/lyrics.Candidates per directory for the
-	// duration of this one render pass only (no caching across renders,
-	// see hasLyrics) -- multiple queued tracks from the same album share
-	// a directory, so this avoids re-listing it once per track.
-	lyricsDirs := map[string]map[string]string{}
+	// lrcDirs/txtDirs cache internal/lyrics.LRCCandidates/Candidates per
+	// directory for the duration of this one render pass only (no
+	// caching across renders, see lyricsPresence) -- multiple queued
+	// tracks from the same album share a directory, so this avoids
+	// re-listing it (once per format) more than once per directory.
+	lrcDirs := map[string]map[string]string{}
+	txtDirs := map[string]map[string]string{}
 	for i, s := range q.songs {
 		row := i + queueHeaderRows
 		marker := "  "
@@ -351,16 +353,12 @@ func (q *queuePanel) render(curID int) {
 			SetTextColor(queueTitleColor))
 		if cols.lyr >= 0 {
 			// lyrCell carries no queueColumnGap padding, unlike every
-			// other column here -- its only content is ever lyricsTick or
-			// "", so tview.Table's own auto-sizing-to-content already
-			// makes the column exactly as wide as the tick and no wider
-			// (the explicit ask: "the column width should only take to
-			// contain the icon").
-			lyrCell := tview.NewTableCell("")
-			if q.hasLyrics(s.File, lyricsDirs) {
-				lyrCell = tview.NewTableCell(lyricsTick).SetTextColor(lyricsTickColor)
-			}
-			q.table.SetCell(row, cols.lyr, lyrCell)
+			// other column here -- its content never exceeds the header's
+			// own width ("Lyr", 3 runes), so tview.Table's own
+			// auto-sizing-to-content already makes the column exactly as
+			// wide as it needs to be (the explicit ask: "the column width
+			// should only take to contain the icon").
+			q.table.SetCell(row, cols.lyr, tview.NewTableCell(lyricsCellText(q.lyricsPresence(s.File, lrcDirs, txtDirs))))
 		}
 		q.table.SetCell(row, cols.album, tview.NewTableCell(truncateWithEllipsis(s.Album, queueAlbumMaxLen)+queueColumnGap))
 		q.table.SetCell(row, cols.artist, tview.NewTableCell(truncateWithEllipsis(s.Artist, queueArtistMaxLen)+queueColumnGap))
@@ -532,27 +530,59 @@ func markCell(mark *metadata.MarkReason) *tview.TableCell {
 		SetAlign(tview.AlignRight)
 }
 
-// hasLyrics reports whether file has a matching lyrics sidecar (see
-// internal/lyrics), rechecked live against the real directory contents on
-// every render -- there's no caching across render() calls, only within
-// this one pass (dirCache), so a lyrics file added after a track was
-// already queued shows up as soon as the Queue next repopulates (adding/
-// removing/moving a track, or another client's own change via MPD's
-// "playlist" idle event), without needing a special "recheck" code path
-// of its own. Always false if musicDir is unset (the feature is
-// inactive).
-func (q *queuePanel) hasLyrics(file string, dirCache map[string]map[string]string) bool {
+// lyricsPresence reports which lyrics format(s) file has a matching
+// sidecar for (see internal/lyrics), rechecked live against the real
+// directory contents on every render -- there's no caching across
+// render() calls, only within this one pass (lrcDirs/txtDirs), so a
+// lyrics file added after a track was already queued shows up as soon as
+// the Queue next repopulates (adding/removing/moving a track, or another
+// client's own change via MPD's "playlist" idle event), without needing
+// a special "recheck" code path of its own. Both false if musicDir is
+// unset (the feature is inactive). Checks both formats independently
+// (not lyricsAvailableFormats, lyrics.go -- that one has no caching of
+// its own, fine for a single lookup but would re-list every directory
+// twice per queued track here).
+func (q *queuePanel) lyricsPresence(file string, lrcDirs, txtDirs map[string]map[string]string) (hasLRC, hasTxt bool) {
 	if q.app.musicDir == "" {
-		return false
+		return false, false
 	}
 	dir := lyrics.Dir(q.app.musicDir, file)
-	candidates, cached := dirCache[dir]
+
+	lrcCandidates, cached := lrcDirs[dir]
 	if !cached {
-		candidates = lyrics.Candidates(dir)
-		dirCache[dir] = candidates
+		lrcCandidates = lyrics.LRCCandidates(dir)
+		lrcDirs[dir] = lrcCandidates
 	}
-	_, ok := lyrics.Match(file, candidates)
-	return ok
+	_, hasLRC = lyrics.Match(file, lrcCandidates)
+
+	txtCandidates, cached := txtDirs[dir]
+	if !cached {
+		txtCandidates = lyrics.Candidates(dir)
+		txtDirs[dir] = txtCandidates
+	}
+	_, hasTxt = lyrics.Match(file, txtCandidates)
+	return hasLRC, hasTxt
+}
+
+// lyricsCellText builds the Queue Lyr column's cell content from which
+// formats are present: a single colored tick for just one format, two
+// adjacent colored ticks -- no gap between them, explicit "overlap"
+// request, the closest a character-grid terminal can get to that (tcell
+// renders one rune per cell, each with its own single color -- there's
+// no way to actually blend two colors within one cell the way a
+// graphical UI could) -- (green LRC, orange TXT, in that order) when
+// both exist, or "" for neither. Uses embedded tview color tags rather
+// than TableCell.SetTextColor, since a cell can carry only one
+// SetTextColor for its whole text but needs two different colors here.
+func lyricsCellText(hasLRC, hasTxt bool) string {
+	var ticks []string
+	if hasLRC {
+		ticks = append(ticks, fmt.Sprintf("[%s]%s[-]", lyricsLRCColor, lyricsTick))
+	}
+	if hasTxt {
+		ticks = append(ticks, fmt.Sprintf("[%s]%s[-]", lyricsTxtColor, lyricsTick))
+	}
+	return strings.Join(ticks, "")
 }
 
 // truncateWithEllipsis returns s unchanged if it's at most max runes,
