@@ -156,7 +156,12 @@ const helpText = `[::b]Global[-:-:-]
                  can be queued back-to-back -- accent-insensitive, so
                  "buble" matches "Bublé"
   F              clear any active search/filter, in every panel at once
-  i              track info card for the currently playing track
+  i              track info card for the currently playing track --
+                 Track/Album/Artist/Genre/Year, a green tick if a lyrics
+                 file is found for it (needs music_dir set), live audio
+                 quality (bitrate, sample rate/bit depth/channels), and,
+                 when track_metadata is active, a Rating/Plays/Mark/Tags
+                 table
   y              lyrics viewer for the currently playing track (needs
                  music_dir set in ~/.config/mpdtui/config); j/k/g/G/
                  Ctrl-F/Ctrl-B to scroll, 'y' or Esc to close --

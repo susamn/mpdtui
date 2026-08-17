@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -27,13 +29,20 @@ func TestQuadrantRectBottomRight(t *testing.T) {
 	}
 }
 
-func TestCardRectFloatsAtQuadrantTopLeftHalfSized(t *testing.T) {
+func TestCardRectFixedSizeClampedToQuadrant(t *testing.T) {
 	cases := []struct {
 		x, y, w, h                 int
 		wantX, wantY, wantW, wantH int
 	}{
-		{50, 30, 50, 30, 50, 30, 25, 15},
-		{0, 0, 41, 21, 0, 0, 20, 10}, // odd dimensions round the card size down
+		// Quadrant bigger than the fixed footprint in both dimensions --
+		// card stays at its fixed compact size, not the quadrant's.
+		{50, 30, 50, 30, 50, 30, trackInfoCardWidth, trackInfoCardHeight},
+		// Quadrant narrower than the fixed width -- clamps width down,
+		// height still fixed (quadrant is tall enough for it).
+		{0, 0, 41, 21, 0, 0, 41, trackInfoCardHeight},
+		// Quadrant smaller than the fixed footprint in both dimensions.
+		{0, 0, 1, 1, 0, 0, 1, 1},
+		{0, 0, 0, 0, 0, 0, 0, 0},
 	}
 	for _, tc := range cases {
 		gotX, gotY, gotW, gotH := cardRect(tc.x, tc.y, tc.w, tc.h)
@@ -46,8 +55,8 @@ func TestCardRectFloatsAtQuadrantTopLeftHalfSized(t *testing.T) {
 
 func TestTrackInfoCardRenderNothingPlaying(t *testing.T) {
 	a := newTestApp()
-	a.trackInfo.render(mpdclient.Song{})
-	if got := a.trackInfo.GetText(false); !strings.Contains(got, "Nothing playing") {
+	a.trackInfo.render(mpdclient.Song{}, mpdclient.Status{})
+	if got := a.trackInfo.identity.GetText(false); !strings.Contains(got, "Nothing playing") {
 		t.Errorf("render(zero Song) = %q, want it to contain %q", got, "Nothing playing")
 	}
 }
@@ -61,8 +70,8 @@ func TestTrackInfoCardRenderFullSong(t *testing.T) {
 		Genre:  "Rock",
 		Date:   "1975-11-21",
 	}
-	a.trackInfo.render(song)
-	got := a.trackInfo.GetText(true)
+	a.trackInfo.render(song, mpdclient.Status{})
+	got := a.trackInfo.identity.GetText(true)
 
 	for _, want := range []string{"Bohemian Rhapsody", "A Night at the Opera", "Queen", "Rock", "1975"} {
 		if !strings.Contains(got, want) {
@@ -76,12 +85,166 @@ func TestTrackInfoCardRenderFullSong(t *testing.T) {
 
 func TestTrackInfoCardRenderFallsBackToFilename(t *testing.T) {
 	a := newTestApp()
-	a.trackInfo.render(mpdclient.Song{File: "music/artist/track.mp3"})
-	got := a.trackInfo.GetText(true)
+	a.trackInfo.render(mpdclient.Song{File: "music/artist/track.mp3"}, mpdclient.Status{})
+	got := a.trackInfo.identity.GetText(true)
 	if !strings.Contains(got, "track.mp3") {
 		t.Errorf("render(untagged Song) text = %q, want it to contain the filename %q", got, "track.mp3")
 	}
 }
+
+// --- Audio quality line ---
+
+func TestTrackInfoCardRenderShowsAudioQuality(t *testing.T) {
+	a := newTestApp()
+	song := mpdclient.Song{Title: "Track", Artist: "Artist"}
+	st := mpdclient.Status{Bitrate: 128, AudioFormat: "44100:16:2"}
+	a.trackInfo.render(song, st)
+	got := a.trackInfo.identity.GetText(true)
+	if !strings.Contains(got, "128kbps 44.1kHz/16-bit/2ch") {
+		t.Errorf("render(...) text = %q, want it to contain the audio quality line", got)
+	}
+}
+
+func TestTrackInfoCardRenderAudioQualityBlankWhenUnknown(t *testing.T) {
+	a := newTestApp()
+	song := mpdclient.Song{Title: "Track", Artist: "Artist"}
+	a.trackInfo.render(song, mpdclient.Status{}) // stopped: no bitrate/audio format
+	got := a.trackInfo.identity.GetText(true)
+	if !strings.Contains(got, "🎚️") {
+		t.Errorf("render(...) text = %q, want the audio quality line (icon) present even with a blank value", got)
+	}
+}
+
+// --- Lyrics tick line ---
+
+func TestTrackInfoCardRenderOmitsLyricsLineWithoutMusicDir(t *testing.T) {
+	a := newTestApp() // musicDir == ""
+	a.trackInfo.render(mpdclient.Song{Title: "Track", Artist: "Artist", File: "artist/track.mp3"}, mpdclient.Status{})
+	got := a.trackInfo.identity.GetText(false)
+	if strings.Contains(got, "📝") {
+		t.Errorf("render(...) with no musicDir configured = %q, want the lyrics line omitted entirely", got)
+	}
+}
+
+func TestTrackInfoCardRenderLyricsTickPresent(t *testing.T) {
+	dir := t.TempDir()
+	trackDir := filepath.Join(dir, "artist")
+	if err := os.MkdirAll(trackDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(trackDir, "Track.txt"), []byte("la la la"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	a := newTestAppWithMusicDir(dir)
+	a.trackInfo.render(mpdclient.Song{Title: "Track", Artist: "Artist", File: "artist/Track.mp3"}, mpdclient.Status{})
+	got := a.trackInfo.identity.GetText(true)
+	if !strings.Contains(got, lyricsTick) {
+		t.Errorf("render(...) with a matching lyrics file = %q, want the tick glyph present", got)
+	}
+}
+
+func TestTrackInfoCardRenderLyricsTickAbsentWhenNoMatch(t *testing.T) {
+	a := newTestAppWithMusicDir(t.TempDir())
+	a.trackInfo.render(mpdclient.Song{Title: "Track", Artist: "Artist", File: "artist/Track.mp3"}, mpdclient.Status{})
+	got := a.trackInfo.identity.GetText(true)
+	if strings.Contains(got, lyricsTick) {
+		t.Errorf("render(...) with no matching lyrics = %q, want no tick glyph", got)
+	}
+	if !strings.Contains(got, "📝") {
+		t.Errorf("render(...) = %q, want the lyrics line's icon still present (just no tick)", got)
+	}
+}
+
+// --- Metadata table: presence gated on metaDB ---
+
+func TestTrackInfoCardMetaTableNilWithoutMetaDB(t *testing.T) {
+	a := newTestApp()
+	if a.trackInfo.meta != nil {
+		t.Error("trackInfo.meta should be nil when metaDB is inactive")
+	}
+}
+
+func TestTrackInfoCardMetaTableBuiltWithMetaDB(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	if a.trackInfo.meta == nil {
+		t.Fatal("trackInfo.meta should be non-nil when metaDB is active")
+	}
+}
+
+func metaCellText(a *App, row, col int) string {
+	return a.trackInfo.meta.GetCell(row, col).Text
+}
+
+func TestTrackInfoCardRenderMetaShowsZeroOpinionPlaceholders(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.trackInfo.render(mpdclient.Song{Title: "Track", File: "artist/track.mp3"}, mpdclient.Status{})
+
+	if got := metaCellText(a, 0, 1); got != ratingStars(0) {
+		t.Errorf("Rating cell = %q, want %q (all-empty stars)", got, ratingStars(0))
+	}
+	if got := metaCellText(a, 1, 1); got != "0" {
+		t.Errorf("Plays cell = %q, want %q", got, "0")
+	}
+	if got := metaCellText(a, 2, 1); got != "-" {
+		t.Errorf("Mark cell = %q, want %q (unmarked placeholder)", got, "-")
+	}
+	if got := metaCellText(a, 3, 1); got != "-" {
+		t.Errorf("Tags cell = %q, want %q (no tags placeholder)", got, "-")
+	}
+}
+
+func TestTrackInfoCardRenderMetaShowsRealValues(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	file := "artist/track.mp3"
+
+	if err := a.metaDB.Rate(file, 4); err != nil {
+		t.Fatalf("Rate: %v", err)
+	}
+	if err := a.metaDB.IncrementPlayCount(file); err != nil {
+		t.Fatalf("IncrementPlayCount: %v", err)
+	}
+	if err := a.metaDB.IncrementPlayCount(file); err != nil {
+		t.Fatalf("IncrementPlayCount: %v", err)
+	}
+	markID := int64(1) // seeded "mark for deletion"
+	if err := a.metaDB.SetMark(file, &markID); err != nil {
+		t.Fatalf("SetMark: %v", err)
+	}
+	if err := a.metaDB.SetTags(file, []int64{1, 2}); err != nil { // seeded bengali, hindi
+		t.Fatalf("SetTags: %v", err)
+	}
+
+	a.trackInfo.render(mpdclient.Song{Title: "Track", File: file}, mpdclient.Status{})
+
+	if got := metaCellText(a, 0, 1); got != ratingStars(4) {
+		t.Errorf("Rating cell = %q, want %q", got, ratingStars(4))
+	}
+	if got := metaCellText(a, 1, 1); got != "2" {
+		t.Errorf("Plays cell = %q, want %q", got, "2")
+	}
+	if got := metaCellText(a, 2, 1); got != "mark for deletion" {
+		t.Errorf("Mark cell = %q, want %q", got, "mark for deletion")
+	}
+	if got := metaCellText(a, 3, 1); got != "bengali, hindi" {
+		t.Errorf("Tags cell = %q, want %q", got, "bengali, hindi")
+	}
+}
+
+func TestTrackInfoCardRenderMetaClearedWhenNothingPlaying(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.trackInfo.render(mpdclient.Song{Title: "Track", File: "artist/track.mp3"}, mpdclient.Status{})
+	if got := metaCellText(a, 1, 1); got != "0" {
+		t.Fatalf("setup: Plays cell = %q, want %q", got, "0")
+	}
+
+	a.trackInfo.render(mpdclient.Song{}, mpdclient.Status{}) // nothing playing
+	if got := a.trackInfo.meta.GetRowCount(); got != 0 {
+		t.Errorf("meta table row count with nothing playing = %d, want 0 (cleared)", got)
+	}
+}
+
+// --- Positioning/overlay behavior (unaffected by the metadata addition) ---
 
 func TestOpenTrackInfoTakesFocusAndPositionsInBottomRightQuadrant(t *testing.T) {
 	a := newTestApp()
@@ -102,8 +265,9 @@ func TestOpenTrackInfoTakesFocusAndPositionsInBottomRightQuadrant(t *testing.T) 
 	// than Draw itself, which needs a real tcell.Screen to paint into.
 	a.trackInfo.positionOverQueue()
 	x, y, w, h := a.trackInfo.GetRect()
-	if x != 50 || y != 30 || w != 25 || h != 15 {
-		t.Errorf("card rect after Draw = (%d,%d,%d,%d), want (50,30,25,15) -- half the quadrant, floating at its top-left corner", x, y, w, h)
+	if x != 50 || y != 30 || w != trackInfoCardWidth || h != trackInfoCardHeight {
+		t.Errorf("card rect after Draw = (%d,%d,%d,%d), want (50,30,%d,%d) -- fixed compact size, floating at the quadrant's top-left corner",
+			x, y, w, h, trackInfoCardWidth, trackInfoCardHeight)
 	}
 }
 
@@ -182,15 +346,15 @@ func TestOpenTrackInfoEscRestoresOriginalFocus(t *testing.T) {
 
 func TestRefreshNowPlayingUpdatesTrackInfoLive(t *testing.T) {
 	a := newTestApp()
-	a.trackInfo.render(mpdclient.Song{Title: "Old Track", Artist: "Old Artist"})
-	if got := a.trackInfo.GetText(true); !strings.Contains(got, "Old Track") {
+	a.trackInfo.render(mpdclient.Song{Title: "Old Track", Artist: "Old Artist"}, mpdclient.Status{})
+	if got := a.trackInfo.identity.GetText(true); !strings.Contains(got, "Old Track") {
 		t.Fatalf("setup: expected initial render to contain %q, got %q", "Old Track", got)
 	}
 
 	// refreshNowPlaying itself needs a live client; exercise the same
 	// call it makes so this stays a pure/no-MPD test.
-	a.trackInfo.render(mpdclient.Song{Title: "New Track", Artist: "New Artist"})
-	got := a.trackInfo.GetText(true)
+	a.trackInfo.render(mpdclient.Song{Title: "New Track", Artist: "New Artist"}, mpdclient.Status{})
+	got := a.trackInfo.identity.GetText(true)
 	if strings.Contains(got, "Old Track") {
 		t.Errorf("card still shows the old track after re-render: %q", got)
 	}

@@ -140,3 +140,26 @@ func TestTrackFormat(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatAudioQuality(t *testing.T) {
+	cases := []struct {
+		name        string
+		bitrate     int
+		audioFormat string
+		want        string
+	}{
+		{"full CD quality", 128, "44100:16:2", "128kbps 44.1kHz/16-bit/2ch"},
+		{"exact-kHz sample rate", 320, "48000:24:2", "320kbps 48kHz/24-bit/2ch"},
+		{"floating point bit depth", 1411, "192000:f:2", "1411kbps 192kHz/float/2ch"},
+		{"mono", 96, "22050:8:1", "96kbps 22.05kHz/8-bit/1ch"},
+		{"bitrate unknown (still settling)", 0, "44100:16:2", "44.1kHz/16-bit/2ch"},
+		{"audio format unknown (not yet reported)", 128, "", "128kbps"},
+		{"nothing known", 0, "", ""},
+		{"malformed audio format", 128, "not-a-triplet", "128kbps"},
+	}
+	for _, tc := range cases {
+		if got := ui.FormatAudioQuality(tc.bitrate, tc.audioFormat); got != tc.want {
+			t.Errorf("%s: FormatAudioQuality(%d, %q) = %q, want %q", tc.name, tc.bitrate, tc.audioFormat, got, tc.want)
+		}
+	}
+}

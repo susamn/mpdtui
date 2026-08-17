@@ -163,6 +163,62 @@ func TrackFormat(file string) string {
 	return strings.ToUpper(file[i+1:])
 }
 
+// FormatAudioQuality renders MPD's live audio quality as e.g. "128kbps
+// 44.1kHz/16-bit/2ch" -- audioFormat is Status.AudioFormat, MPD's raw
+// "samplerate:bits:channels" status field (bits is "f" for floating
+// point). Either half can be missing on its own (MPD only reports
+// bitrate/audio at all once a decoder is active, and a variable-bitrate
+// stream's bitrate can still take a moment to settle) -- each renders
+// only what it actually has rather than an all-or-nothing blank, so
+// "128kbps" alone or "44.1kHz/16-bit/2ch" alone are both valid results,
+// not just the combination.
+func FormatAudioQuality(bitrate int, audioFormat string) string {
+	var segs []string
+	if bitrate > 0 {
+		segs = append(segs, strconv.Itoa(bitrate)+"kbps")
+	}
+	if triplet := formatAudioFormatTriplet(audioFormat); triplet != "" {
+		segs = append(segs, triplet)
+	}
+	return strings.Join(segs, " ")
+}
+
+// formatAudioFormatTriplet renders "samplerate:bits:channels" as
+// "44.1kHz/16-bit/2ch", tolerating a partially-known triplet (each
+// segment renders only if MPD actually reported it) but not a malformed
+// one (any shape other than exactly 3 colon-separated fields renders as
+// "", since there's nothing sensible to show for it).
+func formatAudioFormatTriplet(audioFormat string) string {
+	parts := strings.SplitN(audioFormat, ":", 3)
+	if len(parts) != 3 {
+		return ""
+	}
+	var segs []string
+	if hz, err := strconv.Atoi(parts[0]); err == nil && hz > 0 {
+		segs = append(segs, formatSampleRate(hz))
+	}
+	if parts[1] != "" {
+		bits := parts[1] + "-bit"
+		if parts[1] == "f" {
+			bits = "float"
+		}
+		segs = append(segs, bits)
+	}
+	if parts[2] != "" {
+		segs = append(segs, parts[2]+"ch")
+	}
+	return strings.Join(segs, "/")
+}
+
+// formatSampleRate renders hz in kHz, trimming a trailing ".0" for exact
+// multiples of 1000 (48000 -> "48kHz") but keeping one decimal place
+// otherwise (44100 -> "44.1kHz") -- strconv.FormatFloat's -1 precision
+// already picks the shortest exact representation, so this needs no
+// explicit rounding.
+func formatSampleRate(hz int) string {
+	return strconv.FormatFloat(float64(hz)/1000, 'f', -1, 64) + "kHz"
+}
+
 // yearFromDate extracts just the year from MPD's "Date" tag, which is
 // often already just a year ("1992") but sometimes a full date
 // ("1992-05-15") -- takes the first 4 characters either way, so a Year
