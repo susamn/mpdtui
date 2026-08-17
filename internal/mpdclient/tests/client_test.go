@@ -38,6 +38,30 @@ func TestStatusAndCurrentSong(t *testing.T) {
 	}
 }
 
+// TestStatusBitrateAndAudioFormatWhilePlaying is read-only (never starts
+// or changes playback itself) -- skips rather than queueing/playing
+// something of its own, so it only ever observes whatever the live server
+// was already doing. MPD only reports "bitrate"/"audio" while a decoder
+// is actually active (play or pause), so this only asserts the shape of
+// AudioFormat, not any specific value.
+func TestStatusBitrateAndAudioFormatWhilePlaying(t *testing.T) {
+	c := dialOrSkip(t)
+
+	st, err := c.Status()
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if st.State != mpdclient.StatePlay && st.State != mpdclient.StatePause {
+		t.Skip("nothing currently playing/paused -- MPD only reports bitrate/audio format with an active decoder")
+	}
+	if st.AudioFormat == "" {
+		t.Error("AudioFormat is empty while a decoder is active, want MPD's \"samplerate:bits:channels\"")
+	}
+	if parts := strings.Split(st.AudioFormat, ":"); len(parts) != 3 {
+		t.Errorf("AudioFormat = %q, want 3 colon-separated fields (samplerate:bits:channels)", st.AudioFormat)
+	}
+}
+
 func TestQueueRoundTrip(t *testing.T) {
 	c := dialOrSkip(t)
 

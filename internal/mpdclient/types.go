@@ -26,8 +26,10 @@ type Status struct {
 	Consume        bool
 	Elapsed        time.Duration
 	Duration       time.Duration
-	SongID         int // currently playing/selected queue song id, -1 if none
-	PlaylistLength int // number of tracks in the queue
+	SongID         int    // currently playing/selected queue song id, -1 if none
+	PlaylistLength int    // number of tracks in the queue
+	Bitrate        int    // kbps, 0 if unknown (e.g. stopped, or just started)
+	AudioFormat    string // MPD's raw "samplerate:bits:channels" (e.g. "44100:16:2"; bits is "f" for floating point), "" if unknown
 }
 
 // Song is a single track, either from the queue, the library, or a
@@ -92,6 +94,7 @@ func parseStatus(a mpd.Attrs) Status {
 	elapsed, _ := strconv.ParseFloat(a["elapsed"], 64)
 	dur, _ := strconv.ParseFloat(a["duration"], 64)
 	playlistLength, _ := strconv.Atoi(a["playlistlength"])
+	bitrate, _ := strconv.Atoi(a["bitrate"])
 
 	return Status{
 		State:          State(a["state"]),
@@ -104,6 +107,8 @@ func parseStatus(a mpd.Attrs) Status {
 		Duration:       time.Duration(dur * float64(time.Second)),
 		SongID:         songID,
 		PlaylistLength: playlistLength,
+		Bitrate:        bitrate,
+		AudioFormat:    a["audio"],
 	}
 }
 

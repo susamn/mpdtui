@@ -506,6 +506,19 @@ var markTickColors = []tcell.Color{
 	tcell.ColorLime,
 }
 
+// markColor picks mark's deterministic color from markTickColors by id --
+// split out from markCell so trackInfoCard's metadata table (which shows
+// a mark reason's full text, not just a tick) can color it the same way,
+// and a given reason reads as the same color everywhere it appears.
+// Callers are expected to have already checked mark != nil; a nil mark
+// here just falls back to markTickColors[0] rather than panicking.
+func markColor(mark *metadata.MarkReason) tcell.Color {
+	if mark == nil || mark.ID < 1 {
+		return markTickColors[0]
+	}
+	return markTickColors[(mark.ID-1)%int64(len(markTickColors))]
+}
+
 // markCell renders a queue row's Mark column: blank if mark is nil
 // (unmarked -- the sensible default for a track with no opinion
 // recorded yet, same as Rating's all-empty stars), otherwise
@@ -514,12 +527,8 @@ func markCell(mark *metadata.MarkReason) *tview.TableCell {
 	if mark == nil {
 		return tview.NewTableCell(queueColumnGap).SetAlign(tview.AlignRight)
 	}
-	color := markTickColors[0]
-	if mark.ID >= 1 {
-		color = markTickColors[(mark.ID-1)%int64(len(markTickColors))]
-	}
 	return tview.NewTableCell(queueMarkTick + queueColumnGap).
-		SetTextColor(color).
+		SetTextColor(markColor(mark)).
 		SetAlign(tview.AlignRight)
 }
 
