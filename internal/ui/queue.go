@@ -566,9 +566,13 @@ func (q *queuePanel) lyricsPresence(file string, lrcDirs, txtDirs map[string]map
 
 // lyricsCellText builds the Queue Lyr column's cell content from which
 // formats are present: a single colored tick for just one format, two
-// space-separated colored ticks (green LRC, orange TXT, in that order)
-// when both exist, or "" for neither. Uses embedded tview color tags
-// rather than TableCell.SetTextColor, since a cell can carry only one
+// adjacent colored ticks -- no gap between them, explicit "overlap"
+// request, the closest a character-grid terminal can get to that (tcell
+// renders one rune per cell, each with its own single color -- there's
+// no way to actually blend two colors within one cell the way a
+// graphical UI could) -- (green LRC, orange TXT, in that order) when
+// both exist, or "" for neither. Uses embedded tview color tags rather
+// than TableCell.SetTextColor, since a cell can carry only one
 // SetTextColor for its whole text but needs two different colors here.
 func lyricsCellText(hasLRC, hasTxt bool) string {
 	var ticks []string
@@ -578,7 +582,7 @@ func lyricsCellText(hasLRC, hasTxt bool) string {
 	if hasTxt {
 		ticks = append(ticks, fmt.Sprintf("[%s]%s[-]", lyricsTxtColor, lyricsTick))
 	}
-	return strings.Join(ticks, " ")
+	return strings.Join(ticks, "")
 }
 
 // truncateWithEllipsis returns s unchanged if it's at most max runes,

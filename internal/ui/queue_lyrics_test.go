@@ -128,7 +128,7 @@ func TestLyricsCellTextTxtOnly(t *testing.T) {
 
 func TestLyricsCellTextBothFormats(t *testing.T) {
 	got := lyricsCellText(true, true)
-	want := lrcTickText() + " " + txtTickText()
+	want := lrcTickText() + txtTickText()
 	if got != want {
 		t.Errorf("lyricsCellText(true, true) = %q, want %q (LRC tick, then TXT tick)", got, want)
 	}
@@ -191,7 +191,7 @@ func TestQueueRenderShowsBothTicksWhenBothFormatsPresent(t *testing.T) {
 	lyrCol := newQueueColumns(true, false).lyr
 
 	got := a.queue.table.GetCell(queueHeaderRows, lyrCol).Text
-	want := lrcTickText() + " " + txtTickText()
+	want := lrcTickText() + txtTickText()
 	if got != want {
 		t.Errorf("Lyr cell with both .lrc and .txt present = %q, want %q", got, want)
 	}

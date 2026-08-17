@@ -226,8 +226,8 @@ const helpText = `[::b]Global[-:-:-]
                  controls still work while it's open
   The narrow "Lyr" column shows a colored tick per lyrics format the
   track has a matching sidecar for (see 'y'): green for synced (.lrc),
-  orange for plain (.txt), both together if both exist -- rechecked live
-  every time the Queue repopulates. Only shown at all when music_dir is
-  configured and exists -- otherwise the Queue looks the same as without
-  this feature
+  orange for plain (.txt), both adjacent (no gap) if both exist --
+  rechecked live every time the Queue repopulates. Only shown at all
+  when music_dir is configured and exists -- otherwise the Queue looks
+  the same as without this feature
 `

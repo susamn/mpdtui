@@ -74,10 +74,10 @@ single-line inline player for a shell or tmux pane.
   color-coded format badge (MP3/FLAC/M4A/...); Type and Duration are
   right-aligned. A narrow Lyr column, right after Title, shows a colored
   tick per lyrics format found for the track -- green for synced (`.lrc`),
-  orange for plain (`.txt`), both together if both exist -- only present
-  at all when `music_dir` is configured and actually exists; otherwise
-  the Queue looks exactly as it would without the lyrics feature -- see
-  [Lyrics](#lyrics)
+  orange for plain (`.txt`), both adjacent (no gap) if both exist -- only
+  present at all when `music_dir` is configured and actually exists;
+  otherwise the Queue looks exactly as it would without the lyrics
+  feature -- see [Lyrics](#lyrics)
 - **Lyrics** (`y`) — a viewer (bordered the same green as a focused
   panel, muted-yellow text), positioned over the Queue's own
   Year-through-Type columns, for the currently playing track's lyrics,
@@ -278,7 +278,9 @@ have your preferred format. A future word-level/enhanced-LRC format
 
 Which format(s) exist for a track is also visible without opening the
 viewer at all: the Queue's Lyr column shows a green tick for `.lrc`, an
-orange tick for `.txt` (both together if both exist), and the track info
+orange tick for `.txt` (both adjacent, no gap, if both exist -- a
+terminal can't blend the two colors into one glyph, so this is the
+closest a character grid gets to "overlapping"), and the track info
 card (`i`) shows the same colors as text -- "LRC" and/or "TXT" -- right
 next to the rest of the track's details.
 
