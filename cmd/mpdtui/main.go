@@ -35,8 +35,18 @@ func main() {
 	}
 	defer client.Close()
 
+	// Only opened for the modes that actually use it (miniMode and the
+	// default full UI) -- picker.Run*Picker and lyricsline.Print don't
+	// take a metaDB at all, so opening it for them was pure waste. That
+	// waste turned into real contention once -lyrics-line started being
+	// polled every second by an external tool (e.g. conky, one process
+	// per line it prints): four concurrent short-lived processes each
+	// opening the same sqlite file produced a steady stream of
+	// "database is locked" (SQLITE_BUSY) warnings on stderr, even though
+	// none of them needed the database in the first place.
+	fullUIMode := !*miniMode && !*playlistPicker && !*trackPicker && !*lyricsLine
 	var metaDB *metadata.DB
-	if config.LoadTrackMetadataEnabled() {
+	if (*miniMode || fullUIMode) && config.LoadTrackMetadataEnabled() {
 		metaDB, err = metadata.Open(config.DBFile())
 		if err != nil {
 			// Non-fatal, unlike the MPD connection above: this is an
