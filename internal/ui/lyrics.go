@@ -198,6 +198,13 @@ func newLyricsViewer(app *App) *lyricsViewer {
 	return lv
 }
 
+// lyricsViewerTopMargin is how many of the Queue table's own data rows
+// stay visible above the viewer, between the header row and the viewer's
+// own top border -- without this gap the viewer's top border sits flush
+// against the header row's own bottom edge and is hard to make out as a
+// distinct border rather than more table decoration.
+const lyricsViewerTopMargin = 1
+
 // lyricsViewerBottomMargin is how many of the Queue table's own data rows
 // stay visible below the viewer (in addition to the table's own bottom
 // border row, which is never covered either way) -- so it visibly floats
@@ -213,25 +220,59 @@ const lyricsViewerBottomMargin = 2
 // Horizontally: from yearX up to (not including) durationX.
 //
 // Vertically: queueY itself is the table's own top border row, queueY+1
-// is the header row, so the first actual data row -- where the viewer
-// starts, leaving the header row visible above it -- is
-// queueY+1+queueHeaderRows. It stops lyricsViewerBottomMargin data rows
-// before the table's own bottom border row (at queueY+queueHeight-1),
-// which itself is also never covered.
+// is the header row, so the first data row is queueY+1+queueHeaderRows --
+// the viewer starts lyricsViewerTopMargin data rows below that, leaving
+// both the header row and a visible gap above its own top border. It
+// stops lyricsViewerBottomMargin data rows before the table's own bottom
+// border row (at queueY+queueHeight-1), which itself is also never
+// covered.
 //
 // Split out as a pure function -- no tview.Table involved -- so the
 // positioning math is testable without a real tcell.Screen, mirroring
 // trackInfoCard's own quadrantRect/cardRect split from
 // positionOverQueue/Draw. Clamps height to 0 rather than negative for a
 // pathologically short Queue table (smaller than its own two border rows
-// plus the header row plus the margin).
+// plus the header row plus both margins).
 func lyricsViewerRect(queueY, queueHeight, yearX, durationX int) (x, y, width, height int) {
-	top := queueY + 1 + queueHeaderRows
-	height = queueHeight - queueHeaderRows - lyricsViewerBottomMargin - 2
+	top := queueY + 1 + queueHeaderRows + lyricsViewerTopMargin
+	height = queueHeight - queueHeaderRows - lyricsViewerTopMargin - lyricsViewerBottomMargin - 2
 	if height < 0 {
 		height = 0
 	}
 	return yearX, top, durationX - yearX, height
+}
+
+// resolveLyricsViewerColumnBounds validates the Year and Duration columns'
+// actual last-drawn x positions (see positionOverQueueColumns) against the
+// Queue table's own current rect (qx, qw -- GetRect()), falling back to
+// the table's own left/right edges when a boundary looks like it wasn't
+// really painted on screen this frame.
+//
+// tview.TableCell.GetLastPosition() is documented as "the return values
+// are undefined" for a cell that isn't currently on screen -- which
+// happens for Duration (and, on a narrow enough terminal, even Year) once
+// the Queue table's own columns overflow and that column isn't actually
+// drawn this frame (tview.Table.Draw only assigns cell.x/y/width to
+// columns that fit; anything past that keeps whatever it last held,
+// stale from a wider frame, or the zero value if never drawn at all). In
+// practice both of those land outside [qx, qx+qw], which a column that's
+// genuinely on screen this frame never does -- so that's the check used
+// to catch it, rather than trying to special-case stale-vs-zero.
+//
+// Falling back to the table's own edges keeps the viewer visible with a
+// sane width (matching the Queue table's own current rect) instead of
+// silently collapsing to a zero/negative-width, invisible rect.
+//
+// Split out as a pure function -- no tview.Table involved -- for the same
+// reason lyricsViewerRect is: testable without a real tcell.Screen.
+func resolveLyricsViewerColumnBounds(qx, qw, yearX, durationX int) (int, int) {
+	if yearX < qx || yearX > qx+qw {
+		yearX = qx
+	}
+	if durationX < qx || durationX > qx+qw || durationX <= yearX {
+		durationX = qx + qw
+	}
+	return yearX, durationX
 }
 
 // positionOverQueueColumns sets the viewer's rect to span horizontally
@@ -243,7 +284,10 @@ func lyricsViewerRect(queueY, queueHeight, yearX, durationX int) (x, y, width, h
 // those exist, e.g. queueTitleMaxLen): those are truncation caps, not a
 // column's real rendered width, which tview.Table sizes to fit whatever's
 // actually in the queue and shrinks below the cap for shorter content --
-// an estimate would drift out of sync with the real layout.
+// an estimate would drift out of sync with the real layout. Those
+// positions are then validated against the Queue table's own rect (see
+// resolveLyricsViewerColumnBounds) since a narrow enough terminal can
+// leave one of them stale or zero.
 //
 // The column indices themselves come from queue.go's newQueueColumns,
 // the same function render() uses to lay out the table in the first
@@ -261,10 +305,11 @@ func lyricsViewerRect(queueY, queueHeight, yearX, durationX int) (x, y, width, h
 // time this runs the header row's cells reflect this exact frame's
 // layout, not a stale one.
 func (v *lyricsViewer) positionOverQueueColumns() {
-	_, qy, _, qh := v.app.queue.table.GetRect()
+	qx, qy, qw, qh := v.app.queue.table.GetRect()
 	cols := newQueueColumns(v.app.musicDir != "", v.app.metaDB != nil)
 	yearX, _, _ := v.app.queue.table.GetCell(0, cols.year).GetLastPosition()
 	durationX, _, _ := v.app.queue.table.GetCell(0, cols.duration).GetLastPosition()
+	yearX, durationX = resolveLyricsViewerColumnBounds(qx, qw, yearX, durationX)
 	v.SetRect(lyricsViewerRect(qy, qh, yearX, durationX))
 }
 

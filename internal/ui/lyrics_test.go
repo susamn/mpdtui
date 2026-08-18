@@ -21,16 +21,16 @@ func TestLyricsViewerRectSpansYearThroughTypeColumns(t *testing.T) {
 		wantX, wantY, wantW, wantH            int
 	}{
 		// y = queueY + 1 (the table's own top border row) + 1
-		// (queueHeaderRows), landing on the first data row, past the
-		// header. height = queueHeight - queueHeaderRows -
-		// lyricsViewerBottomMargin (2) - 2 (both the table's own border
-		// rows), so it stops lyricsViewerBottomMargin data rows short of
-		// the table's own bottom border: 30 - 1 - 2 - 2 = 25.
-		{5, 30, 60, 90, 60, 7, 30, 25},
+		// (queueHeaderRows) + 1 (lyricsViewerTopMargin), landing one data
+		// row past the header, leaving a visible gap above the viewer's
+		// own top border. height = queueHeight - queueHeaderRows -
+		// lyricsViewerTopMargin (1) - lyricsViewerBottomMargin (2) - 2
+		// (both the table's own border rows): 30 - 1 - 1 - 2 - 2 = 24.
+		{5, 30, 60, 90, 60, 8, 30, 24},
 		// A pathologically short queueHeight (shorter than just the two
-		// border rows + header row + margin) clamps height to 0 rather
-		// than negative.
-		{0, 0, 0, 0, 0, 2, 0, 0},
+		// border rows + header row + both margins) clamps height to 0
+		// rather than negative.
+		{0, 0, 0, 0, 0, 3, 0, 0},
 	}
 	for _, tc := range cases {
 		gotX, gotY, gotW, gotH := lyricsViewerRect(tc.queueY, tc.queueHeight, tc.yearX, tc.durationX)
@@ -38,6 +38,59 @@ func TestLyricsViewerRectSpansYearThroughTypeColumns(t *testing.T) {
 			t.Errorf("lyricsViewerRect(%d,%d,%d,%d) = (%d,%d,%d,%d), want (%d,%d,%d,%d)",
 				tc.queueY, tc.queueHeight, tc.yearX, tc.durationX, gotX, gotY, gotW, gotH, tc.wantX, tc.wantY, tc.wantW, tc.wantH)
 		}
+	}
+}
+
+// TestResolveLyricsViewerColumnBoundsFallsBackWhenColumnsOffscreen covers
+// the narrow-terminal bug: when the Queue table's own columns overflow
+// and Duration (or even Year) isn't actually painted this frame,
+// GetLastPosition() returns a stale or zero x -- previously fed straight
+// into lyricsViewerRect, producing a zero/negative-width, invisible
+// viewer. resolveLyricsViewerColumnBounds must catch that and fall back
+// to the Queue table's own edges instead.
+func TestResolveLyricsViewerColumnBoundsFallsBackWhenColumnsOffscreen(t *testing.T) {
+	const qx, qw = 10, 100 // Queue table spans x in [10, 110]
+	cases := []struct {
+		name                string
+		yearX, durationX    int
+		wantYearX, wantDurX int
+	}{
+		{"both on screen, unchanged", 20, 90, 20, 90},
+		{
+			"durationX zero (never drawn, e.g. right after startup)",
+			20, 0,
+			20, qx + qw,
+		},
+		{
+			"durationX stale from a wider frame, now past the table's right edge",
+			20, 500,
+			20, qx + qw,
+		},
+		{
+			"durationX before yearX (nonsensical, however it happened)",
+			60, 30,
+			60, qx + qw,
+		},
+		{
+			"yearX itself offscreen too (even more extreme overflow)",
+			0, 0,
+			qx, qx + qw,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotYearX, gotDurX := resolveLyricsViewerColumnBounds(qx, qw, tc.yearX, tc.durationX)
+			if gotYearX != tc.wantYearX || gotDurX != tc.wantDurX {
+				t.Errorf("resolveLyricsViewerColumnBounds(%d,%d,%d,%d) = (%d,%d), want (%d,%d)",
+					qx, qw, tc.yearX, tc.durationX, gotYearX, gotDurX, tc.wantYearX, tc.wantDurX)
+			}
+			// Whatever comes out must always describe a non-negative-width
+			// band -- the entire point of the fallback.
+			if gotDurX < gotYearX {
+				t.Errorf("resolveLyricsViewerColumnBounds(%d,%d,%d,%d) = (%d,%d), durationX < yearX would give lyricsViewerRect a negative width",
+					qx, qw, tc.yearX, tc.durationX, gotYearX, gotDurX)
+			}
+		})
 	}
 }
 
