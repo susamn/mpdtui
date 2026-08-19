@@ -101,3 +101,50 @@ func TestPrintAlwaysWritesExactlyWindowSizeLines(t *testing.T) {
 		t.Errorf("Print wrote %d lines (%q), want exactly %d", got, buf.String(), windowSize)
 	}
 }
+
+// TestPrintWithoutMusicDirPutsNoSyncedLyricsOnCurrentLineOnly covers the
+// no-.lrc case (guaranteed deterministically here by leaving musicDir
+// unset, same trick as the test above): the message lands only on the
+// current-line slot (line linesAbove+1 in 1-indexed output), every other
+// slot stays blank -- still exactly windowSize lines, not collapsed to
+// just the message, so an external tool reading any other line number
+// never gets nothing.
+func TestPrintWithoutMusicDirPutsNoSyncedLyricsOnCurrentLineOnly(t *testing.T) {
+	c := dialOrSkip(t)
+	var buf bytes.Buffer
+	if err := Print(c, "", &buf); err != nil {
+		t.Fatalf("Print: %v", err)
+	}
+	var want [windowSize]string
+	want[linesAbove] = noSyncedLyrics
+	if got := buf.String(); got != strings.Join(want[:], "\n")+"\n" {
+		t.Errorf("Print wrote %q, want %q", got, strings.Join(want[:], "\n")+"\n")
+	}
+}
+
+// TestPrintExactAlwaysWritesExactlyOneLine is PrintExact's own
+// fixed-line-count contract -- always exactly 1 line, whatever MPD's
+// state. Same offline-safe musicDir="" trick as the Print tests above.
+func TestPrintExactAlwaysWritesExactlyOneLine(t *testing.T) {
+	c := dialOrSkip(t)
+	var buf bytes.Buffer
+	if err := PrintExact(c, "", &buf); err != nil {
+		t.Fatalf("PrintExact: %v", err)
+	}
+	if got := strings.Count(buf.String(), "\n"); got != 1 {
+		t.Errorf("PrintExact wrote %d lines (%q), want exactly 1", got, buf.String())
+	}
+}
+
+// TestPrintExactWithoutMusicDirWritesNoSyncedLyrics covers PrintExact's
+// no-.lrc case (deterministic via musicDir="", same as Print's).
+func TestPrintExactWithoutMusicDirWritesNoSyncedLyrics(t *testing.T) {
+	c := dialOrSkip(t)
+	var buf bytes.Buffer
+	if err := PrintExact(c, "", &buf); err != nil {
+		t.Fatalf("PrintExact: %v", err)
+	}
+	if got := strings.TrimRight(buf.String(), "\n"); got != noSyncedLyrics {
+		t.Errorf("PrintExact wrote %q, want %q", got, noSyncedLyrics)
+	}
+}

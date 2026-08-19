@@ -20,10 +20,11 @@ func main() {
 	playlistPicker := flag.Bool("p", false, "fuzzy-search playlists; Enter clears the queue and plays the selection")
 	trackPicker := flag.Bool("t", false, "fuzzy-search tracks; Enter adds the selection to the queue and plays it")
 	lyricsLine := flag.Bool("lyrics-line", false, "print the current synced (.lrc) lyrics window (1 line above, the current line, 2 lines below) and exit -- for embedding in an external tool like conky")
+	lyricsLineExact := flag.Bool("lyrics-line-exact", false, "print only the current synced (.lrc) lyrics line, no above/below context, and exit -- for embedding in an external tool like conky")
 	flag.Parse()
 
-	if modeCount(*miniMode, *playlistPicker, *trackPicker, *lyricsLine) > 1 {
-		fmt.Fprintln(os.Stderr, "mpdtui: -mini, -p, -t, and -lyrics-line are mutually exclusive")
+	if modeCount(*miniMode, *playlistPicker, *trackPicker, *lyricsLine, *lyricsLineExact) > 1 {
+		fmt.Fprintln(os.Stderr, "mpdtui: -mini, -p, -t, -lyrics-line, and -lyrics-line-exact are mutually exclusive")
 		os.Exit(1)
 	}
 
@@ -36,15 +37,16 @@ func main() {
 	defer client.Close()
 
 	// Only opened for the modes that actually use it (miniMode and the
-	// default full UI) -- picker.Run*Picker and lyricsline.Print don't
-	// take a metaDB at all, so opening it for them was pure waste. That
-	// waste turned into real contention once -lyrics-line started being
-	// polled every second by an external tool (e.g. conky, one process
-	// per line it prints): four concurrent short-lived processes each
-	// opening the same sqlite file produced a steady stream of
-	// "database is locked" (SQLITE_BUSY) warnings on stderr, even though
-	// none of them needed the database in the first place.
-	fullUIMode := !*miniMode && !*playlistPicker && !*trackPicker && !*lyricsLine
+	// default full UI) -- picker.Run*Picker and lyricsline.Print/
+	// PrintExact don't take a metaDB at all, so opening it for them was
+	// pure waste. That waste turned into real contention once
+	// -lyrics-line started being polled every second by an external tool
+	// (e.g. conky, one process per line it prints): four concurrent
+	// short-lived processes each opening the same sqlite file produced a
+	// steady stream of "database is locked" (SQLITE_BUSY) warnings on
+	// stderr, even though none of them needed the database in the first
+	// place.
+	fullUIMode := !*miniMode && !*playlistPicker && !*trackPicker && !*lyricsLine && !*lyricsLineExact
 	var metaDB *metadata.DB
 	if (*miniMode || fullUIMode) && config.LoadTrackMetadataEnabled() {
 		metaDB, err = metadata.Open(config.DBFile())
@@ -69,6 +71,8 @@ func main() {
 		err = mini.Run(client, metaDB)
 	case *lyricsLine:
 		err = lyricsline.Print(client, config.LoadMusicDir(), os.Stdout)
+	case *lyricsLineExact:
+		err = lyricsline.PrintExact(client, config.LoadMusicDir(), os.Stdout)
 	default:
 		summary := ui.ConfigSummary{
 			MPDHost:              cfg.Host,

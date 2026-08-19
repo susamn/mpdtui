@@ -140,13 +140,20 @@ Requires Go 1.26+ and a reachable MPD server.
 ## Usage
 
 ```bash
-./mpdtui          # full panel UI
-./mpdtui -mini    # lightweight inline player
-./mpdtui -p       # fuzzy-search playlists; Enter clears the queue and plays it
-./mpdtui -t       # fuzzy-search tracks; Enter adds it to the queue and plays it
+./mpdtui                     # full panel UI
+./mpdtui -mini               # lightweight inline player
+./mpdtui -p                  # fuzzy-search playlists; Enter clears the queue and plays it
+./mpdtui -t                  # fuzzy-search tracks; Enter adds it to the queue and plays it
+./mpdtui -lyrics-line        # print the current synced-lyrics window (1 line above, current, 2 below) and exit
+./mpdtui -lyrics-line-exact  # print only the current synced-lyrics line, no context, and exit
 ```
 
-`-mini`, `-p`, and `-t` are mutually exclusive.
+`-mini`, `-p`, `-t`, `-lyrics-line`, and `-lyrics-line-exact` are mutually
+exclusive. The two `-lyrics-line*` flags are meant to be invoked
+repeatedly by an external tool (a conky `${execi N ...}` block, a status
+bar segment) rather than run interactively -- see
+[Non-interactive lyrics line](#non-interactive-lyrics-line-lyrics-line--lyrics-line-exact)
+below.
 
 Connects using the same environment variables as `mpc`:
 
@@ -291,6 +298,31 @@ terminal can't blend the two colors into one glyph, so this is the
 closest a character grid gets to "overlapping"), and the track info
 card (`i`) shows the same colors as text -- "LRC" and/or "TXT" -- right
 next to the rest of the track's details.
+
+### Non-interactive lyrics line (`-lyrics-line`/`-lyrics-line-exact`)
+
+For embedding the current synced lyric in an external tool (a conky
+widget, a status bar segment) rather than the interactive viewer:
+
+```bash
+./mpdtui -lyrics-line          # 4 lines: 1 above, current, 2 below
+./mpdtui -lyrics-line-exact    # 1 line: just the current line, no context
+```
+
+Each does a single MPD round-trip and exits -- meant to be invoked
+repeatedly by the external tool's own polling (e.g. conky's
+`${execi N ...}`), not run interactively. `-lyrics-line` always prints
+exactly 4 lines regardless of playback state, so a layout that reads a
+specific line number (e.g. `sed -n '2p'` for just the current line)
+never has to special-case a shorter or missing line; `-lyrics-line-exact`
+always prints exactly 1. When the playing track has no `.lrc` (or
+nothing is playing, or `music_dir` isn't configured), both print
+`No synced lyrics available` in place of the current line -- on
+`-lyrics-line-exact`'s single line, or on `-lyrics-line`'s line 2 only,
+with lines 1/3/4 left blank so the line count still holds. An
+instrumental intro (a `.lrc` that exists but hasn't reached its first
+timestamp yet) is left blank instead, since synced lyrics do exist for
+that track -- only a genuinely missing `.lrc` gets the message.
 
 ## Track metadata
 
