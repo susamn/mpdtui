@@ -199,6 +199,27 @@ func TestMaybeTrackPlayCountCountsAgainForADifferentSongID(t *testing.T) {
 	}
 }
 
+// TestMaybeTrackPlayCountCountsAgainAfterRestartFromBeginning mirrors
+// internal/ui's own test of the same name -- see its doc comment.
+func TestMaybeTrackPlayCountCountsAgainAfterRestartFromBeginning(t *testing.T) {
+	db := openTestMetaDB(t)
+	song := mpdclient.Song{File: "artist/track.mp3"}
+	playCountedSongID := -1
+	total := 200 * time.Second
+
+	maybeTrackPlayCount(db, mpdclient.Status{SongID: 7, Duration: total, Elapsed: total}, song, &playCountedSongID)
+	maybeTrackPlayCount(db, mpdclient.Status{SongID: 7, Duration: total, Elapsed: 0}, song, &playCountedSongID)
+	maybeTrackPlayCount(db, mpdclient.Status{SongID: 7, Duration: total, Elapsed: total}, song, &playCountedSongID)
+
+	track, err := db.Get(song.File)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if track.PlayCount != 2 {
+		t.Errorf("play count after a same-SongID restart-and-replay = %d, want 2", track.PlayCount)
+	}
+}
+
 func TestMaybeTrackPlayCountNoopWithoutMetaDB(t *testing.T) {
 	playCountedSongID := -1
 	// Must not panic with a nil *metadata.DB.

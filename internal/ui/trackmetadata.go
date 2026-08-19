@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -52,26 +53,44 @@ func (a *App) handleRateSelectedTrack(rating int) {
 	})
 }
 
+// playCountRearmElapsed is how close to the very start of a track
+// Elapsed has to be, for a SongID already counted by maybeTrackPlayCount,
+// to be treated as a fresh play rather than still the one already
+// counted. Once counted, a SongID's Elapsed was already at or past the
+// halfway point, so a later Elapsed this low for that same SongID can
+// only mean the track restarted from the beginning -- a repeat-mode
+// loop, or the user replaying the same still-queued entry -- both of
+// which reuse the SongID MPD already assigned rather than getting a
+// fresh one, unlike a genuine re-add. A few seconds of margin (rather
+// than exactly 0) absorbs the ~500ms refresh tick's own polling slop.
+const playCountRearmElapsed = 3 * time.Second
+
 // maybeTrackPlayCount increments the currently playing track's local
 // play count (internal/metadata) once it's been played at least halfway
 // through, per explicit direction ("if 50% of a track is played marks
 // that track played"). Counted at most once per distinct queue song id
 // (a.playCountedSongID) -- ticking past the halfway point on every
 // ~500ms refresh, or seeking back and forth across it, doesn't inflate
-// the count, while a genuine repeat play (a fresh SongID once MPD
-// re-adds/replays it) counts again. No-op if the feature isn't active,
-// nothing is playing, or the duration is unknown (can't compute a
-// halfway point). playCountedSongID is set immediately (before the
-// database write, which runs in the background -- see App.runAsync) so
-// a second refresh landing before that write finishes can't double-count.
-// The Queue panel's Plays cell is repainted once the write lands, same
-// as the Rating/Mark cells after a rate/mark action.
+// the count, while a genuine repeat play counts again: either a fresh
+// SongID (MPD re-added/replaced the track) or the same SongID restarted
+// from the beginning (a repeat-mode loop, or replaying the same
+// still-queued entry -- see playCountRearmElapsed). No-op if the
+// feature isn't active, nothing is playing, or the duration is unknown
+// (can't compute a halfway point). playCountedSongID is set immediately
+// (before the database write, which runs in the background -- see
+// App.runAsync) so a second refresh landing before that write finishes
+// can't double-count. The Queue panel's Plays cell is repainted once
+// the write lands, same as the Rating/Mark cells after a rate/mark
+// action.
 func (a *App) maybeTrackPlayCount(st mpdclient.Status, song mpdclient.Song) {
 	if a.metaDB == nil || st.SongID < 0 || song.File == "" {
 		return
 	}
 	if st.SongID == a.playCountedSongID {
-		return
+		if st.Elapsed >= playCountRearmElapsed {
+			return
+		}
+		a.playCountedSongID = -1
 	}
 	if st.Duration <= 0 || st.Elapsed*2 < st.Duration {
 		return

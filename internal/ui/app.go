@@ -94,7 +94,11 @@ type App struct {
 	// already incremented the play count for, so ticking past the
 	// halfway point on every ~500ms refresh doesn't count it again; -1
 	// (matching queuePanel.currentID's own "none" convention) means
-	// nothing's been counted yet this session.
+	// nothing's been counted yet this session. MPD reuses the same
+	// SongID for a repeat-mode loop or a replay of the same still-queued
+	// entry (no fresh id like a re-add gets), so this alone can't tell a
+	// genuine repeat listen-through from "still the play already
+	// counted" -- see maybeTrackPlayCount's own re-arm check.
 	playCountedSongID int
 
 	panels   []tview.Primitive
