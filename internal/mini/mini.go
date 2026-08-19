@@ -181,19 +181,29 @@ func rateCurrentTrack(client *mpdclient.Client, metaDB *metadata.DB, rating int)
 	_ = metaDB.Rate(song.File, rating)
 }
 
+// playCountRearmElapsed mirrors internal/ui's own constant of the same
+// name (trackmetadata.go) -- see its doc comment for why a SongID
+// already counted re-arms once Elapsed is observed back near the start.
+const playCountRearmElapsed = 3 * time.Second
+
 // maybeTrackPlayCount mirrors internal/ui's own identical logic
 // (App.maybeTrackPlayCount in trackmetadata.go) -- duplicated, not
 // imported, same leaf-package reasoning as everywhere else this package
 // avoids depending on internal/ui. Increments the currently playing
 // track's local play count once it's played at least halfway through,
 // at most once per distinct queue song id (*playCountedSongID, -1
-// meaning none counted yet this session).
+// meaning none counted yet this session) -- unless that same SongID
+// restarted from the beginning (repeat-mode loop, or replaying the same
+// still-queued entry), which re-arms it.
 func maybeTrackPlayCount(metaDB *metadata.DB, st mpdclient.Status, song mpdclient.Song, playCountedSongID *int) {
 	if metaDB == nil || st.SongID < 0 || song.File == "" {
 		return
 	}
 	if st.SongID == *playCountedSongID {
-		return
+		if st.Elapsed >= playCountRearmElapsed {
+			return
+		}
+		*playCountedSongID = -1
 	}
 	if st.Duration <= 0 || st.Elapsed*2 < st.Duration {
 		return

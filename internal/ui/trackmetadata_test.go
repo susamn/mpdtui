@@ -224,6 +224,55 @@ func TestMaybeTrackPlayCountCountsAgainForADifferentSongID(t *testing.T) {
 	}
 }
 
+// TestMaybeTrackPlayCountCountsAgainAfterRestartFromBeginning covers the
+// bug reported live: repeat mode (or replaying the same still-queued
+// entry) reuses the SAME SongID rather than getting a fresh one like a
+// re-add does, so the count must re-arm once Elapsed is observed back
+// near the start rather than staying permanently blocked for that id.
+func TestMaybeTrackPlayCountCountsAgainAfterRestartFromBeginning(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	song := mpdclient.Song{File: "artist/track.mp3"}
+	total := 200 * time.Second
+
+	a.maybeTrackPlayCount(mpdclient.Status{SongID: 7, Duration: total, Elapsed: total}, song)
+	// Restarted from the beginning on the same SongID (repeat-mode loop,
+	// or the user replaying the same queue entry) -- must not count yet.
+	a.maybeTrackPlayCount(mpdclient.Status{SongID: 7, Duration: total, Elapsed: 0}, song)
+	a.maybeTrackPlayCount(mpdclient.Status{SongID: 7, Duration: total, Elapsed: total}, song)
+
+	track, err := a.metaDB.Get(song.File)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if track.PlayCount != 2 {
+		t.Errorf("play count after a same-SongID restart-and-replay = %d, want 2", track.PlayCount)
+	}
+}
+
+// TestMaybeTrackPlayCountDoesNotRearmOnASmallBackwardSeek keeps the
+// original stated goal intact: seeking backward across the halfway
+// point without going all the way back to the beginning is normal
+// scrubbing, not a restart, and must not re-arm the count.
+func TestMaybeTrackPlayCountDoesNotRearmOnASmallBackwardSeek(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	song := mpdclient.Song{File: "artist/track.mp3"}
+	total := 200 * time.Second
+
+	a.maybeTrackPlayCount(mpdclient.Status{SongID: 7, Duration: total, Elapsed: total}, song)
+	// Seeks back near the midpoint, well short of the beginning, then
+	// forward past halfway again -- still the same play-through.
+	a.maybeTrackPlayCount(mpdclient.Status{SongID: 7, Duration: total, Elapsed: total / 3}, song)
+	a.maybeTrackPlayCount(mpdclient.Status{SongID: 7, Duration: total, Elapsed: total}, song)
+
+	track, err := a.metaDB.Get(song.File)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if track.PlayCount != 1 {
+		t.Errorf("play count after a small backward seek = %d, want still 1", track.PlayCount)
+	}
+}
+
 func TestMaybeTrackPlayCountNoopWithoutMetaDB(t *testing.T) {
 	a := newTestApp() // nil metaDB, nil client -- would panic if metaDB were touched
 	song := mpdclient.Song{File: "artist/track.mp3"}
