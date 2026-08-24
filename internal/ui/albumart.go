@@ -25,11 +25,11 @@ import (
 // grid, so it sees nothing different and never retransmits -- the
 // already-placed image, whose pixel dimensions were fixed by the
 // terminal at transmit time, is then wrong for the new cell-to-pixel
-// mapping with no resize event to react to. Forcing a fresh delete+
-// retransmit unconditionally every albumArtResendInterval is a blunt
-// but reliable self-heal for exactly that case, at the cost of a
-// harmless no-op retransmit (identical bytes, identical position) the
-// rest of the time.
+// mapping with no resize event to react to. Forcing a fresh retransmit
+// (see draw's own new-then-delete-old ordering) unconditionally every
+// albumArtResendInterval is a blunt but reliable self-heal for exactly
+// that case, at the cost of a harmless no-op retransmit (identical
+// bytes, identical position) the rest of the time.
 const albumArtResendInterval = 4 * time.Second
 
 // albumArtPanel renders the currently playing track's art, either as a
@@ -52,6 +52,32 @@ type albumArtPanel struct {
 	currentURI string    // main-goroutine-only (set from onTrackChanged, read from draw)
 	sentSig    string    // main-goroutine-only: signature of the last frame actually transmitted
 	lastSentAt time.Time // main-goroutine-only: when sentSig was last (re)transmitted, zero if never
+
+	// lastImageID is the Kitty image id (see draw's own i= parameter) of
+	// the placement currently on screen, 0 if none. draw() alternates
+	// between two fixed ids (see nextImageID) instead of reusing one,
+	// specifically so a retransmit can place the *new* image first (an
+	// id the terminal has never seen collides with nothing) and only
+	// delete the old one -- by that same specific id -- afterward, once
+	// the new one is already covering it on screen. Deleting first
+	// (the original approach) leaves a visible blank gap between the
+	// delete and the new image finishing decode, which is what actually
+	// produced the flicker; deleting a *shared* id after transmitting
+	// under it again would instead delete the image that was just
+	// placed.
+	lastImageID int
+}
+
+// nextImageID returns the Kitty image id draw() should transmit under
+// next -- alternates 1/2 so it's never the same as lastImageID, which is
+// what makes a delete-after-transmit of lastImageID safe (see its own
+// doc comment): the two placements are always distinct objects to the
+// terminal, never the same id being deleted out from under itself.
+func nextImageID(last int) int {
+	if last == 1 {
+		return 2
+	}
+	return 1
 }
 
 func newAlbumArtPanel(app *App) *albumArtPanel {
@@ -197,23 +223,26 @@ func (p *albumArtPanel) fetch(uri string, seq int) {
 // draw cycle -- the only reason it's safe for this to write raw escape
 // sequences straight to the terminal without racing tview/tcell's own
 // output. Retransmits only when the image or the panel's size actually
-// changed (sentSig), and explicitly deletes the previously-drawn image
-// (a=d) before every retransmit, not just when there's no longer one to
-// show -- tview's own Clear() only touches its text buffer, it has no
-// idea a Kitty image is separately composited on top, and Kitty's own
-// a=T (transmit+display) always creates a *new* placement rather than
-// replacing the last one. Without the delete, a same-size track change
-// merely draws the new image exactly over the old one (invisible, since
-// both cover identical terminal cells) -- but a terminal resize moves/
-// resizes the panel first, so the new placement lands somewhere else
-// and the old one stays ghosted on screen right alongside it, which is
-// what actually surfaces this: two overlapping copies of the art after
-// a resize. Also force-retransmits every albumArtResendInterval even
-// when sig hasn't changed, since a pure display-scale change can leave
-// the character grid sig is keyed on completely unchanged while the
-// terminal's actual pixel-per-cell size (invisible to tcell/tview)
-// changes underneath it -- see albumArtResendInterval's own doc
-// comment.
+// changed (sentSig), or albumArtResendInterval has elapsed since the
+// last transmit regardless (see its own doc comment: a pure display-
+// scale change can leave sig's own inputs, the character grid, totally
+// unchanged while the terminal's actual pixel-per-cell size doesn't).
+//
+// A retransmit always transmits the *new* image first, under a fresh id
+// (nextImageID), and only deletes the previous placement -- by that
+// specific id, via d=i -- afterward, once the new one is already
+// covering it on screen: tview's own Clear() only touches its text
+// buffer, it has no idea a Kitty image is separately composited on top,
+// and Kitty's own a=T always creates a new placement rather than
+// replacing the last one, so *some* explicit delete is unavoidable to
+// avoid a permanent ghost (see git history for the resize-ghosting bug
+// this fixed). Deleting the old placement *first* was tried and
+// reverted: it leaves a visible blank gap between the delete and the
+// new image finishing decode, which is what actually produced visible
+// flicker on albumArtResendInterval's own periodic no-real-change
+// resends. new-then-delete-old never has that gap -- there's always
+// something rendered at that location throughout, old until new lands
+// on top of it, old removed harmlessly afterward.
 func (p *albumArtPanel) draw() {
 	if !supportsKittyGraphics() {
 		return
@@ -224,8 +253,9 @@ func (p *albumArtPanel) draw() {
 	p.mu.Unlock()
 
 	if len(data) == 0 {
-		if p.sentSig != "" {
-			fmt.Print("\033_Ga=d\033\\")
+		if p.lastImageID != 0 {
+			fmt.Printf("\033_Ga=d,d=i,i=%d\033\\", p.lastImageID)
+			p.lastImageID = 0
 			p.sentSig = ""
 		}
 		return
@@ -240,12 +270,8 @@ func (p *albumArtPanel) draw() {
 	if p.sentSig == sig && time.Since(p.lastSentAt) < albumArtResendInterval {
 		return
 	}
-	if p.sentSig != "" {
-		fmt.Print("\033_Ga=d\033\\")
-	}
-	p.sentSig = sig
-	p.lastSentAt = time.Now()
 
+	id := nextImageID(p.lastImageID)
 	fmt.Printf("\033[%d;%dH", y+1, x+1)
 	b64 := base64.StdEncoding.EncodeToString(data)
 	const chunkSize = 4096
@@ -257,9 +283,16 @@ func (p *albumArtPanel) draw() {
 			m = 0
 		}
 		if i == 0 {
-			fmt.Printf("\033_Ga=T,f=100,q=2,c=%d,r=%d,m=%d;%s\033\\", w, h, m, b64[i:end])
+			fmt.Printf("\033_Ga=T,i=%d,f=100,q=2,c=%d,r=%d,m=%d;%s\033\\", id, w, h, m, b64[i:end])
 		} else {
 			fmt.Printf("\033_Gm=%d;%s\033\\", m, b64[i:end])
 		}
 	}
+
+	if p.lastImageID != 0 {
+		fmt.Printf("\033_Ga=d,d=i,i=%d\033\\", p.lastImageID)
+	}
+	p.lastImageID = id
+	p.sentSig = sig
+	p.lastSentAt = time.Now()
 }
