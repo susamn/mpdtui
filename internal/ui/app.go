@@ -307,6 +307,36 @@ func (a *App) reapplyTheme() {
 
 	a.nowPlaying.SetBorderColor(nowPlayingBorderColor).SetTitleColor(nowPlayingBorderColor)
 	a.lyricsViewer.SetBorderColor(lyricsColor).SetTitleColor(lyricsColor)
+
+	// Same "baked in at construction, not read live" problem as the
+	// table cells below, but for the selected-row highlight specifically:
+	// newQueuePanel/newPlaylistsPanel/newSettingsView each called
+	// SetSelectedStyle once, up front, with a tcell.Style *value* built
+	// from colorSelectedBg/colorSelectedFg at that moment -- reassigning
+	// those vars afterward doesn't reach back into an already-built
+	// Style. markPicker (a *tview.List, not a Table) has the same issue
+	// via SetSelectedTextColor/SetSelectedBackgroundColor instead.
+	selectedStyle := tcell.StyleDefault.Background(colorSelectedBg).Foreground(colorSelectedFg)
+	a.queue.table.SetSelectedStyle(selectedStyle)
+	a.playlists.table.SetSelectedStyle(selectedStyle)
+	a.settings.catalogTable.SetSelectedStyle(selectedStyle)
+	a.markPicker.SetSelectedTextColor(colorSelectedFg)
+	a.markPicker.SetSelectedBackgroundColor(colorSelectedBg)
+
+	// Everything above is a widget whose border/title color tview reads
+	// live off a Box field on every Draw. Table cells are different:
+	// SetTextColor/SetBackgroundColor bakes the *current* color value
+	// into that TableCell right then, at construction time -- Queue's
+	// title/format/rating/mark colors and header row, Playlists' header
+	// row -- and neither table gets rebuilt again until its underlying
+	// *data* changes (a track added/removed, a watcher event), which a
+	// theme reload alone never triggers. Without an explicit re-render
+	// here, every already-drawn row would keep showing whatever the
+	// previous theme's colors were until the next unrelated data change
+	// happened to redraw them.
+	a.queue.render(a.queue.currentID)
+	a.playlists.render()
+	a.queue.refreshStats()
 }
 
 func (a *App) refreshAll() {
