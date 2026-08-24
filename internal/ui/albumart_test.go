@@ -92,6 +92,43 @@ func TestDrawSkipsRetransmitWhenNothingChanged(t *testing.T) {
 	}
 }
 
+// TestDrawForceRetransmitsAfterResendInterval covers the self-heal for a
+// change draw() has no way to detect directly: a pure display-scale
+// change (e.g. a Wayland compositor DPI change) can leave the terminal's
+// character grid -- all that GetInnerRect()/sig can see -- completely
+// unchanged while the actual pixel size of each cell changes underneath
+// it. With no resize signal to react to, draw() must eventually
+// retransmit anyway, on a timer, or a stale placement (sized for the old
+// pixel-per-cell mapping) would stay wrong on screen indefinitely.
+func TestDrawForceRetransmitsAfterResendInterval(t *testing.T) {
+	t.Setenv("TERM", "xterm-kitty")
+
+	p := newAlbumArtPanel(&App{})
+	p.currentURI = "track-a.mp3"
+	p.kittyPNG = []byte("fake-png-data")
+	p.view.SetRect(0, 0, 20, 10)
+
+	captureDraw(t, p.draw)
+
+	// Still well inside the resend interval: nothing changed, so this
+	// must stay a no-op (same as TestDrawSkipsRetransmitWhenNothingChanged).
+	soon := captureDraw(t, p.draw)
+	if soon != "" {
+		t.Errorf("draw() well inside the resend interval wrote %q, want nothing", soon)
+	}
+
+	// Simulate the resend interval having elapsed, with nothing else
+	// about the image/panel changed -- same sig as before.
+	p.lastSentAt = p.lastSentAt.Add(-albumArtResendInterval)
+	stale := captureDraw(t, p.draw)
+	if !strings.Contains(stale, "\033_Ga=d\033\\") {
+		t.Errorf("draw() past the resend interval didn't delete the previous placement: %q", stale)
+	}
+	if !strings.Contains(stale, "\033_Ga=T") {
+		t.Errorf("draw() past the resend interval didn't retransmit: %q", stale)
+	}
+}
+
 func TestSupportsKittyGraphics(t *testing.T) {
 	cases := []struct {
 		name           string

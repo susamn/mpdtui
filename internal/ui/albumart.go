@@ -10,10 +10,27 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/qeesung/image2ascii/convert"
 	"github.com/rivo/tview"
 )
+
+// albumArtResendInterval bounds how long a stale Kitty placement can
+// survive a change draw() has no way to detect on its own -- a pure
+// display-scale change (e.g. a Wayland compositor DPI change) can leave
+// the terminal's character grid (columns/rows, all tcell/tview expose)
+// completely unchanged while the actual pixel size of each cell changes
+// underneath it. draw()'s own sig comparison is keyed on that character
+// grid, so it sees nothing different and never retransmits -- the
+// already-placed image, whose pixel dimensions were fixed by the
+// terminal at transmit time, is then wrong for the new cell-to-pixel
+// mapping with no resize event to react to. Forcing a fresh delete+
+// retransmit unconditionally every albumArtResendInterval is a blunt
+// but reliable self-heal for exactly that case, at the cost of a
+// harmless no-op retransmit (identical bytes, identical position) the
+// rest of the time.
+const albumArtResendInterval = 4 * time.Second
 
 // albumArtPanel renders the currently playing track's art, either as a
 // real image (Kitty graphics protocol, when supported) or as ASCII art
@@ -32,8 +49,9 @@ type albumArtPanel struct {
 	seq      int    // bumped on every track change; a fetch checks this before applying its result
 	kittyPNG []byte // set only when supportsKittyGraphics() and decode+encode succeeded
 
-	currentURI string // main-goroutine-only (set from onTrackChanged, read from draw)
-	sentSig    string // main-goroutine-only: signature of the last frame actually transmitted
+	currentURI string    // main-goroutine-only (set from onTrackChanged, read from draw)
+	sentSig    string    // main-goroutine-only: signature of the last frame actually transmitted
+	lastSentAt time.Time // main-goroutine-only: when sentSig was last (re)transmitted, zero if never
 }
 
 func newAlbumArtPanel(app *App) *albumArtPanel {
@@ -190,7 +208,12 @@ func (p *albumArtPanel) fetch(uri string, seq int) {
 // resizes the panel first, so the new placement lands somewhere else
 // and the old one stays ghosted on screen right alongside it, which is
 // what actually surfaces this: two overlapping copies of the art after
-// a resize.
+// a resize. Also force-retransmits every albumArtResendInterval even
+// when sig hasn't changed, since a pure display-scale change can leave
+// the character grid sig is keyed on completely unchanged while the
+// terminal's actual pixel-per-cell size (invisible to tcell/tview)
+// changes underneath it -- see albumArtResendInterval's own doc
+// comment.
 func (p *albumArtPanel) draw() {
 	if !supportsKittyGraphics() {
 		return
@@ -214,13 +237,14 @@ func (p *albumArtPanel) draw() {
 	}
 
 	sig := fmt.Sprintf("%s:%d:%d:%d", p.currentURI, len(data), w, h)
-	if p.sentSig == sig {
+	if p.sentSig == sig && time.Since(p.lastSentAt) < albumArtResendInterval {
 		return
 	}
 	if p.sentSig != "" {
 		fmt.Print("\033_Ga=d\033\\")
 	}
 	p.sentSig = sig
+	p.lastSentAt = time.Now()
 
 	fmt.Printf("\033[%d;%dH", y+1, x+1)
 	b64 := base64.StdEncoding.EncodeToString(data)
