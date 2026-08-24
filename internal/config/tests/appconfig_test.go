@@ -3,6 +3,7 @@ package tests
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"mpdtui/internal/config"
@@ -123,6 +124,83 @@ func TestLoadMusicDirExpandsLeadingTilde(t *testing.T) {
 	}
 }
 
+func TestLoadThemeFileMissingFileFallsBackToDefaultColorsFile(t *testing.T) {
+	withEnv(t, "XDG_CONFIG_HOME", t.TempDir())
+	if got, want := config.LoadThemeFile(), config.DefaultColorsFile(); got != want {
+		t.Errorf("LoadThemeFile() with no config file = %q, want DefaultColorsFile() %q", got, want)
+	}
+}
+
+func TestLoadThemeFileReadsKey(t *testing.T) {
+	xdgHome := t.TempDir()
+	withEnv(t, "XDG_CONFIG_HOME", xdgHome)
+	writeConfigFile(t, xdgHome, "theme_file = /some/where/colors.toml\n")
+
+	if got, want := config.LoadThemeFile(), "/some/where/colors.toml"; got != want {
+		t.Errorf("LoadThemeFile() = %q, want %q", got, want)
+	}
+}
+
+// TestLoadThemeFileDoesNotRequireExistence covers LoadThemeFile's own
+// deliberate divergence from LoadMusicDir: a configured-but-unreadable
+// path is passed through as-is rather than collapsed to "", since
+// internal/theme's own Load/LoadFrom already treat an unreadable file
+// as "no live theme" and fall back to mpdtui's static colors on their
+// own -- there's no separate "is this a real file" check to duplicate
+// here.
+func TestLoadThemeFileDoesNotRequireExistence(t *testing.T) {
+	xdgHome := t.TempDir()
+	withEnv(t, "XDG_CONFIG_HOME", xdgHome)
+	writeConfigFile(t, xdgHome, "theme_file = /does/not/exist.toml\n")
+
+	if got, want := config.LoadThemeFile(), "/does/not/exist.toml"; got != want {
+		t.Errorf("LoadThemeFile() = %q, want %q", got, want)
+	}
+}
+
+func TestLoadThemeFileExpandsLeadingTilde(t *testing.T) {
+	fakeHome := t.TempDir()
+	withEnv(t, "HOME", fakeHome)
+	xdgHome := t.TempDir()
+	withEnv(t, "XDG_CONFIG_HOME", xdgHome)
+	writeConfigFile(t, xdgHome, "theme_file = ~/.cache/mpdtui/colors.toml\n")
+
+	want := filepath.Join(fakeHome, ".cache", "mpdtui", "colors.toml")
+	if got := config.LoadThemeFile(); got != want {
+		t.Errorf("LoadThemeFile() = %q, want %q", got, want)
+	}
+}
+
+// TestLoadThemeFileResolvesRelativePathAgainstConfigDir covers
+// EnsureConfigFiles' own default value ("./colors.toml"): a relative
+// theme_file resolves against ConfigDir(), not the process's current
+// working directory, so it keeps working no matter where mpdtui is
+// launched from.
+func TestLoadThemeFileResolvesRelativePathAgainstConfigDir(t *testing.T) {
+	xdgHome := t.TempDir()
+	withEnv(t, "XDG_CONFIG_HOME", xdgHome)
+	writeConfigFile(t, xdgHome, "theme_file = ./colors.toml\n")
+
+	want := filepath.Join(xdgHome, "mpdtui", "colors.toml")
+	if got := config.LoadThemeFile(); got != want {
+		t.Errorf("LoadThemeFile() = %q, want %q", got, want)
+	}
+}
+
+// TestLoadThemeFileResolvesBareRelativeFilename covers a theme_file
+// value with no "./" prefix at all (just a bare filename) -- same
+// resolution as the "./"-prefixed form above.
+func TestLoadThemeFileResolvesBareRelativeFilename(t *testing.T) {
+	xdgHome := t.TempDir()
+	withEnv(t, "XDG_CONFIG_HOME", xdgHome)
+	writeConfigFile(t, xdgHome, "theme_file = matugen-colors.toml\n")
+
+	want := filepath.Join(xdgHome, "mpdtui", "matugen-colors.toml")
+	if got := config.LoadThemeFile(); got != want {
+		t.Errorf("LoadThemeFile() = %q, want %q", got, want)
+	}
+}
+
 func TestLoadTrackMetadataEnabledDefaultsToFalse(t *testing.T) {
 	withEnv(t, "XDG_CONFIG_HOME", t.TempDir())
 	if config.LoadTrackMetadataEnabled() {
@@ -175,6 +253,77 @@ func TestDBFileIsInsideConfigDir(t *testing.T) {
 	withEnv(t, "XDG_CONFIG_HOME", "/xdg")
 	if got, want := config.DBFile(), filepath.Join("/xdg", "mpdtui", "mpdtui.db"); got != want {
 		t.Errorf("DBFile() = %q, want %q", got, want)
+	}
+}
+
+func TestEnsureConfigFilesCreatesBothFiles(t *testing.T) {
+	withEnv(t, "XDG_CONFIG_HOME", t.TempDir())
+
+	if err := config.EnsureConfigFiles(); err != nil {
+		t.Fatalf("EnsureConfigFiles(): %v", err)
+	}
+
+	if _, err := os.Stat(config.DefaultColorsFile()); err != nil {
+		t.Errorf("DefaultColorsFile() not created: %v", err)
+	}
+	if _, err := os.Stat(config.ConfigFile()); err != nil {
+		t.Errorf("ConfigFile() not created: %v", err)
+	}
+	if got := config.LoadThemeFile(); got != config.DefaultColorsFile() {
+		t.Errorf("LoadThemeFile() after EnsureConfigFiles() = %q, want %q", got, config.DefaultColorsFile())
+	}
+}
+
+// TestEnsureConfigFilesWritesRelativeThemeFile covers the actual
+// written content, not just LoadThemeFile()'s resolved result: the
+// config file itself must contain a relative theme_file value
+// ("./colors.toml"), not an absolute path baked in at creation time --
+// so it stays correct if ConfigDir() (e.g. $XDG_CONFIG_HOME) ever
+// changes later, and reads cleanly if the config directory itself is
+// copied/moved somewhere else.
+func TestEnsureConfigFilesWritesRelativeThemeFile(t *testing.T) {
+	withEnv(t, "XDG_CONFIG_HOME", t.TempDir())
+
+	if err := config.EnsureConfigFiles(); err != nil {
+		t.Fatalf("EnsureConfigFiles(): %v", err)
+	}
+
+	data, err := os.ReadFile(config.ConfigFile())
+	if err != nil {
+		t.Fatalf("ReadFile(ConfigFile()): %v", err)
+	}
+	if !strings.Contains(string(data), "theme_file = ./colors.toml") {
+		t.Errorf("ConfigFile() content = %q, want it to contain \"theme_file = ./colors.toml\"", data)
+	}
+}
+
+// TestEnsureConfigFilesNeverOverwritesExistingFiles covers the
+// "mandatory but non-destructive" contract: EnsureConfigFiles always
+// attempts to create what's missing, but must never touch a file
+// that's already there -- a hand-edited config or color file surviving
+// across every future run is the whole point of checking existence
+// first rather than always writing.
+func TestEnsureConfigFilesNeverOverwritesExistingFiles(t *testing.T) {
+	withEnv(t, "XDG_CONFIG_HOME", t.TempDir())
+
+	writeConfigFile(t, os.Getenv("XDG_CONFIG_HOME"), "theme_file = /my/own/colors.toml\n")
+	if err := os.WriteFile(config.DefaultColorsFile(), []byte("accent = \"#123456\"\n"), 0o644); err != nil {
+		t.Fatalf("seed DefaultColorsFile(): %v", err)
+	}
+
+	if err := config.EnsureConfigFiles(); err != nil {
+		t.Fatalf("EnsureConfigFiles(): %v", err)
+	}
+
+	if got, want := config.LoadThemeFile(), "/my/own/colors.toml"; got != want {
+		t.Errorf("LoadThemeFile() = %q, want %q (config file was overwritten)", got, want)
+	}
+	data, err := os.ReadFile(config.DefaultColorsFile())
+	if err != nil {
+		t.Fatalf("ReadFile(DefaultColorsFile()): %v", err)
+	}
+	if string(data) != "accent = \"#123456\"\n" {
+		t.Errorf("DefaultColorsFile() content = %q, want it unchanged (was overwritten)", data)
 	}
 }
 

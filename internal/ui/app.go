@@ -131,6 +131,8 @@ type App struct {
 // same as the MPD client. cfg is a read-only snapshot shown in the
 // Settings overlay's Config tab ('e') -- see ConfigSummary.
 func Run(client *mpdclient.Client, musicDir string, metaDB *metadata.DB, cfg ConfigSummary) error {
+	SetThemeFile(cfg.ThemeFile)
+
 	a := &App{
 		tv:                tview.NewApplication(),
 		client:            client,
@@ -159,6 +161,28 @@ func Run(client *mpdclient.Client, musicDir string, metaDB *metadata.DB, cfg Con
 		case <-sigCh:
 			a.tv.Stop()
 		case <-a.done:
+		}
+	}()
+
+	// SIGUSR1 is mpdtui's own theme-reload signal, the same convention
+	// kitty/btop/helix use for "your config changed, re-read it" (see
+	// /usr/share/omarchy/bin/omarchy-restart-terminal and friends) --
+	// Omarchy itself never pushes color data at a running process, every
+	// integrated app just gets poked and pulls its own config back in.
+	// A `pkill -SIGUSR1 mpdtui` dropped into
+	// ~/.config/omarchy/hooks/theme-set.d/ is what wires "omarchy theme
+	// set ..." up to this.
+	themeCh := make(chan os.Signal, 1)
+	signal.Notify(themeCh, syscall.SIGUSR1)
+	defer signal.Stop(themeCh)
+	go func() {
+		for {
+			select {
+			case <-themeCh:
+				a.tv.QueueUpdateDraw(a.reapplyTheme)
+			case <-a.done:
+				return
+			}
 		}
 	}()
 
@@ -202,8 +226,8 @@ func (a *App) build() {
 	wireFocusColors(a.queue.search)
 
 	a.nowPlaying = tview.NewTextView().SetDynamicColors(true)
-	a.nowPlaying.SetBorder(true).SetTitle(" Now Playing ").SetTitleColor(tcell.ColorYellow)
-	a.nowPlaying.SetBorderColor(tcell.ColorYellow)
+	a.nowPlaying.SetBorder(true).SetTitle(" Now Playing ").SetTitleColor(nowPlayingBorderColor)
+	a.nowPlaying.SetBorderColor(nowPlayingBorderColor)
 
 	a.albumArt = newAlbumArtPanel(a)
 	a.trackInfo = newTrackInfoCard(a)
@@ -257,6 +281,62 @@ func (a *App) build() {
 	a.tv.SetAfterDrawFunc(func(tcell.Screen) {
 		a.albumArt.draw()
 	})
+}
+
+// reapplyTheme re-reads the live Omarchy theme (reloadPalette) and
+// repaints every widget whose color was captured once at construction
+// time rather than read live on each render. Most of this package's
+// theme-derived colors (queueTitleColor, nowPlayingBarColor, and
+// friends -- see theme.go's deriveColors) need no such repaint: they're
+// package-level vars read fresh by render/refreshNowPlaying/etc. on
+// every ~500ms refresh tick anyway. Only the handful of widgets below,
+// all built once in build() and never rebuilt, need an explicit push.
+// The panel-focus borders (wireFocusColors) are the trickiest of these:
+// their color is normally only set by a real focus/blur event, so this
+// re-derives "should this panel look focused right now" itself via
+// setFocusColor rather than waiting for one.
+func (a *App) reapplyTheme() {
+	reloadPalette()
+	applyTheme()
+
+	focused := a.tv.GetFocus()
+	setFocusColor(a.library.tree, focused == a.library.tree)
+	setFocusColor(a.playlists.table, focused == a.playlists.table)
+	setFocusColor(a.queue.table, focused == a.queue.table)
+	setFocusColor(a.queue.search, focused == a.queue.search)
+
+	a.nowPlaying.SetBorderColor(nowPlayingBorderColor).SetTitleColor(nowPlayingBorderColor)
+	a.lyricsViewer.SetBorderColor(lyricsColor).SetTitleColor(lyricsColor)
+
+	// Same "baked in at construction, not read live" problem as the
+	// table cells below, but for the selected-row highlight specifically:
+	// newQueuePanel/newPlaylistsPanel/newSettingsView each called
+	// SetSelectedStyle once, up front, with a tcell.Style *value* built
+	// from colorSelectedBg/colorSelectedFg at that moment -- reassigning
+	// those vars afterward doesn't reach back into an already-built
+	// Style. markPicker (a *tview.List, not a Table) has the same issue
+	// via SetSelectedTextColor/SetSelectedBackgroundColor instead.
+	selectedStyle := tcell.StyleDefault.Background(colorSelectedBg).Foreground(colorSelectedFg)
+	a.queue.table.SetSelectedStyle(selectedStyle)
+	a.playlists.table.SetSelectedStyle(selectedStyle)
+	a.settings.catalogTable.SetSelectedStyle(selectedStyle)
+	a.markPicker.SetSelectedTextColor(colorSelectedFg)
+	a.markPicker.SetSelectedBackgroundColor(colorSelectedBg)
+
+	// Everything above is a widget whose border/title color tview reads
+	// live off a Box field on every Draw. Table cells are different:
+	// SetTextColor/SetBackgroundColor bakes the *current* color value
+	// into that TableCell right then, at construction time -- Queue's
+	// title/format/rating/mark colors and header row, Playlists' header
+	// row -- and neither table gets rebuilt again until its underlying
+	// *data* changes (a track added/removed, a watcher event), which a
+	// theme reload alone never triggers. Without an explicit re-render
+	// here, every already-drawn row would keep showing whatever the
+	// previous theme's colors were until the next unrelated data change
+	// happened to redraw them.
+	a.queue.render(a.queue.currentID)
+	a.playlists.render()
+	a.queue.refreshStats()
 }
 
 func (a *App) refreshAll() {

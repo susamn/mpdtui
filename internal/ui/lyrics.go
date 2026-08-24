@@ -27,17 +27,19 @@ import (
 const lyricsTick = "✓"
 
 // lyricsLRCColor/lyricsTxtColor color a lyrics format's own badge --
-// green for LRC (reuses nowPlayingTrackColor's WhatsApp green, the same
-// "this is the synced/active one" association the lyrics viewer's own
-// highlight already uses) and orange for TXT (reuses markTickColors'
-// own orange RGB, #FFA500, rather than inventing a new one) -- explicit
-// request ("green for LRC and Orange for TXT"). Used both in the Queue
-// table's Lyr column (colored tick(s), via embedded tview color tags
-// since a single TableCell can otherwise only carry one SetTextColor for
-// its whole text) and the track info card (colored "LRC"/"TXT" text).
-const (
-	lyricsLRCColor = nowPlayingTrackColor
-	lyricsTxtColor = "#FFA500"
+// green for LRC (reuses nowPlayingTrackColor's value, the same "this is
+// the synced/active one" association the lyrics viewer's own highlight
+// already uses) and orange for TXT (reuses the active theme's Orange,
+// same as markTickColors' own orange tick) -- explicit request ("green
+// for LRC and Orange for TXT"). Used both in the Queue table's Lyr
+// column (colored tick(s), via embedded tview color tags since a single
+// TableCell can otherwise only carry one SetTextColor for its whole
+// text) and the track info card (colored "LRC"/"TXT" text). Theme-
+// derived (deriveColors), not consts here, since nowPlayingTrackColor
+// and the palette itself can change after a reload.
+var (
+	lyricsLRCColor string
+	lyricsTxtColor string
 )
 
 // lyricsViewer shows the currently playing track's lyrics. It's
@@ -152,12 +154,15 @@ func resolveLyricsFormat(preferred lyricsFormat, available []lyricsFormat) lyric
 	return lyricsFormatNone
 }
 
-// lyricsColor matches colorActiveBorder, the same green a focused
-// panel's (Library/Playlists/Queue) border and title use -- explicit
-// request ("make the lyrics viewer border just like the border of the
-// player panels... when they are selected"), replacing an earlier
-// distinct teal that set this viewer visually apart from every panel.
-var lyricsColor = colorActiveBorder
+// lyricsColor matches colorActiveBorder, the same accent color a
+// focused panel's (Library/Playlists/Queue) border and title use --
+// explicit request ("make the lyrics viewer border just like the
+// border of the player panels... when they are selected"). Set by
+// theme.go's deriveColors, not a literal here -- see App.reapplyTheme
+// for why this viewer additionally needs an explicit re-set on a theme
+// reload (it's built once in app.go's build(), like Now Playing, not
+// re-rendered on every refresh tick).
+var lyricsColor tcell.Color
 
 // lyricsTextColor tints the actual lyrics text a muted (not bright)
 // gold/yellow -- explicit request. A tview color tag string, not a
@@ -169,11 +174,13 @@ const lyricsTextColor = "#DAA520"
 
 // lyricsSyncedHighlightColor is the background used to highlight
 // whichever line is currently playing in synced (.lrc) lyrics -- reuses
-// nowPlayingTrackColor's own WhatsApp green (nowplaying.go) rather than
-// inventing a new color, so "this is the active/now" reads consistently
-// with the rest of the app (Now Playing bar's own track-title color, the
-// track info card's lyrics-present tick).
-const lyricsSyncedHighlightColor = nowPlayingTrackColor
+// nowPlayingTrackColor's own value (nowplaying.go, theme-derived) rather
+// than inventing a new color, so "this is the active/now" reads
+// consistently with the rest of the app (Now Playing bar's own
+// track-title color, the track info card's lyrics-present tick). A
+// func, not a const, since nowPlayingTrackColor is itself theme-derived
+// (deriveColors) and can change after a reload.
+func lyricsSyncedHighlightColor() string { return nowPlayingTrackColor }
 
 // lyricsSyncedScrollLookback keeps this many already-sung lines visible
 // above the highlighted one when auto-scrolling, rather than pinning the
@@ -562,7 +569,7 @@ func (v *lyricsViewer) renderSyncedLines() {
 			text = " "
 		}
 		if i == v.currentLine {
-			fmt.Fprintf(&b, "[white:%s:b]%s[-:-:-]\n", lyricsSyncedHighlightColor, text)
+			fmt.Fprintf(&b, "[white:%s:b]%s[-:-:-]\n", lyricsSyncedHighlightColor(), text)
 		} else {
 			fmt.Fprintf(&b, "[%s]%s[-]\n", lyricsTextColor, text)
 		}

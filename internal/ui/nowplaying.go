@@ -3,19 +3,23 @@ package ui
 import (
 	"fmt"
 
+	"github.com/gdamore/tcell/v2"
+
 	"mpdtui/internal/mpdclient"
 )
 
-// nowPlayingBarColor matches internal/mini's own progress-bar color
-// (ansiBarCyan, RGB(0,229,229)) -- explicit request to reuse it here too.
-// nowPlayingRatingColor matches queueRatingColor's exact RGB (gold).
-// nowPlayingTrackColor matches queueTitleColor's exact RGB (WhatsApp
-// green). nowPlayingArtistColor matches tcell.ColorSkyblue's.
-const (
-	nowPlayingBarColor    = "#00E5E5"
-	nowPlayingRatingColor = "#FFD700"
-	nowPlayingTrackColor  = "#25D366"
-	nowPlayingArtistColor = "#87CEEB"
+// nowPlayingBarColor mirrors queueRatingColor/queueTitleColor's own
+// theme fields (Cyan/Yellow/Green respectively) so the same concept
+// reads as the same color across panels; nowPlayingArtistColor uses
+// Blue. nowPlayingBorderColor is the Now Playing panel's own (always-
+// on, not focus-driven) border/title color. All theme-derived
+// (deriveColors), see theme.go.
+var (
+	nowPlayingBarColor    string
+	nowPlayingRatingColor string
+	nowPlayingTrackColor  string
+	nowPlayingArtistColor string
+	nowPlayingBorderColor tcell.Color
 )
 
 func (a *App) renderNowPlaying(st mpdclient.Status, song mpdclient.Song) {

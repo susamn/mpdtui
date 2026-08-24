@@ -26,6 +26,13 @@ type ConfigSummary struct {
 	TrackMetadataEnabled bool
 	ConfigFilePath       string
 	DBFilePath           string
+
+	// ThemeFile is theme_file's configured value (see
+	// internal/config.LoadThemeFile), "" meaning internal/theme's own
+	// Omarchy default path is in use instead. Shown here so a
+	// misconfigured override (a typo'd path, e.g.) is visible without
+	// needing to know that theme_file is a settings key at all.
+	ThemeFile string
 }
 
 const (
@@ -190,6 +197,11 @@ func populateConfigTable(table *tview.Table, cfg ConfigSummary) {
 	if cfg.TrackMetadataEnabled {
 		trackMetadata = "yes"
 	}
+	themeFile := orPlaceholder(cfg.ThemeFile)
+	themeStatus := "not found -- built-in default colors in use"
+	if themeFound {
+		themeStatus = "found -- active"
+	}
 
 	rows := []struct{ setting, value string }{
 		{"MPD Host", cfg.MPDHost},
@@ -199,6 +211,8 @@ func populateConfigTable(table *tview.Table, cfg ConfigSummary) {
 		{"Track Metadata", trackMetadata},
 		{"Config File", orPlaceholder(cfg.ConfigFilePath)},
 		{"Database File", orPlaceholder(cfg.DBFilePath)},
+		{"Theme File", themeFile},
+		{"Theme Status", themeStatus},
 	}
 	for i, r := range rows {
 		row := i + 1

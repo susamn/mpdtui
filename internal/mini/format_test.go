@@ -98,7 +98,7 @@ func TestPadOrTruncateIsRuneSafe(t *testing.T) {
 }
 
 func TestPlainWidthIgnoresNothingSinceSegmentsHoldNoAnsiYet(t *testing.T) {
-	segs := []segment{{text: "abc", fg: ansiTrackGreen}, {text: "de"}}
+	segs := []segment{{text: "abc", fg: ansiTrackColor}, {text: "de"}}
 	if got := plainWidth(segs); got != 5 {
 		t.Errorf("plainWidth = %d, want 5", got)
 	}
@@ -110,18 +110,18 @@ func TestPlainWidthIgnoresNothingSinceSegmentsHoldNoAnsiYet(t *testing.T) {
 // width -- what renderLine pads to -- must still be exactly width, or
 // the box border would drift out of alignment on any colored line.
 func TestRenderLineColorsAndPadsToVisibleWidth(t *testing.T) {
-	segs := []segment{{text: "AB", fg: ansiTrackGreen}, {text: "cd"}}
+	segs := []segment{{text: "AB", fg: ansiTrackColor}, {text: "cd"}}
 	got := renderLine(segs, 10)
-	want := ansiTrackGreen + "AB" + ansiReset + "cd" + "      " // 6 trailing spaces: 10 - 4
+	want := ansiTrackColor + "AB" + ansiReset + "cd" + "      " // 6 trailing spaces: 10 - 4
 	if got != want {
 		t.Errorf("renderLine = %q, want %q", got, want)
 	}
 }
 
 func TestRenderLineExactWidthNoTrailingPadding(t *testing.T) {
-	segs := []segment{{text: "AB", fg: ansiTrackGreen}, {text: "cd"}}
+	segs := []segment{{text: "AB", fg: ansiTrackColor}, {text: "cd"}}
 	got := renderLine(segs, 4)
-	want := ansiTrackGreen + "AB" + ansiReset + "cd"
+	want := ansiTrackColor + "AB" + ansiReset + "cd"
 	if got != want {
 		t.Errorf("renderLine at exact width = %q, want %q", got, want)
 	}
@@ -132,7 +132,7 @@ func TestRenderLineExactWidthNoTrailingPadding(t *testing.T) {
 // escape code unclosed, renderLine drops color entirely and truncates
 // the plain concatenated text instead.
 func TestRenderLineFallsBackToPlainWhenTooLong(t *testing.T) {
-	segs := []segment{{text: "hello", fg: ansiTrackGreen}, {text: " world"}}
+	segs := []segment{{text: "hello", fg: ansiTrackColor}, {text: " world"}}
 	got := renderLine(segs, 8)
 	want := padOrTruncate("hello world", 8)
 	if got != want {

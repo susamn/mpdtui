@@ -55,23 +55,6 @@ func ratingStars(rating int) string {
 	return strings.Repeat("★", rating) + strings.Repeat("☆", 5-rating)
 }
 
-// ansi* are raw 24-bit-color escape sequences, matching internal/ui's
-// own color choices for the same concepts as closely as makes sense
-// here: ansiTrackGreen is queueTitleColor's exact RGB (WhatsApp green),
-// ansiRatingGold is queueRatingColor's, and ansiStatsSkyBlue is
-// tcell.ColorSkyblue's. ansiBarCyan has no full-UI equivalent to match
-// (the Queue table has no progress bar) -- picked to read as clearly
-// distinct from the other three. Raw escapes rather than tcell.Style
-// because this package renders via bare terminal control sequences, not
-// tcell/tview (see this file's own top-of-file doc comment).
-const (
-	ansiReset        = "\x1b[0m"
-	ansiTrackGreen   = "\x1b[38;2;37;211;102m"
-	ansiRatingGold   = "\x1b[38;2;255;215;0m"
-	ansiStatsSkyBlue = "\x1b[38;2;135;206;235m"
-	ansiBarCyan      = "\x1b[38;2;0;229;229m"
-)
-
 // segment is one colored (or plain, if fg == "") run of text within a
 // line -- a line mixing color and plain text (e.g. the progress line's
 // plain "[", colored bar, plain "] 1:23/4:56  vol 80%") is built as a

@@ -27,6 +27,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Mandatory on every run, every mode -- mirrors internal/metadata.
+	// Open's own "always ensure the schema exists" spirit, just for
+	// mpdtui's own settings file and default color file instead of a
+	// database. Non-fatal: a permissions problem here shouldn't stop
+	// mpdtui from running, just leave theme_file/music_dir/
+	// track_metadata unresolvable from a config file that was never
+	// written, same as before this existed.
+	if err := config.EnsureConfigFiles(); err != nil {
+		fmt.Fprintf(os.Stderr, "mpdtui: %v -- continuing without it\n", err)
+	}
+
 	cfg := config.Load()
 	client, err := mpdclient.Dial(cfg)
 	if err != nil {
@@ -62,11 +73,11 @@ func main() {
 
 	switch {
 	case *playlistPicker:
-		err = picker.RunPlaylistPicker(client)
+		err = picker.RunPlaylistPicker(client, config.LoadThemeFile())
 	case *trackPicker:
-		err = picker.RunTrackPicker(client)
+		err = picker.RunTrackPicker(client, config.LoadThemeFile())
 	case *miniMode:
-		err = mini.Run(client, metaDB)
+		err = mini.Run(client, metaDB, config.LoadThemeFile())
 	case *lyricsLine:
 		err = lyricsline.Print(client, config.LoadMusicDir(), os.Stdout)
 	default:
@@ -78,6 +89,7 @@ func main() {
 			TrackMetadataEnabled: config.LoadTrackMetadataEnabled(),
 			ConfigFilePath:       config.ConfigFile(),
 			DBFilePath:           config.DBFile(),
+			ThemeFile:            config.LoadThemeFile(),
 		}
 		err = ui.Run(client, config.LoadMusicDir(), metaDB, summary)
 	}
