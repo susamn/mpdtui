@@ -1,12 +1,24 @@
 package tests
 
 import (
+	"os"
 	"testing"
 	"time"
 
 	"mpdtui/internal/mpdclient"
 	"mpdtui/internal/ui"
 )
+
+// TestMain resets the package's theme-derived colors to mpdtui's
+// built-in defaults before any test runs -- without this, the
+// color-literal assertions below (StateGlyphColor, VolumeColor,
+// FlagText) would depend on whatever Omarchy theme happens to be live
+// on the machine running the tests (see internal/ui/theme.go's palette
+// var), rather than being deterministic.
+func TestMain(m *testing.M) {
+	ui.ResetPaletteForTest()
+	os.Exit(m.Run())
+}
 
 func TestFormatDuration(t *testing.T) {
 	cases := map[time.Duration]string{
@@ -117,7 +129,7 @@ func TestFlagTextColorsAndBoldsTheValue(t *testing.T) {
 	if got, want := ui.FlagText("repeat", true), "repeat [#25D366::b]on[-:-:-]"; got != want {
 		t.Errorf("FlagText(repeat, true) = %q, want %q", got, want)
 	}
-	if got, want := ui.FlagText("repeat", false), "repeat [red::b]off[-:-:-]"; got != want {
+	if got, want := ui.FlagText("repeat", false), "repeat [#DC3545::b]off[-:-:-]"; got != want {
 		t.Errorf("FlagText(repeat, false) = %q, want %q", got, want)
 	}
 }

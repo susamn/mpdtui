@@ -106,6 +106,67 @@ func LoadMusicDir() string {
 	return dir
 }
 
+// DefaultColorsFile is the path to mpdtui's own default color file
+// (see internal/theme.Serialize/Default), inside ConfigDir --
+// EnsureConfigFiles creates it there the first time mpdtui runs, and
+// LoadThemeFile points at it whenever theme_file isn't set to something
+// else.
+func DefaultColorsFile() string {
+	dir := ConfigDir()
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "colors.toml")
+}
+
+// LoadThemeFile reads theme_file from ConfigFile -- which color file
+// internal/theme's own LoadFrom reads from. Always resolves to *some*
+// usable path: DefaultColorsFile() if theme_file isn't set (missing
+// config file, or a config file with no such line) or ConfigDir() can't
+// be determined either, otherwise the configured value resolved via
+// resolveThemeFile (relative paths -- what EnsureConfigFiles itself
+// writes, "./colors.toml" -- against ConfigDir(); "~/" against the home
+// directory; an absolute path used as-is).
+//
+// This is how every desktop integration points at that path: on
+// Omarchy, set theme_file to
+// ~/.local/state/omarchy/current/theme/colors.toml (Omarchy's own live
+// theme file); on a matugen-driven Hyprland setup (which has no fixed
+// output location of its own -- see this repo's README for a matugen
+// template that emits a file in DefaultColorsFile()'s own shape), set
+// it to wherever that template's output_path writes. Unlike
+// LoadMusicDir, the resolved path isn't checked for existence here --
+// internal/theme's own LoadFrom already treats a missing/unreadable
+// file as "no live theme" and falls back to Default() on its own.
+func LoadThemeFile() string {
+	if value, ok := loadConfigValues()["theme_file"]; ok && value != "" {
+		return resolveThemeFile(value)
+	}
+	return DefaultColorsFile()
+}
+
+// resolveThemeFile resolves theme_file's raw configured value into an
+// absolute path: "~/" expands against the home directory (same as
+// expandHome); anything else not already absolute is resolved relative
+// to ConfigDir() -- so the default "./colors.toml" EnsureConfigFiles
+// writes keeps working if ConfigDir() itself ever moves (e.g.
+// $XDG_CONFIG_HOME changes), rather than baking in whatever absolute
+// path happened to be correct at config-creation time. An already-
+// absolute path (leading "/") is returned unchanged.
+func resolveThemeFile(value string) string {
+	if strings.HasPrefix(value, "~/") {
+		return expandHome(value)
+	}
+	if filepath.IsAbs(value) {
+		return value
+	}
+	dir := ConfigDir()
+	if dir == "" {
+		return value
+	}
+	return filepath.Join(dir, value)
+}
+
 // LoadTrackMetadataEnabled reads track_metadata from ConfigFile -- the
 // activation flag for internal/metadata's local play-count/rating/mark/
 // tags database. Off (false) unless the config file has a line reading

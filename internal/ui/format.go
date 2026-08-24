@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gdamore/tcell/v2"
+
 	"mpdtui/internal/mpdclient"
 )
 
@@ -60,22 +62,29 @@ func StateGlyph(s mpdclient.State) string {
 	}
 }
 
+// stateGlyphPlayColor/PauseColor/StopColor are theme-derived
+// (deriveColors, from the active theme's BrightGreen/BrightYellow/
+// BrightRed), see theme.go -- StateGlyphColor just selects between
+// them.
+var (
+	stateGlyphPlayColor  string
+	stateGlyphPauseColor string
+	stateGlyphStopColor  string
+)
+
 // StateGlyphColor returns the tview color tag value for s's own
-// StateGlyph -- bright green for Play, bright yellow for Pause, bright
-// red for Stop (and any other state), per explicit direction ("a bit
-// more vibrant... pause: bright yellow, play: bright green, stop:
-// bright red"): the glyph character itself is unchanged, only its
-// color. Pure/saturated hex rather than the softer WhatsApp-green/gold
-// used elsewhere in this bar -- "vibrant" was an explicit correction
-// after Play and Pause first shared that softer green.
+// StateGlyph -- a vibrant green for Play, yellow for Pause, red for
+// Stop (and any other state), per explicit direction ("a bit more
+// vibrant... pause: bright yellow, play: bright green, stop: bright
+// red"): the glyph character itself is unchanged, only its color.
 func StateGlyphColor(s mpdclient.State) string {
 	switch s {
 	case mpdclient.StatePlay:
-		return "#00FF00"
+		return stateGlyphPlayColor
 	case mpdclient.StatePause:
-		return "#FFFF00"
+		return stateGlyphPauseColor
 	default:
-		return "#FF0000"
+		return stateGlyphStopColor
 	}
 }
 
@@ -95,14 +104,22 @@ func VolText(v int) string {
 	return strconv.Itoa(v)
 }
 
+// volumeColorLow/Mid/High are the three stops VolumeColor interpolates
+// between (0%/50%/100%) -- theme-derived (deriveColors, from the active
+// theme's Green/Yellow/Red), see theme.go.
+var (
+	volumeColorLow  tcell.Color
+	volumeColorMid  tcell.Color
+	volumeColorHigh tcell.Color
+)
+
 // VolumeColor interpolates a tview hex color tag value (no brackets)
-// from WhatsApp green (0%) through gold (50%) to red (100%), so a
-// displayed volume percentage communicates its level at a glance --
-// explicit request ("the volume percentage value with diff color from
-// green to all the way to red"). Green/gold reuse the same colors
-// already established elsewhere for the same concepts (queueTitleColor,
-// queueRatingColor). Returns "" for an unknown volume (v < 0, VolText's
-// own "?" case), letting the caller skip coloring it entirely.
+// from volumeColorLow (0%) through volumeColorMid (50%) to
+// volumeColorHigh (100%), so a displayed volume percentage communicates
+// its level at a glance -- explicit request ("the volume percentage
+// value with diff color from green to all the way to red"). Returns ""
+// for an unknown volume (v < 0, VolText's own "?" case), letting the
+// caller skip coloring it entirely.
 func VolumeColor(v int) string {
 	if v < 0 {
 		return ""
@@ -110,18 +127,15 @@ func VolumeColor(v int) string {
 	if v > 100 {
 		v = 100
 	}
-	type rgb struct{ r, g, b int }
-	green := rgb{0x25, 0xD3, 0x66}
-	gold := rgb{0xFF, 0xD7, 0x00}
-	red := rgb{0xDC, 0x35, 0x45}
-
-	from, to, t := green, gold, float64(v)/50
+	from, to, t := volumeColorLow, volumeColorMid, float64(v)/50
 	if v > 50 {
-		from, to, t = gold, red, float64(v-50)/50
+		from, to, t = volumeColorMid, volumeColorHigh, float64(v-50)/50
 	}
-	r := int(float64(from.r) + t*float64(to.r-from.r))
-	g := int(float64(from.g) + t*float64(to.g-from.g))
-	b := int(float64(from.b) + t*float64(to.b-from.b))
+	fr, fg, fb := from.RGB()
+	tr, tg, tb := to.RGB()
+	r := int(float64(fr) + t*float64(tr-fr))
+	g := int(float64(fg) + t*float64(tg-fg))
+	b := int(float64(fb) + t*float64(tb-fb))
 	return fmt.Sprintf("#%02X%02X%02X", r, g, b)
 }
 
@@ -137,14 +151,21 @@ func VolumeText(v int) string {
 	return fmt.Sprintf("[%s]%s[-]", color, text)
 }
 
-// FlagText renders label + a bold, colored on/off value -- WhatsApp
-// green when on, red when off (explicit request: "red being off and
+// flagOnColor/flagOffColor are theme-derived (deriveColors, from the
+// active theme's Green/Red), see theme.go.
+var (
+	flagOnColor  string
+	flagOffColor string
+)
+
+// FlagText renders label + a bold, colored on/off value -- theme green
+// when on, theme red when off (explicit request: "red being off and
 // whatsapp green being on... make the value fonts bold"), for the
 // Now Playing bar's repeat/random/single/consume flags.
 func FlagText(label string, on bool) string {
-	color := "red"
+	color := flagOffColor
 	if on {
-		color = "#25D366"
+		color = flagOnColor
 	}
 	return fmt.Sprintf("%s [%s::b]%s[-:-:-]", label, color, OnOff(on))
 }

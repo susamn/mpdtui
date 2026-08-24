@@ -177,22 +177,20 @@ const (
 	queueColumnGap      = "  "
 )
 
-// queueTitleColor tints the Title cell WhatsApp's brand green (#25D366),
+// queueTitleColor tints the Title cell with the active theme's Green,
 // on top of its existing bold weight, so the track title reads as the
-// row's primary/most prominent field at a glance.
-var queueTitleColor = tcell.NewRGBColor(0x25, 0xD3, 0x66)
+// row's primary/most prominent field at a glance. Set by theme.go's
+// deriveColors (from palette), not a literal here -- see that file for
+// the actual mapping from palette to every color in this block.
+var queueTitleColor tcell.Color
 
 // queueHeaderBg/Fg give the header row an inverted look (filled
-// background, dark text) to set it apart from the data rows below.
-// queueHeaderBg is a forced true-RGB white (tcell.NewRGBColor), not the
-// basic ANSI tcell.ColorWhite -- that's a legacy 16-color palette slot,
-// confirmed via raw ANSI output to render as the SGR 107 "bright white
-// background" code, which plenty of terminal color themes customize to
-// something duller than actual white. A explicit RGB color is always sent
-// as a true 24-bit escape sequence, bypassing any such palette remapping.
+// background, contrasting text) to set it apart from the data rows
+// below. Both theme-derived (deriveColors) rather than a fixed white-
+// on-black -- see theme.go.
 var (
-	queueHeaderBg = tcell.NewRGBColor(255, 255, 255)
-	queueHeaderFg = tcell.ColorBlack
+	queueHeaderBg tcell.Color
+	queueHeaderFg tcell.Color
 )
 
 // queueColumns holds the Queue table's column indices for one header/
@@ -469,11 +467,12 @@ func playCountCell(count int) *tview.TableCell {
 		SetAlign(tview.AlignRight)
 }
 
-// queueRatingColor tints the Rating column gold, filled and unfilled
-// stars alike (ratingStars renders both in one string) -- a single
-// text color per cell is all tview.Table's TableCell supports, unlike a
-// TextView's per-rune dynamic-color tags.
-var queueRatingColor = tcell.NewRGBColor(0xFF, 0xD7, 0x00)
+// queueRatingColor tints the Rating column with the active theme's
+// Yellow, filled and unfilled stars alike (ratingStars renders both in
+// one string) -- a single text color per cell is all tview.Table's
+// TableCell supports, unlike a TextView's per-rune dynamic-color tags.
+// Theme-derived (deriveColors), see theme.go.
+var queueRatingColor tcell.Color
 
 // ratingCell renders a queue row's Rating column from its local rating
 // (0-5): ratingStars' filled+empty star glyphs, in gold.
@@ -494,15 +493,9 @@ const queueMarkTick = "✓"
 // internal/metadata's seedMarkReasons doc comment) and open-ended, so
 // there's no fixed reason-to-color mapping to hardcode; a deterministic
 // cycle at least keeps the same reason the same color across a session
-// and across restarts.
-var markTickColors = []tcell.Color{
-	tcell.ColorRed,
-	tcell.NewRGBColor(0xFF, 0xA5, 0x00), // orange
-	tcell.ColorGold,
-	tcell.ColorFuchsia,
-	tcell.ColorDeepSkyBlue,
-	tcell.ColorLime,
-}
+// and across restarts. Theme-derived (deriveColors, from the active
+// theme's Red/Orange/Yellow/Magenta/Blue/Green), see theme.go.
+var markTickColors []tcell.Color
 
 // markColor picks mark's deterministic color from markTickColors by id --
 // split out from markCell so trackInfoCard's metadata table (which shows
@@ -617,18 +610,11 @@ func truncateWithEllipsis(s string, max int) string {
 // style always overrides regardless of format, not a real rendering
 // failure. RGB colors are back, verified rendering correctly on
 // non-selected rows.
-var formatColors = map[string]tcell.Color{
-	"FLAC": tcell.ColorLime,
-	"MP3":  tcell.ColorSkyblue,
-	"WAV":  tcell.ColorTurquoise,
-	"M4A":  tcell.ColorLavender,
-	"AAC":  tcell.ColorLavender,
-	"OGG":  tcell.ColorAquaMarine,
-	"OPUS": tcell.ColorAquaMarine,
-	"WMA":  tcell.ColorOrange,
-}
+// Theme-derived (deriveColors), see theme.go for the actual
+// format-to-palette-field mapping.
+var formatColors map[string]tcell.Color
 
-const defaultFormatColor = tcell.ColorHotPink
+var defaultFormatColor tcell.Color
 
 // formatGap is trailing space after the tag, separating it from the
 // duration column next to it.

@@ -36,8 +36,12 @@ const (
 // rate-the-current-track keybinding when non-nil; pass nil to leave both
 // entirely inactive, same "off means off" convention
 // config.LoadTrackMetadataEnabled already establishes for the full panel
-// UI.
-func Run(client *mpdclient.Client, metaDB *metadata.DB) error {
+// UI. themeFile is config.LoadThemeFile()'s value -- "" (the default)
+// reads Omarchy's own live theme file (see theme.go); anything else
+// overrides that path (a Hyprland/matugen setup, e.g.).
+func Run(client *mpdclient.Client, metaDB *metadata.DB, themeFile string) error {
+	reloadTheme(themeFile)
+
 	fd := int(os.Stdin.Fd())
 	if !term.IsTerminal(fd) {
 		return fmt.Errorf("mini mode requires an interactive terminal on stdin")
@@ -53,6 +57,14 @@ func Run(client *mpdclient.Client, metaDB *metadata.DB) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
+
+	// SIGUSR1 is mpdtui's own theme-reload signal (see internal/ui's
+	// App.Run and its own longer explanation) -- a
+	// `pkill -SIGUSR1 mpdtui` from an Omarchy theme-set hook lands here
+	// too, so mini mode re-colors along with the full panel UI.
+	themeCh := make(chan os.Signal, 1)
+	signal.Notify(themeCh, syscall.SIGUSR1)
+	defer signal.Stop(themeCh)
 
 	keys := make(chan byte)
 	go readKeys(keys)
@@ -84,6 +96,9 @@ func Run(client *mpdclient.Client, metaDB *metadata.DB) error {
 		select {
 		case <-sigCh:
 			return nil
+		case <-themeCh:
+			reloadTheme(themeFile)
+			redraw()
 		case b, ok := <-keys:
 			if !ok {
 				return nil
@@ -303,11 +318,10 @@ func render(out *block, client *mpdclient.Client, metaDB *metadata.DB, playlistC
 	out.print(box(lines, width))
 }
 
-// statsSegments is sky blue in full, matching the full panel UI's own
-// use of tcell.ColorSkyblue elsewhere (e.g. the Queue's Lyr tick).
+// statsSegments is colored with the active theme's Blue (ansiStatsColor).
 func statsSegments(st mpdclient.Status, playlistCount int) []segment {
 	text := fmt.Sprintf("%d track(s) in queue  ·  %d playlist(s)", st.PlaylistLength, playlistCount)
-	return []segment{{text: text, fg: ansiStatsSkyBlue}}
+	return []segment{{text: text, fg: ansiStatsColor}}
 }
 
 func stateGlyph(state mpdclient.State) string {
@@ -333,7 +347,7 @@ func nowPlayingSegments(st mpdclient.Status, song mpdclient.Song) []segment {
 	}
 	return []segment{
 		{text: stateGlyph(st.State) + " "},
-		{text: track, fg: ansiTrackGreen},
+		{text: track, fg: ansiTrackColor},
 	}
 }
 
@@ -347,7 +361,7 @@ func progressSegments(st mpdclient.Status) []segment {
 	}
 	return []segment{
 		{text: "["},
-		{text: bar, fg: ansiBarCyan},
+		{text: bar, fg: ansiBarColor},
 		{text: fmt.Sprintf("] %s/%s  vol %s%%", formatDuration(st.Elapsed), formatDuration(st.Duration), vol)},
 	}
 }
@@ -358,7 +372,7 @@ func progressSegments(st mpdclient.Status) []segment {
 // actually playing (see render).
 func metaSegments(meta metadata.Track) []segment {
 	segs := []segment{
-		{text: ratingStars(meta.Rating), fg: ansiRatingGold},
+		{text: ratingStars(meta.Rating), fg: ansiRatingColor},
 		{text: fmt.Sprintf("  played %dx", meta.PlayCount)},
 	}
 	if meta.Mark != nil {

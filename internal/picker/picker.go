@@ -11,15 +11,51 @@ import (
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/theme"
 )
 
-// Colors mirror internal/ui/theme.go's scheme (kept independent per
-// DEPENDENCY.md rather than imported -- picker has no dependency on ui).
-const (
-	colorAccent     = tcell.ColorGreen
-	colorSelectedBg = tcell.ColorBlue
-	colorSelectedFg = tcell.ColorYellow
-)
+// Colors mirror internal/ui/theme.go's own derivation from the live
+// theme (internal/theme.LoadFrom) -- picker still has no dependency on
+// ui itself (see DEPENDENCY.md), only on the shared internal/theme leaf
+// package both import independently. Resolved once per run (initColors,
+// called by RunPlaylistPicker/RunTrackPicker with
+// internal/config.LoadThemeFile's value), not re-read on a theme-change
+// signal like ui's own palette: a picker run is a single short-lived
+// pick-one-and-exit invocation, gone well before a theme switch could
+// plausibly land mid-run.
+var colorAccent, colorSelectedBg, colorSelectedFg tcell.Color
+
+// initColors resolves colorAccent/colorSelectedBg/colorSelectedFg from
+// themeFile (internal/config.LoadThemeFile's value -- always a real
+// path once internal/config.EnsureConfigFiles has run; LoadFrom's own
+// Default() fallback covers the rare case it's unreadable anyway).
+func initColors(themeFile string) {
+	p, _ := theme.LoadFrom(themeFile)
+	colorAccent = hexColor(p.Accent)
+	colorSelectedBg = hexColor(p.Selection)
+	colorSelectedFg = contrastColor(colorSelectedBg)
+}
+
+// hexColor converts a theme.Color ("#RRGGBB") to a tcell.Color, via
+// tcell's own hex parser.
+func hexColor(c theme.Color) tcell.Color {
+	if c == "" {
+		return tcell.ColorDefault
+	}
+	return tcell.GetColor(string(c))
+}
+
+// contrastColor picks a readable foreground for text drawn on top of
+// bg, so the selected-row highlight stays legible regardless of how
+// bright or dark the active theme's accent color is.
+func contrastColor(bg tcell.Color) tcell.Color {
+	r, g, b := bg.RGB()
+	luminance := 0.299*float64(r) + 0.587*float64(g) + 0.114*float64(b)
+	if luminance > 140 {
+		return tcell.ColorBlack
+	}
+	return tcell.ColorWhite
+}
 
 // applyTheme overrides tview's global defaults, which otherwise force a
 // pure black background and ANSI white text irrespective of the user's
@@ -36,8 +72,11 @@ func applyTheme() {
 
 // RunPlaylistPicker fuzzy-searches stored playlists. Selecting one
 // (Enter) clears the queue and plays it. Cancelling (Esc/Ctrl-C) does
-// nothing.
-func RunPlaylistPicker(client *mpdclient.Client) error {
+// nothing. themeFile is config.LoadThemeFile()'s value -- see
+// initColors.
+func RunPlaylistPicker(client *mpdclient.Client, themeFile string) error {
+	initColors(themeFile)
+
 	playlists, err := client.Playlists()
 	if err != nil {
 		return fmt.Errorf("list playlists: %w", err)
@@ -64,8 +103,11 @@ func RunPlaylistPicker(client *mpdclient.Client) error {
 
 // RunTrackPicker fuzzy-searches every track in the library. Selecting
 // one (Enter) appends it to the queue and plays it. Cancelling
-// (Esc/Ctrl-C) does nothing.
-func RunTrackPicker(client *mpdclient.Client) error {
+// (Esc/Ctrl-C) does nothing. themeFile is config.LoadThemeFile()'s
+// value -- see initColors.
+func RunTrackPicker(client *mpdclient.Client, themeFile string) error {
+	initColors(themeFile)
+
 	songs, err := client.AllSongs()
 	if err != nil {
 		return fmt.Errorf("list tracks: %w", err)

@@ -69,8 +69,8 @@ func TestStatsSegmentsIsAllSkyBlue(t *testing.T) {
 		t.Errorf("statsSegments text = %q, want %q", got, want)
 	}
 	for _, seg := range segs {
-		if seg.fg != ansiStatsSkyBlue {
-			t.Errorf("statsSegments segment %q fg = %q, want %q", seg.text, seg.fg, ansiStatsSkyBlue)
+		if seg.fg != ansiStatsColor {
+			t.Errorf("statsSegments segment %q fg = %q, want %q", seg.text, seg.fg, ansiStatsColor)
 		}
 	}
 }
@@ -92,8 +92,8 @@ func TestNowPlayingSegmentsColorsOnlyTheTrackGreen(t *testing.T) {
 	for _, seg := range segs {
 		switch seg.text {
 		case "Track":
-			if seg.fg != ansiTrackGreen {
-				t.Errorf("track segment fg = %q, want %q", seg.fg, ansiTrackGreen)
+			if seg.fg != ansiTrackColor {
+				t.Errorf("track segment fg = %q, want %q", seg.fg, ansiTrackColor)
 			}
 		default:
 			if seg.fg != "" {
@@ -117,8 +117,8 @@ func TestProgressSegmentsUnknownVolume(t *testing.T) {
 			barFg = seg.fg
 		}
 	}
-	if barFg != ansiBarCyan {
-		t.Errorf("progress bar segment fg = %q, want %q", barFg, ansiBarCyan)
+	if barFg != ansiBarColor {
+		t.Errorf("progress bar segment fg = %q, want %q", barFg, ansiBarColor)
 	}
 }
 
@@ -136,8 +136,8 @@ func TestMetaSegmentsRatedAndMarkedColorsOnlyTheStarsGold(t *testing.T) {
 	if got := plainText(segs); got != want {
 		t.Errorf("metaSegments text = %q, want %q", got, want)
 	}
-	if segs[0].fg != ansiRatingGold {
-		t.Errorf("rating segment fg = %q, want %q", segs[0].fg, ansiRatingGold)
+	if segs[0].fg != ansiRatingColor {
+		t.Errorf("rating segment fg = %q, want %q", segs[0].fg, ansiRatingColor)
 	}
 	for _, seg := range segs[1:] {
 		if seg.fg != "" {

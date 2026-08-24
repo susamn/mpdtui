@@ -157,6 +157,168 @@ Connects using the same environment variables as `mpc`:
 
 Press `?` inside the full UI for the in-app keybinding list.
 
+## Theming
+
+mpdtui reads its color palette from a plain file -- borders, the
+selected-row highlight, format badges, ratings, and every other accent
+color come from it, rather than being fixed in the binary. This is
+entirely config-driven: mpdtui itself has no built-in notion of
+Omarchy, matugen, or any other specific desktop -- it only knows about
+one setting, `theme_file`, in its own config file
+(`~/.config/mpdtui/config`, alongside `music_dir`/`track_metadata`).
+
+The first time mpdtui ever runs (any mode -- full UI, `-mini`, `-p`,
+`-t`), it creates both of these if they don't already exist yet, and
+never touches either again once they do:
+
+- `~/.config/mpdtui/colors.toml` -- mpdtui's own default color file,
+  seeded with its original built-in colors, so there's a real,
+  inspectable, editable file on disk from the start rather than a value
+  only visible in the source.
+- `~/.config/mpdtui/config` -- with `theme_file = ./colors.toml`
+  already pointing at that default file (a relative path resolves
+  against `~/.config/mpdtui` itself, whatever `$XDG_CONFIG_HOME` is set
+  to; `~/...` and absolute paths both work too), plus commented
+  examples for `music_dir`/`track_metadata`.
+
+So out of the box, on any generic Linux system, mpdtui looks exactly
+like it always did -- just now backed by a file you can open and edit
+directly, rather than a fixed scheme. To follow a live desktop theme
+instead, point `theme_file` at wherever that theme's colors actually
+live -- see below for Omarchy and matugen specifically, or hand-edit
+`~/.config/mpdtui/colors.toml` itself for anything else.
+
+**File format** -- flat `key = "value"` pairs, no sections/arrays/
+nesting:
+
+```
+mode = "dark"
+
+accent = "#89b4fa"
+selection = "#cdd6f4"
+muted = "#45475a"
+
+background = "#1e1e2e"
+dark_background = "#171723"
+darker_background = "#0f0f17"
+lighter_background = "#353543"
+
+foreground = "#cdd6f4"
+dark_foreground = "#9aa1b7"
+light_foreground = "#d5dcf6"
+bright_foreground = "#dae0f7"
+
+red = "#f38ba8"
+yellow = "#f9e2af"
+orange = "#f59cb5"
+green = "#a6e3a1"
+cyan = "#94e2d5"
+blue = "#89b4fa"
+magenta = "#cba6f7"
+brown = "#935e6d"
+
+bright_red = "#f38ba8"
+bright_yellow = "#f9e2af"
+bright_green = "#a6e3a1"
+bright_cyan = "#94e2d5"
+bright_blue = "#89b4fa"
+bright_magenta = "#cba6f7"
+```
+
+(this is deliberately the same shape Omarchy's own theme files use --
+any subset of these keys is fine, missing ones just keep the built-in
+default for that slot; see `internal/theme.Default`)
+
+`theme_file` is read once at startup. To make an already-running mpdtui
+(full UI or `-mini`) pick up a change to that file without restarting
+it, send it `SIGUSR1` -- the same convention e.g. Omarchy's own
+theme-set flow already uses for kitty/ghostty/btop/helix (see
+`omarchy-restart-terminal` and friends): each app opts in by handling
+that signal itself and re-reading its own config, rather than something
+else pushing color data at it. Whatever regenerates `theme_file` should
+send this after writing it:
+
+```bash
+pkill -SIGUSR1 mpdtui
+```
+
+Also visible at a glance from the Settings overlay (`e`) -- the Config
+tab shows the resolved `theme_file` path and whether it was actually
+found and read.
+
+### Omarchy
+
+Point `theme_file` at Omarchy's own live theme file, which it keeps in
+sync on every `omarchy theme set ...`:
+
+```
+theme_file = ~/.local/state/omarchy/current/theme/colors.toml
+```
+
+Then drop this in `~/.config/omarchy/hooks/theme-set.d/reload-mpdtui.hook`
+(and `chmod +x` it) so mpdtui re-reads it automatically on every switch:
+
+```bash
+#!/bin/bash
+pkill -SIGUSR1 mpdtui
+```
+
+### matugen
+
+Unlike Omarchy, [matugen](https://github.com/InioX/matugen) has no
+single fixed output file of its own: it only produces whatever
+*template* you configure, written to wherever you tell it. Add a
+template that emits mpdtui's own file shape
+(`~/.config/matugen/templates/mpdtui-colors.toml`):
+
+```
+accent = "{{colors.primary.default.hex}}"
+selection = "{{colors.secondary_container.default.hex}}"
+muted = "{{colors.outline.default.hex}}"
+
+background = "{{colors.surface.default.hex}}"
+dark_background = "{{colors.surface_dim.default.hex}}"
+lighter_background = "{{colors.surface_bright.default.hex}}"
+
+foreground = "{{colors.on_surface.default.hex}}"
+dark_foreground = "{{colors.on_surface_variant.default.hex}}"
+
+red = "{{colors.error.default.hex}}"
+yellow = "{{colors.secondary.default.hex}}"
+orange = "{{colors.tertiary_container.default.hex}}"
+green = "{{colors.tertiary.default.hex}}"
+cyan = "{{colors.secondary_fixed.default.hex}}"
+blue = "{{colors.primary.default.hex}}"
+magenta = "{{colors.tertiary_fixed.default.hex}}"
+
+bright_red = "{{colors.on_error_container.default.hex}}"
+bright_yellow = "{{colors.on_secondary_container.default.hex}}"
+bright_green = "{{colors.on_tertiary_container.default.hex}}"
+bright_cyan = "{{colors.secondary_fixed_dim.default.hex}}"
+bright_blue = "{{colors.primary_container.default.hex}}"
+bright_magenta = "{{colors.tertiary_fixed_dim.default.hex}}"
+```
+
+(the red/green/yellow/blue/magenta/cyan role choices mirror matugen's own
+usual kitty-template ANSI-color mapping, so it stays consistent with the
+rest of an existing matugen setup) then wire it into
+`~/.config/matugen/config.toml`:
+
+```toml
+[templates.mpdtui]
+input_path = '~/.config/matugen/templates/mpdtui-colors.toml'
+output_path = '~/.cache/mpdtui/colors.toml'
+post_hook = "pkill -SIGUSR1 mpdtui"
+```
+
+`post_hook` there is exactly the same SIGUSR1 nudge as the Omarchy hook
+above -- matugen already runs it on every regenerate. Then point
+`theme_file` in mpdtui's own config at that same `output_path`:
+
+```
+theme_file = ~/.cache/mpdtui/colors.toml
+```
+
 ## Keybindings
 
 **Global** (any panel):
@@ -360,8 +522,10 @@ UI so far.
   (matching the Database tab's own look). Shows exactly what mpdtui
   resolved at startup: MPD host/port (and whether a password is set,
   never the password itself), `music_dir` (or a note that it's not
-  configured), and `track_metadata`'s status plus the config/database
-  file paths. There's no way to edit any of this from here -- it's a
+  configured), `track_metadata`'s status, the config/database file
+  paths, and `theme_file`'s resolved path plus whether it was actually
+  found and read (see [Theming](#theming)). There's no way to edit any
+  of this from here -- it's a
   snapshot for reference, not a settings form; change the underlying
   environment variables or `~/.config/mpdtui/config` and restart mpdtui
   instead.
