@@ -180,10 +180,17 @@ func (p *albumArtPanel) fetch(uri string, seq int) {
 // sequences straight to the terminal without racing tview/tcell's own
 // output. Retransmits only when the image or the panel's size actually
 // changed (sentSig), and explicitly deletes the previously-drawn image
-// (a=d) when there's no longer one to show -- tview's own Clear() only
-// touches its text buffer, it has no idea a Kitty image is separately
-// composited on top, so without this the old art would stay ghosted on
-// screen after switching to a track with no art.
+// (a=d) before every retransmit, not just when there's no longer one to
+// show -- tview's own Clear() only touches its text buffer, it has no
+// idea a Kitty image is separately composited on top, and Kitty's own
+// a=T (transmit+display) always creates a *new* placement rather than
+// replacing the last one. Without the delete, a same-size track change
+// merely draws the new image exactly over the old one (invisible, since
+// both cover identical terminal cells) -- but a terminal resize moves/
+// resizes the panel first, so the new placement lands somewhere else
+// and the old one stays ghosted on screen right alongside it, which is
+// what actually surfaces this: two overlapping copies of the art after
+// a resize.
 func (p *albumArtPanel) draw() {
 	if !supportsKittyGraphics() {
 		return
@@ -209,6 +216,9 @@ func (p *albumArtPanel) draw() {
 	sig := fmt.Sprintf("%s:%d:%d:%d", p.currentURI, len(data), w, h)
 	if p.sentSig == sig {
 		return
+	}
+	if p.sentSig != "" {
+		fmt.Print("\033_Ga=d\033\\")
 	}
 	p.sentSig = sig
 

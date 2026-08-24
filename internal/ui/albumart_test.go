@@ -1,6 +1,96 @@
 package ui
 
-import "testing"
+import (
+	"io"
+	"os"
+	"strings"
+	"testing"
+)
+
+// captureDraw redirects os.Stdout for the duration of fn (draw's own raw
+// terminal writes have no other seam to observe) and returns everything
+// written.
+func captureDraw(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	old := os.Stdout
+	os.Stdout = w
+	fn()
+	os.Stdout = old
+	w.Close()
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	return string(out)
+}
+
+// TestDrawDeletesPreviousPlacementOnResize covers the actual bug seen in
+// the wild: a terminal resize changes the Album Art panel's own pixel
+// rect mid-session, and draw() retransmits the image at the new
+// position/size -- but Kitty's a=T (transmit+display) always creates a
+// *new* placement rather than replacing the last one. Without an
+// explicit a=d (delete) before the second transmit, the old placement
+// stays on screen at its old position, ghosted right alongside the new
+// one -- exactly the offset double-image screenshot this was reported
+// from. A same-size track change doesn't show this visually (the new
+// image happens to land on identical terminal cells, hiding the old
+// one), which is why only a resize surfaced it.
+func TestDrawDeletesPreviousPlacementOnResize(t *testing.T) {
+	t.Setenv("TERM", "xterm-kitty")
+
+	p := newAlbumArtPanel(&App{})
+	p.currentURI = "track-a.mp3"
+	p.kittyPNG = []byte("fake-png-data")
+
+	p.view.SetRect(0, 0, 20, 10)
+	first := captureDraw(t, p.draw)
+	if strings.Contains(first, "\033_Ga=d\033\\") {
+		t.Errorf("first draw() sent a delete with nothing previously placed: %q", first)
+	}
+	if !strings.Contains(first, "\033_Ga=T") {
+		t.Errorf("first draw() didn't transmit an image: %q", first)
+	}
+
+	// Simulate a terminal resize: the panel's inner rect changes, so
+	// draw()'s own signature (URI:len:w:h) changes too, without the
+	// image data or currentURI changing at all.
+	p.view.SetRect(0, 0, 30, 15)
+	second := captureDraw(t, p.draw)
+	if !strings.Contains(second, "\033_Ga=d\033\\") {
+		t.Errorf("resize draw() didn't delete the previous placement before retransmitting: %q", second)
+	}
+	if !strings.Contains(second, "\033_Ga=T") {
+		t.Errorf("resize draw() didn't retransmit the image: %q", second)
+	}
+	// The delete must come before the retransmit, not after -- sending
+	// it after would just delete the placement this call itself made.
+	if idx := strings.Index(second, "\033_Ga=d\033\\"); idx > strings.Index(second, "\033_Ga=T") {
+		t.Errorf("delete came after retransmit, want before: %q", second)
+	}
+}
+
+// TestDrawSkipsRetransmitWhenNothingChanged covers draw()'s own
+// deduplication: calling it again with the same URI/data/size should
+// neither delete nor retransmit anything -- called once per screen
+// redraw, this runs far more often than the image actually changes.
+func TestDrawSkipsRetransmitWhenNothingChanged(t *testing.T) {
+	t.Setenv("TERM", "xterm-kitty")
+
+	p := newAlbumArtPanel(&App{})
+	p.currentURI = "track-a.mp3"
+	p.kittyPNG = []byte("fake-png-data")
+	p.view.SetRect(0, 0, 20, 10)
+
+	captureDraw(t, p.draw)
+	again := captureDraw(t, p.draw)
+	if again != "" {
+		t.Errorf("second draw() with nothing changed wrote %q, want nothing", again)
+	}
+}
 
 func TestSupportsKittyGraphics(t *testing.T) {
 	cases := []struct {
