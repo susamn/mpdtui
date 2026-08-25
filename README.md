@@ -144,9 +144,10 @@ Requires Go 1.26+ and a reachable MPD server.
 ./mpdtui -mini    # lightweight inline player
 ./mpdtui -p       # fuzzy-search playlists; Enter clears the queue and plays it
 ./mpdtui -t       # fuzzy-search tracks; Enter adds it to the queue and plays it
+./mpdtui -v       # print version and exit
 ```
 
-`-mini`, `-p`, and `-t` are mutually exclusive.
+`-mini`, `-p`, `-t`, and `-lyrics-line` are mutually exclusive.
 
 Connects using the same environment variables as `mpc`:
 
