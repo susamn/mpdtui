@@ -85,13 +85,12 @@ func newQueuePanel(app *App) *queuePanel {
 	})
 	q.table = t
 	_, _, w, _ := t.GetRect()
-	compact := w > 0 && w < queueCompactWidthThreshold
-	q.cols = newQueueColumns(app.musicDir != "", app.metaDB != nil, compact)
+	showYear, showGenre, showComposer := queueOptionalColumns(w, app.musicDir != "", app.metaDB != nil)
+	q.cols = newQueueColumns(app.musicDir != "", app.metaDB != nil, showYear, showGenre, showComposer)
 	setQueueHeader(t, q.cols)
 
 	t.SetDrawFunc(func(screen tcell.Screen, x, y, width, height int) (int, int, int, int) {
-		compact := width < queueCompactWidthThreshold
-		if compact != q.cols.compact || (compact && width != q.lastRenderedWidth) {
+		if width > 0 && width != q.lastRenderedWidth {
 			q.lastRenderedWidth = width
 			q.render(q.currentID)
 		}
@@ -223,17 +222,11 @@ var (
 
 // queueColumns holds the Queue table's column indices for one header/
 // render pass. Lyr only exists as a column when the lyrics feature is
-// actually active -- a music_dir that config.LoadMusicDir has already
-// confirmed both exists and is a real directory, not just configured --
-// so an install without it (or with a broken/stale setting) looks
-// exactly like it did before this feature existed, rather than always
-// reserving space for a column that will never show anything. Every
-// other column shifts left by one to fill that gap when Lyr is absent
-// (lyr == -1). On smaller screens (compact == true), Year, Genre, and
-// Composer are omitted (indices set to -1) so the remaining columns
-// have guaranteed space without clipping.
+// actually active. Playcount/Mark/Rating exist when metadata is active.
+// Year, Genre, and Composer are optional columns included progressively
+// based on available screen width in order of priority: Year first, then
+// Genre, and finally Composer on wide screens.
 type queueColumns struct {
-	compact                                                                                  bool
 	lyr, title, album, artist, year, genre, composer, playcount, mark, rating, typ, duration int
 }
 
@@ -241,11 +234,10 @@ type queueColumns struct {
 // Marker (0) and position (1) are always fixed; Title always follows at
 // 2; everything from there on is assigned sequentially, with Lyr
 // included only when lyricsActive and Playcount/Mark/Rating included
-// only when metadataActive (App.metaDB != nil). On compact screens,
-// Year, Genre, and Composer are omitted (-1).
-func newQueueColumns(lyricsActive, metadataActive, compact bool) queueColumns {
+// only when metadataActive (App.metaDB != nil). Year, Genre, and Composer
+// are included conditionally according to available space and priority.
+func newQueueColumns(lyricsActive, metadataActive, showYear, showGenre, showComposer bool) queueColumns {
 	var c queueColumns
-	c.compact = compact
 	c.title = 2
 	next := 3
 	if lyricsActive {
@@ -258,16 +250,22 @@ func newQueueColumns(lyricsActive, metadataActive, compact bool) queueColumns {
 	next++
 	c.artist = next
 	next++
-	if !compact {
+	if showYear {
 		c.year = next
-		next++
-		c.genre = next
-		next++
-		c.composer = next
 		next++
 	} else {
 		c.year = -1
+	}
+	if showGenre {
+		c.genre = next
+		next++
+	} else {
 		c.genre = -1
+	}
+	if showComposer {
+		c.composer = next
+		next++
+	} else {
 		c.composer = -1
 	}
 	if metadataActive {
@@ -363,25 +361,67 @@ func setQueueHeader(t *tview.Table, cols queueColumns) {
 	set(cols.duration, "Duration", tview.AlignRight)
 }
 
+// queueOptionalColumns determines which optional columns (Year, Genre,
+// Composer) should be shown given the available table width and active
+// features. The core columns (Title, Lyr, Album, Artist, Plays, Mark,
+// Rating, Type, Duration) are always preserved on all displays. Extra
+// space is allocated progressively by priority: Year first, then Genre,
+// and finally Composer on wide screens.
+func queueOptionalColumns(width int, lyricsActive, metadataActive bool) (showYear, showGenre, showComposer bool) {
+	if width <= 0 {
+		return true, true, true
+	}
+	fixed := 2 + 3 + 6 + 6 + 2 // marker(2) + pos(3) + type(6) + duration(6) + border(2)
+	if lyricsActive {
+		fixed += 3
+	}
+	if metadataActive {
+		fixed += 6 + 3 + 7
+	}
+	avail := width - fixed
+	// Base space needed for Title (20), Album (14), Artist (18) + gaps (6) = 58
+	const baseTextSpace = 58
+	if avail >= baseTextSpace+6 { // Year (4 + 2 gap = 6)
+		showYear = true
+	}
+	if avail >= baseTextSpace+6+11 { // Genre (9 + 2 gap = 11)
+		showGenre = true
+	}
+	if avail >= baseTextSpace+6+11+16 { // Composer (14 + 2 gap = 16)
+		showComposer = true
+	}
+	return showYear, showGenre, showComposer
+}
+
 // queueColumnTruncation calculates the maximum text lengths (runes) for Title,
-// Album, and Artist based on available table width and active features.
-// On full screens (compact == false), fixed standard caps (30/20/40) are used.
-// On compact screens, text column caps scale proportionally to the available width
+// Album, and Artist based on available table width and optional columns.
+// Fixed standard caps (30/20/40) are used when all columns fit comfortably.
+// On narrower screens, text column caps scale proportionally to the available width
 // after reserving fixed space for marker, pos, lyrics, play count, mark, rating,
 // type, and duration columns, ensuring the trailing metadata and format columns
 // are never pushed off screen.
-func queueColumnTruncation(width int, lyricsActive, metadataActive, compact bool) (titleLen, albumLen, artistLen int) {
-	if !compact {
+func queueColumnTruncation(width int, lyricsActive, metadataActive, showYear, showGenre, showComposer bool) (titleLen, albumLen, artistLen int) {
+	if showYear && showGenre && showComposer {
 		return queueTitleMaxLen, queueAlbumMaxLen, queueArtistMaxLen
 	}
-	// Fixed width needed by non-text columns:
-	// Marker (2) + Pos (3) + [Lyr (3)] + [Plays (6) + Mark (3) + Rating (7)] + Type (6) + Duration (6) + Table border (2)
+	if width <= 0 {
+		return queueTitleCompactMaxLen, queueAlbumCompactMaxLen, queueArtistCompactMaxLen
+	}
 	fixed := 2 + 3 + 6 + 6 + 2
 	if lyricsActive {
 		fixed += 3
 	}
 	if metadataActive {
 		fixed += 6 + 3 + 7
+	}
+	if showYear {
+		fixed += 6
+	}
+	if showGenre {
+		fixed += 11
+	}
+	if showComposer {
+		fixed += 16
 	}
 	avail := width - fixed
 	if avail <= 0 {
@@ -421,12 +461,10 @@ func (q *queuePanel) render(curID int) {
 	lyricsActive := q.app.musicDir != ""
 	metadataActive := q.app.metaDB != nil
 	_, _, w, _ := q.table.GetRect()
-	compact := q.cols.compact
-	if w > 0 {
-		compact = w < queueCompactWidthThreshold
-	}
 	q.lastRenderedWidth = w
-	cols := newQueueColumns(lyricsActive, metadataActive, compact)
+
+	showYear, showGenre, showComposer := queueOptionalColumns(w, lyricsActive, metadataActive)
+	cols := newQueueColumns(lyricsActive, metadataActive, showYear, showGenre, showComposer)
 	q.cols = cols
 	setQueueHeader(q.table, cols)
 	// lrcDirs/txtDirs cache internal/lyrics.LRCCandidates/Candidates per
@@ -437,7 +475,7 @@ func (q *queuePanel) render(curID int) {
 	lrcDirs := map[string]map[string]string{}
 	txtDirs := map[string]map[string]string{}
 
-	titleMaxLen, albumMaxLen, artistMaxLen := queueColumnTruncation(w, lyricsActive, metadataActive, cols.compact)
+	titleMaxLen, albumMaxLen, artistMaxLen := queueColumnTruncation(w, lyricsActive, metadataActive, showYear, showGenre, showComposer)
 
 	for i, s := range q.songs {
 		row := i + queueHeaderRows
