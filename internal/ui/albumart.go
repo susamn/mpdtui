@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"image"
+	"image/color"
 	_ "image/jpeg"
 	"image/png"
 	"os"
@@ -12,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/qeesung/image2ascii/convert"
+	"github.com/nfnt/resize"
 	"github.com/rivo/tview"
 )
 
@@ -203,10 +204,9 @@ func (p *albumArtPanel) fetch(uri string, seq int) {
 	}
 
 	p.setKittyPNGIfCurrent(seq, nil)
-	opts := convert.DefaultOptions
-	opts.FixedWidth = 30
-	opts.FixedHeight = 15
-	asciiStr := convert.NewImageConverter().Image2ASCIIString(img, &opts)
+
+	// Fallback to high-resolution ASCII using Unicode half-blocks and true color
+	asciiStr := imageToHalfBlocks(img, 30, 15)
 
 	p.app.tv.QueueUpdateDraw(func() {
 		if !p.isCurrent(seq) {
@@ -295,4 +295,39 @@ func (p *albumArtPanel) draw() {
 	p.lastImageID = id
 	p.sentSig = sig
 	p.lastSentAt = time.Now()
+}
+
+// imageToHalfBlocks converts an image to a high-resolution terminal string
+// using Unicode half-blocks (▀) and ANSI true color sequences.
+// Each character represents 2 vertical pixels (foreground for top, background for bottom).
+func imageToHalfBlocks(img image.Image, width, height int) string {
+	// resize to width, height*2 (since each character represents 2 vertical pixels)
+	img = resize.Resize(uint(width), uint(height*2), img, resize.Lanczos3)
+
+	bounds := img.Bounds()
+	var b []byte
+
+	for y := bounds.Min.Y; y < bounds.Max.Y; y += 2 {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			cTop := img.At(x, y)
+			var cBot color.Color = color.RGBA{0, 0, 0, 0}
+			if y+1 < bounds.Max.Y {
+				cBot = img.At(x, y+1)
+			}
+
+			r1, g1, b1, a1 := cTop.RGBA()
+			r2, g2, b2, a2 := cBot.RGBA()
+
+			r1, g1, b1 = r1>>8, g1>>8, b1>>8
+			r2, g2, b2 = r2>>8, g2>>8, b2>>8
+
+			if a1 < 128 && a2 < 128 {
+				b = append(b, []byte(" ")...)
+			} else {
+				b = append(b, []byte(fmt.Sprintf("\033[38;2;%d;%d;%dm\033[48;2;%d;%d;%dm▀", r1, g1, b1, r2, g2, b2))...)
+			}
+		}
+		b = append(b, []byte("\033[0m\n")...)
+	}
+	return string(b)
 }
