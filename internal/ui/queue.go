@@ -36,6 +36,11 @@ type queuePanel struct {
 	// goroutine, same as every other field here.
 	cols queueColumns
 
+	// lastRenderedWidth is the table width (runes) at the last render pass,
+	// tracked so SetDrawFunc can trigger a re-render when terminal resize
+	// alters the available column space on smaller screens.
+	lastRenderedWidth int
+
 	// metaCache holds the last known local metadata (rating/mark) per
 	// song file, populated asynchronously (see refreshTrackMeta) so
 	// render() never blocks the UI goroutine on a database read. Absent
@@ -79,8 +84,22 @@ func newQueuePanel(app *App) *queuePanel {
 		q.app.refreshNowPlaying()
 	})
 	q.table = t
-	q.cols = newQueueColumns(app.musicDir != "", app.metaDB != nil)
+	_, _, w, _ := t.GetRect()
+	compact := w > 0 && w < queueCompactWidthThreshold
+	q.cols = newQueueColumns(app.musicDir != "", app.metaDB != nil, compact)
 	setQueueHeader(t, q.cols)
+
+	t.SetDrawFunc(func(screen tcell.Screen, x, y, width, height int) (int, int, int, int) {
+		compact := width < queueCompactWidthThreshold
+		if compact != q.cols.compact || (compact && width != q.lastRenderedWidth) {
+			q.lastRenderedWidth = width
+			q.render(q.currentID)
+		}
+		if width <= 2 || height <= 2 {
+			return x, y, 0, 0
+		}
+		return x + 1, y + 1, width - 2, height - 2
+	})
 
 	search := tview.NewInputField().SetLabel("Search track: ")
 	search.SetBorder(true)
@@ -169,12 +188,21 @@ func (q *queuePanel) refresh() {
 // automatic column spacing). Year has no max of its own: yearFromDate
 // already caps it to at most 4 characters.
 const (
-	queueTitleMaxLen    = 30
-	queueAlbumMaxLen    = 20
-	queueArtistMaxLen   = 40
-	queueGenreMaxLen    = 9
-	queueComposerMaxLen = 14
-	queueColumnGap      = "  "
+	queueTitleMaxLen         = 30
+	queueAlbumMaxLen         = 20
+	queueArtistMaxLen        = 40
+	queueGenreMaxLen         = 9
+	queueComposerMaxLen      = 14
+	queueTitleCompactMaxLen  = 22
+	queueAlbumCompactMaxLen  = 16
+	queueArtistCompactMaxLen = 20
+	queueColumnGap           = "  "
+
+	// queueCompactWidthThreshold is the Queue table width (runes) below
+	// which the table drops Year, Genre, and Composer columns to preserve
+	// space for Title, Album, Artist, Play count, Mark, Rating, Type, and
+	// Duration on smaller or scaled screens (e.g. 1080p @ 1.5x scaling).
+	queueCompactWidthThreshold = 130
 )
 
 // queueTitleColor tints the Title cell with the active theme's Green,
@@ -201,8 +229,11 @@ var (
 // exactly like it did before this feature existed, rather than always
 // reserving space for a column that will never show anything. Every
 // other column shifts left by one to fill that gap when Lyr is absent
-// (lyr == -1).
+// (lyr == -1). On smaller screens (compact == true), Year, Genre, and
+// Composer are omitted (indices set to -1) so the remaining columns
+// have guaranteed space without clipping.
 type queueColumns struct {
+	compact                                                                                  bool
 	lyr, title, album, artist, year, genre, composer, playcount, mark, rating, typ, duration int
 }
 
@@ -210,12 +241,11 @@ type queueColumns struct {
 // Marker (0) and position (1) are always fixed; Title always follows at
 // 2; everything from there on is assigned sequentially, with Lyr
 // included only when lyricsActive and Playcount/Mark/Rating included
-// only when metadataActive (App.metaDB != nil) -- same "don't reserve
-// space for a column that will never show anything" reasoning as Lyr.
-// Playcount/Mark/Rating sit right before Type, in that order, per
-// explicit request (Playcount ahead of Mark, itself ahead of Rating).
-func newQueueColumns(lyricsActive, metadataActive bool) queueColumns {
+// only when metadataActive (App.metaDB != nil). On compact screens,
+// Year, Genre, and Composer are omitted (-1).
+func newQueueColumns(lyricsActive, metadataActive, compact bool) queueColumns {
 	var c queueColumns
+	c.compact = compact
 	c.title = 2
 	next := 3
 	if lyricsActive {
@@ -228,12 +258,18 @@ func newQueueColumns(lyricsActive, metadataActive bool) queueColumns {
 	next++
 	c.artist = next
 	next++
-	c.year = next
-	next++
-	c.genre = next
-	next++
-	c.composer = next
-	next++
+	if !compact {
+		c.year = next
+		next++
+		c.genre = next
+		next++
+		c.composer = next
+		next++
+	} else {
+		c.year = -1
+		c.genre = -1
+		c.composer = -1
+	}
 	if metadataActive {
 		c.playcount = next
 		next++
@@ -302,10 +338,18 @@ func setQueueHeader(t *tview.Table, cols queueColumns) {
 	set(cols.title, "Title"+queueColumnGap, tview.AlignLeft)
 	set(cols.album, "Album"+queueColumnGap, tview.AlignLeft)
 	set(cols.artist, "Artist"+queueColumnGap, tview.AlignLeft)
-	set(cols.year, "Year"+queueColumnGap, tview.AlignLeft)
-	set(cols.genre, "Genre"+queueColumnGap, tview.AlignLeft)
-	set(cols.composer, "Composer"+queueColumnGap, tview.AlignLeft)
-	t.GetCell(0, cols.composer).SetExpansion(1)
+	if cols.year >= 0 {
+		set(cols.year, "Year"+queueColumnGap, tview.AlignLeft)
+	}
+	if cols.genre >= 0 {
+		set(cols.genre, "Genre"+queueColumnGap, tview.AlignLeft)
+	}
+	if cols.composer >= 0 {
+		set(cols.composer, "Composer"+queueColumnGap, tview.AlignLeft)
+		t.GetCell(0, cols.composer).SetExpansion(1)
+	} else {
+		t.GetCell(0, cols.artist).SetExpansion(1)
+	}
 	if cols.playcount >= 0 {
 		set(cols.playcount, "Plays"+queueColumnGap, tview.AlignRight)
 	}
@@ -319,11 +363,70 @@ func setQueueHeader(t *tview.Table, cols queueColumns) {
 	set(cols.duration, "Duration", tview.AlignRight)
 }
 
+// queueColumnTruncation calculates the maximum text lengths (runes) for Title,
+// Album, and Artist based on available table width and active features.
+// On full screens (compact == false), fixed standard caps (30/20/40) are used.
+// On compact screens, text column caps scale proportionally to the available width
+// after reserving fixed space for marker, pos, lyrics, play count, mark, rating,
+// type, and duration columns, ensuring the trailing metadata and format columns
+// are never pushed off screen.
+func queueColumnTruncation(width int, lyricsActive, metadataActive, compact bool) (titleLen, albumLen, artistLen int) {
+	if !compact {
+		return queueTitleMaxLen, queueAlbumMaxLen, queueArtistMaxLen
+	}
+	// Fixed width needed by non-text columns:
+	// Marker (2) + Pos (3) + [Lyr (3)] + [Plays (6) + Mark (3) + Rating (7)] + Type (6) + Duration (6) + Table border (2)
+	fixed := 2 + 3 + 6 + 6 + 2
+	if lyricsActive {
+		fixed += 3
+	}
+	if metadataActive {
+		fixed += 6 + 3 + 7
+	}
+	avail := width - fixed
+	if avail <= 0 {
+		return queueTitleCompactMaxLen, queueAlbumCompactMaxLen, queueArtistCompactMaxLen
+	}
+	// Distribute available width proportionally: Title ~38%, Album ~26%, Artist ~36%
+	// Subtract 2 per column for queueColumnGap
+	tLen := (avail*38)/100 - 2
+	aLen := (avail*26)/100 - 2
+	arLen := (avail*36)/100 - 2
+
+	if tLen < 12 {
+		tLen = 12
+	}
+	if aLen < 8 {
+		aLen = 8
+	}
+	if arLen < 12 {
+		arLen = 12
+	}
+
+	if tLen > queueTitleMaxLen {
+		tLen = queueTitleMaxLen
+	}
+	if aLen > queueAlbumMaxLen {
+		aLen = queueAlbumMaxLen
+	}
+	if arLen > queueArtistMaxLen {
+		arLen = queueArtistMaxLen
+	}
+
+	return tLen, aLen, arLen
+}
+
 func (q *queuePanel) render(curID int) {
 	q.table.Clear()
 	lyricsActive := q.app.musicDir != ""
 	metadataActive := q.app.metaDB != nil
-	cols := newQueueColumns(lyricsActive, metadataActive)
+	_, _, w, _ := q.table.GetRect()
+	compact := q.cols.compact
+	if w > 0 {
+		compact = w < queueCompactWidthThreshold
+	}
+	q.lastRenderedWidth = w
+	cols := newQueueColumns(lyricsActive, metadataActive, compact)
 	q.cols = cols
 	setQueueHeader(q.table, cols)
 	// lrcDirs/txtDirs cache internal/lyrics.LRCCandidates/Candidates per
@@ -333,6 +436,9 @@ func (q *queuePanel) render(curID int) {
 	// re-listing it (once per format) more than once per directory.
 	lrcDirs := map[string]map[string]string{}
 	txtDirs := map[string]map[string]string{}
+
+	titleMaxLen, albumMaxLen, artistMaxLen := queueColumnTruncation(w, lyricsActive, metadataActive, cols.compact)
+
 	for i, s := range q.songs {
 		row := i + queueHeaderRows
 		marker := "  "
@@ -343,7 +449,7 @@ func (q *queuePanel) render(curID int) {
 		if title == "" {
 			title = baseName(s.File)
 		}
-		titleText := truncateWithEllipsis(title, queueTitleMaxLen)
+		titleText := truncateWithEllipsis(title, titleMaxLen)
 		q.table.SetCell(row, 0, tview.NewTableCell(marker))
 		q.table.SetCell(row, 1, tview.NewTableCell(fmt.Sprintf("%3d", i+1)))
 		q.table.SetCell(row, cols.title, tview.NewTableCell(titleText+queueColumnGap).
@@ -358,12 +464,24 @@ func (q *queuePanel) render(curID int) {
 			// should only take to contain the icon").
 			q.table.SetCell(row, cols.lyr, tview.NewTableCell(lyricsCellText(q.lyricsPresence(s.File, lrcDirs, txtDirs))))
 		}
-		q.table.SetCell(row, cols.album, tview.NewTableCell(truncateWithEllipsis(s.Album, queueAlbumMaxLen)+queueColumnGap))
-		q.table.SetCell(row, cols.artist, tview.NewTableCell(truncateWithEllipsis(s.Artist, queueArtistMaxLen)+queueColumnGap))
-		q.table.SetCell(row, cols.year, tview.NewTableCell(yearFromDate(s.Date)+queueColumnGap))
-		q.table.SetCell(row, cols.genre, tview.NewTableCell(truncateWithEllipsis(s.Genre, queueGenreMaxLen)+queueColumnGap))
-		q.table.SetCell(row, cols.composer, tview.NewTableCell(truncateWithEllipsis(s.Composer, queueComposerMaxLen)+queueColumnGap).
-			SetExpansion(1))
+		q.table.SetCell(row, cols.album, tview.NewTableCell(truncateWithEllipsis(s.Album, albumMaxLen)+queueColumnGap))
+
+		artistCell := tview.NewTableCell(truncateWithEllipsis(s.Artist, artistMaxLen) + queueColumnGap)
+		if cols.composer < 0 {
+			artistCell.SetExpansion(1)
+		}
+		q.table.SetCell(row, cols.artist, artistCell)
+
+		if cols.year >= 0 {
+			q.table.SetCell(row, cols.year, tview.NewTableCell(yearFromDate(s.Date)+queueColumnGap))
+		}
+		if cols.genre >= 0 {
+			q.table.SetCell(row, cols.genre, tview.NewTableCell(truncateWithEllipsis(s.Genre, queueGenreMaxLen)+queueColumnGap))
+		}
+		if cols.composer >= 0 {
+			q.table.SetCell(row, cols.composer, tview.NewTableCell(truncateWithEllipsis(s.Composer, queueComposerMaxLen)+queueColumnGap).
+				SetExpansion(1))
+		}
 		if cols.playcount >= 0 || cols.mark >= 0 || cols.rating >= 0 {
 			// Whatever's cached so far (possibly the zero-value Track, if
 			// the background fetch below hasn't landed yet) -- never a

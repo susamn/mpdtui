@@ -17,6 +17,7 @@ import (
 func newTestApp() *App {
 	a := &App{tv: tview.NewApplication()}
 	a.build()
+	a.queue.table.SetRect(0, 0, 150, 40)
 	return a
 }
 

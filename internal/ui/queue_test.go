@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
@@ -262,21 +263,21 @@ func TestQueueRenderShowsDefaultUnratedUnmarkedRow(t *testing.T) {
 // lyr == -1 is the "no such column" sentinel render()/setQueueHeader
 // check before ever touching that index.
 func TestNewQueueColumnsOmitsLyrWhenInactive(t *testing.T) {
-	cols := newQueueColumns(false, false)
+	cols := newQueueColumns(false, false, false)
 	if cols.lyr != -1 {
 		t.Errorf("lyr = %d, want -1 (no Lyr column when lyrics is inactive)", cols.lyr)
 	}
-	want := queueColumns{lyr: -1, title: 2, album: 3, artist: 4, year: 5, genre: 6, composer: 7, playcount: -1, mark: -1, rating: -1, typ: 8, duration: 9}
+	want := queueColumns{compact: false, lyr: -1, title: 2, album: 3, artist: 4, year: 5, genre: 6, composer: 7, playcount: -1, mark: -1, rating: -1, typ: 8, duration: 9}
 	if cols != want {
-		t.Errorf("newQueueColumns(false, false) = %+v, want %+v", cols, want)
+		t.Errorf("newQueueColumns(false, false, false) = %+v, want %+v", cols, want)
 	}
 }
 
 func TestNewQueueColumnsIncludesLyrWhenActive(t *testing.T) {
-	cols := newQueueColumns(true, false)
-	want := queueColumns{lyr: 3, title: 2, album: 4, artist: 5, year: 6, genre: 7, composer: 8, playcount: -1, mark: -1, rating: -1, typ: 9, duration: 10}
+	cols := newQueueColumns(true, false, false)
+	want := queueColumns{compact: false, lyr: 3, title: 2, album: 4, artist: 5, year: 6, genre: 7, composer: 8, playcount: -1, mark: -1, rating: -1, typ: 9, duration: 10}
 	if cols != want {
-		t.Errorf("newQueueColumns(true, false) = %+v, want %+v", cols, want)
+		t.Errorf("newQueueColumns(true, false, false) = %+v, want %+v", cols, want)
 	}
 }
 
@@ -286,18 +287,157 @@ func TestNewQueueColumnsIncludesLyrWhenActive(t *testing.T) {
 // (i.e. App.metaDB != nil) -- otherwise the layout is identical to Lyr's
 // own "no such column" omission.
 func TestNewQueueColumnsIncludesMarkAndRatingWhenMetadataActive(t *testing.T) {
-	cols := newQueueColumns(false, true)
-	want := queueColumns{lyr: -1, title: 2, album: 3, artist: 4, year: 5, genre: 6, composer: 7, playcount: 8, mark: 9, rating: 10, typ: 11, duration: 12}
+	cols := newQueueColumns(false, true, false)
+	want := queueColumns{compact: false, lyr: -1, title: 2, album: 3, artist: 4, year: 5, genre: 6, composer: 7, playcount: 8, mark: 9, rating: 10, typ: 11, duration: 12}
 	if cols != want {
-		t.Errorf("newQueueColumns(false, true) = %+v, want %+v", cols, want)
+		t.Errorf("newQueueColumns(false, true, false) = %+v, want %+v", cols, want)
 	}
 }
 
 func TestNewQueueColumnsIncludesLyrAndMarkAndRatingTogether(t *testing.T) {
-	cols := newQueueColumns(true, true)
-	want := queueColumns{lyr: 3, title: 2, album: 4, artist: 5, year: 6, genre: 7, composer: 8, playcount: 9, mark: 10, rating: 11, typ: 12, duration: 13}
+	cols := newQueueColumns(true, true, false)
+	want := queueColumns{compact: false, lyr: 3, title: 2, album: 4, artist: 5, year: 6, genre: 7, composer: 8, playcount: 9, mark: 10, rating: 11, typ: 12, duration: 13}
 	if cols != want {
-		t.Errorf("newQueueColumns(true, true) = %+v, want %+v", cols, want)
+		t.Errorf("newQueueColumns(true, true, false) = %+v, want %+v", cols, want)
+	}
+}
+
+func TestNewQueueColumnsCompactOmitsYearGenreComposer(t *testing.T) {
+	cols := newQueueColumns(false, false, true)
+	if cols.year != -1 || cols.genre != -1 || cols.composer != -1 {
+		t.Errorf("compact columns had year=%d, genre=%d, composer=%d, want all -1", cols.year, cols.genre, cols.composer)
+	}
+	want := queueColumns{compact: true, lyr: -1, title: 2, album: 3, artist: 4, year: -1, genre: -1, composer: -1, playcount: -1, mark: -1, rating: -1, typ: 5, duration: 6}
+	if cols != want {
+		t.Errorf("newQueueColumns(false, false, true) = %+v, want %+v", cols, want)
+	}
+}
+
+func TestNewQueueColumnsCompactWithLyrAndMetadata(t *testing.T) {
+	cols := newQueueColumns(true, true, true)
+	want := queueColumns{compact: true, lyr: 3, title: 2, album: 4, artist: 5, year: -1, genre: -1, composer: -1, playcount: 6, mark: 7, rating: 8, typ: 9, duration: 10}
+	if cols != want {
+		t.Errorf("newQueueColumns(true, true, true) = %+v, want %+v", cols, want)
+	}
+}
+
+func TestQueueHeaderRowCompactOmitsYearGenreComposer(t *testing.T) {
+	a := newTestApp()
+	a.queue.table.SetRect(0, 0, 80, 40)
+	a.queue.render(-1)
+
+	wantHeaders := []struct {
+		col   int
+		text  string
+		align int
+	}{
+		{0, "", tview.AlignLeft},
+		{1, "", tview.AlignLeft},
+		{2, "Title" + queueColumnGap, tview.AlignLeft},
+		{3, "Album" + queueColumnGap, tview.AlignLeft},
+		{4, "Artist" + queueColumnGap, tview.AlignLeft},
+		{5, "Type" + formatGap, tview.AlignRight},
+		{6, "Duration", tview.AlignRight},
+	}
+	for _, w := range wantHeaders {
+		cell := a.queue.table.GetCell(0, w.col)
+		if cell.Text != w.text {
+			t.Errorf("header col %d text = %q, want %q", w.col, cell.Text, w.text)
+		}
+		if cell.Align != w.align {
+			t.Errorf("header col %d align = %d, want %d", w.col, cell.Align, w.align)
+		}
+	}
+	if a.queue.table.GetCell(0, 4).Expansion != 1 {
+		t.Errorf("Artist header cell in compact mode has expansion %d, want 1", a.queue.table.GetCell(0, 4).Expansion)
+	}
+}
+
+func TestQueueRenderCompactOmitsYearGenreComposerAndExpandsArtist(t *testing.T) {
+	a := newTestApp()
+	a.queue.table.SetRect(0, 0, 80, 40)
+	a.queue.songs = []mpdclient.Song{{
+		ID:       1,
+		Title:    "A Very Long Song Title Exceeding Max",
+		Album:    "A Very Long Album Name Exceeding Max",
+		Artist:   "A Very Long Artist Name Exceeding Max",
+		Date:     "1999",
+		Genre:    "Rock",
+		Composer: "Composer Name",
+		File:     "artist/track.mp3",
+		Duration: 180 * time.Second,
+	}}
+	a.queue.render(-1)
+
+	row := queueHeaderRows
+	titleLen, albumLen, artistLen := queueColumnTruncation(80, false, false, true)
+	wantTitle := truncateWithEllipsis("A Very Long Song Title Exceeding Max", titleLen) + queueColumnGap
+	if got := a.queue.table.GetCell(row, 2).Text; got != wantTitle {
+		t.Errorf("compact title cell = %q, want %q", got, wantTitle)
+	}
+	wantAlbum := truncateWithEllipsis("A Very Long Album Name Exceeding Max", albumLen) + queueColumnGap
+	if got := a.queue.table.GetCell(row, 3).Text; got != wantAlbum {
+		t.Errorf("compact album cell = %q, want %q", got, wantAlbum)
+	}
+	wantArtist := truncateWithEllipsis("A Very Long Artist Name Exceeding Max", artistLen) + queueColumnGap
+	if got := a.queue.table.GetCell(row, 4).Text; got != wantArtist {
+		t.Errorf("compact artist cell = %q, want %q", got, wantArtist)
+	}
+	if a.queue.table.GetCell(row, 4).Expansion != 1 {
+		t.Errorf("Artist data cell in compact mode has expansion %d, want 1", a.queue.table.GetCell(row, 4).Expansion)
+	}
+	if got := a.queue.table.GetCell(row, 5).Text; got != "MP3"+formatGap {
+		t.Errorf("compact type cell = %q, want %q", got, "MP3"+formatGap)
+	}
+	if got := a.queue.table.GetCell(row, 6).Text; got != "3:00" {
+		t.Errorf("compact duration cell = %q, want %q", got, "3:00")
+	}
+}
+
+func TestQueueColumnTruncationAcrossDifferentWidths(t *testing.T) {
+	// Full layout on wide screens
+	tLen, aLen, arLen := queueColumnTruncation(150, true, true, false)
+	if tLen != queueTitleMaxLen || aLen != queueAlbumMaxLen || arLen != queueArtistMaxLen {
+		t.Errorf("wide full truncation = (%d, %d, %d), want (%d, %d, %d)", tLen, aLen, arLen, queueTitleMaxLen, queueAlbumMaxLen, queueArtistMaxLen)
+	}
+
+	// 1080p @ 1.5x scale (approx 95 width with metadata and lyrics active)
+	tLen, aLen, arLen = queueColumnTruncation(95, true, true, true)
+	// Fixed width: 2(marker) + 3(pos) + 3(lyr) + 6(plays) + 3(mark) + 7(rating) + 6(type) + 6(duration) + 2(border) = 38
+	// Text width: (tLen+2) + (aLen+2) + (arLen+2)
+	totalWidth := 38 + (tLen + 2) + (aLen + 2) + (arLen + 2)
+	if totalWidth > 95 {
+		t.Errorf("95-width queue total column width = %d, exceeds available 95", totalWidth)
+	}
+
+	// Very narrow width (e.g. 60 width)
+	tLen, aLen, arLen = queueColumnTruncation(60, true, true, true)
+	if tLen < 12 || aLen < 8 || arLen < 12 {
+		t.Errorf("narrow truncation dropped below floor: (%d, %d, %d)", tLen, aLen, arLen)
+	}
+}
+
+func TestQueueDynamicCompactResizeOnDraw(t *testing.T) {
+	a := newTestApp()
+	a.queue.table.SetRect(0, 0, 150, 40)
+	a.queue.render(-1)
+	if a.queue.cols.compact {
+		t.Errorf("initial wide width 150: cols.compact = true, want false")
+	}
+
+	// Shrink below threshold and trigger Draw on table (which executes SetDrawFunc)
+	screen := tcell.NewSimulationScreen("")
+	if err := screen.Init(); err != nil {
+		t.Fatalf("screen.Init: %v", err)
+	}
+	defer screen.Fini()
+	screen.SetSize(80, 24)
+
+	a.queue.table.SetRect(0, 0, 80, 24)
+	a.queue.table.Draw(screen)
+
+	if !a.queue.cols.compact {
+		t.Errorf("after shrinking to width 80: cols.compact = false, want true")
 	}
 }
 
