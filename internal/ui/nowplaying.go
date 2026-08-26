@@ -41,6 +41,12 @@ func (a *App) renderNowPlaying(st mpdclient.Status, song mpdclient.Song) {
 	if a.metaDB != nil && song.File != "" {
 		meta, _ := a.metaDB.Get(song.File) // zero-opinion Track (not an error) if unrated/unplayed yet
 		line2 += fmt.Sprintf("   rating [%s]%s[-]   played %dx", nowPlayingRatingColor, ratingStars(meta.Rating), meta.PlayCount)
+		if a.queue != nil {
+			cached, ok := a.queue.metaCache[song.File]
+			if !ok || cached.Rating != meta.Rating || cached.PlayCount != meta.PlayCount || (cached.Mark == nil) != (meta.Mark == nil) || (cached.Mark != nil && meta.Mark != nil && *cached.Mark != *meta.Mark) {
+				a.queue.applyTrackMeta(song.File, meta)
+			}
+		}
 	}
 
 	a.nowPlaying.SetText(line1 + "\n" + line2)

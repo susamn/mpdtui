@@ -79,3 +79,84 @@ func TestRenderNowPlayingOmitsRatingWhenNothingPlaying(t *testing.T) {
 		t.Errorf("Now Playing text = %q, want no rating row when nothing's playing", got)
 	}
 }
+
+func TestRenderNowPlayingSyncsExternalRatingChangeToQueue(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	song := mpdclient.Song{File: "artist/track.mp3", Title: "Track"}
+	a.queue.songs = []mpdclient.Song{song}
+	a.queue.render(-1)
+
+	// Initially 0 stars in queue table
+	cols := a.queue.cols
+	if got := a.queue.table.GetCell(queueHeaderRows, cols.rating).Text; !strings.Contains(got, ratingStars(0)) {
+		t.Fatalf("initial rating cell = %q, want %q", got, ratingStars(0))
+	}
+
+	// External write updates rating in metaDB
+	if err := a.metaDB.Rate(song.File, 5); err != nil {
+		t.Fatalf("Rate: %v", err)
+	}
+
+	// Now playing render runs on the next tick
+	a.renderNowPlaying(mpdclient.Status{}, song)
+
+	// Queue table rating cell should be updated
+	if got := a.queue.table.GetCell(queueHeaderRows, cols.rating).Text; !strings.Contains(got, ratingStars(5)) {
+		t.Errorf("queue rating cell after external rate = %q, want %q", got, ratingStars(5))
+	}
+}
+
+func TestRenderNowPlayingSyncsExternalMarkChangeToQueue(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	song := mpdclient.Song{File: "artist/track.mp3", Title: "Track"}
+	a.queue.songs = []mpdclient.Song{song}
+	a.queue.render(-1)
+
+	cols := a.queue.cols
+	// Initially blank/empty mark cell
+	if got := a.queue.table.GetCell(queueHeaderRows, cols.mark).Text; strings.TrimSpace(got) != "" {
+		t.Fatalf("initial mark cell = %q, want blank", got)
+	}
+
+	// External write sets mark in metaDB
+	markID := int64(1) // seeded "mark for deletion"
+	if err := a.metaDB.SetMark(song.File, &markID); err != nil {
+		t.Fatalf("SetMark: %v", err)
+	}
+
+	// Now playing render runs on the next tick
+	a.renderNowPlaying(mpdclient.Status{}, song)
+
+	// Queue table mark cell should now have mark tick
+	if got := a.queue.table.GetCell(queueHeaderRows, cols.mark).Text; strings.TrimSpace(got) == "" {
+		t.Errorf("queue mark cell after external mark set = %q, want non-empty mark tick", got)
+	}
+}
+
+func TestRenderNowPlayingSyncsExternalPlayCountChangeToQueue(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	song := mpdclient.Song{File: "artist/track.mp3", Title: "Track"}
+	a.queue.songs = []mpdclient.Song{song}
+	a.queue.render(-1)
+
+	cols := a.queue.cols
+	// Initially 0 plays
+	if got := a.queue.table.GetCell(queueHeaderRows, cols.playcount).Text; !strings.Contains(got, "0") {
+		t.Fatalf("initial playcount cell = %q, want %q", got, "0")
+	}
+
+	// External write increments play count in metaDB
+	if err := a.metaDB.IncrementPlayCount(song.File); err != nil {
+		t.Fatalf("IncrementPlayCount: %v", err)
+	}
+
+	// Now playing render runs on the next tick
+	a.renderNowPlaying(mpdclient.Status{}, song)
+
+	// Queue table playcount cell should now show 1
+	if got := a.queue.table.GetCell(queueHeaderRows, cols.playcount).Text; !strings.Contains(got, "1") {
+		t.Errorf("queue playcount cell after external increment = %q, want %q", got, "1")
+	}
+}
+
+
