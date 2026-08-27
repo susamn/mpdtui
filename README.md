@@ -115,6 +115,9 @@ single-line inline player for a shell or tmux pane.
   tmux status panes or a quick glance
 - **Fuzzy pickers** (`-p` / `-t`) — fzf-style playlist/track search from
   the shell, no panels involved
+- **Track info and metadata updates** (`-i` / `-iu`) — print details for the
+  currently playing track (`-i`), or update track properties such as rating
+  (`-iu -r 1-5`) directly from the command line
 - Confirmation prompts on destructive actions (clear queue, delete playlist)
 
 ## Install
@@ -140,14 +143,16 @@ Requires Go 1.26+ and a reachable MPD server.
 ## Usage
 
 ```bash
-./mpdtui          # full panel UI
-./mpdtui -mini    # lightweight inline player
-./mpdtui -p       # fuzzy-search playlists; Enter clears the queue and plays it
-./mpdtui -t       # fuzzy-search tracks; Enter adds it to the queue and plays it
+./mpdtui            # full panel UI
+./mpdtui -mini      # lightweight inline player
+./mpdtui -p         # fuzzy-search playlists; Enter clears the queue and plays it
+./mpdtui -t         # fuzzy-search tracks; Enter adds it to the queue and plays it
+./mpdtui -i         # print info for the currently playing track
+./mpdtui -iu -r 4   # update rating of the currently playing track (1-5)
 ./mpdtui -v       # print version and exit
 ```
 
-`-mini`, `-p`, `-t`, and `-lyrics-line` are mutually exclusive.
+`-mini`, `-p`, `-t`, `-lyrics-line`, `-i`, and `-iu` are mutually exclusive.
 
 Connects using the same environment variables as `mpc`:
 
