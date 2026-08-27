@@ -49,6 +49,8 @@ func (a *App) renderNowPlaying(st mpdclient.Status, song mpdclient.Song) {
 		}
 	}
 
+	line2 += a.castStatusLine()
+
 	a.nowPlaying.SetText(line1 + "\n" + line2)
 }
 

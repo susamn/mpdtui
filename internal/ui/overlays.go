@@ -180,6 +180,14 @@ const helpText = `[::b]Global[-:-:-]
                  unaffected
   v              cycle Now Playing visualizations
   L              locate the currently playing track in the Queue
+  P              cast MPD's audio to a Chromecast / Nest device: a popup
+                 lists devices found on the network (j/k/g/G to navigate,
+                 Enter to cast, Esc to cancel). mpdtui enables MPD's httpd
+                 output while casting and restores it on stop; the device
+                 keeps playing if you quit mpdtui, and mpdtui re-attaches
+                 to it on the next launch. Press P again and pick
+                 "Stop casting" to tear it down. Needs an httpd audio
+                 output in mpd.conf -- see the README.
   e              settings: Config tab (read-only: MPD host/port,
                  music_dir, track_metadata status) and Database tab --
                  browse the mark_reason/tags catalog tables (when

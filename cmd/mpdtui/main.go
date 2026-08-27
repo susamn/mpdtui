@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"mpdtui/internal/cast"
 	"mpdtui/internal/config"
 	"mpdtui/internal/lyricsline"
 	"mpdtui/internal/metadata"
@@ -121,7 +122,8 @@ func main() {
 			DBFilePath:           config.DBFile(),
 			ThemeFile:            config.LoadThemeFile(),
 		}
-		err = ui.Run(client, config.LoadMusicDir(), metaDB, summary)
+		castMgr := cast.NewManager(cast.LoadConfig(cfg.Host), client)
+		err = ui.Run(client, config.LoadMusicDir(), metaDB, summary, castMgr)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mpdtui: %v\n", err)
