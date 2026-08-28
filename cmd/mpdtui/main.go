@@ -25,10 +25,28 @@ func main() {
 	trackInfo := flag.Bool("i", false, "print info for the currently playing track and exit")
 	trackInfoUpdate := flag.Bool("iu", false, "update metadata for the currently playing track and exit")
 	ratingFlag := flag.Int("r", 0, "rating value (1-5) to update when used with -iu")
+	stopFlag := flag.Bool("stop", false, "stop MPD playback and exit")
+	castList := flag.Bool("cast-list", false, "list discovered cast targets and exit")
+	castTo := flag.String("cast-to", "", "start casting MPD's audio to the named (or id'd) cast target and exit")
+	castStop := flag.Bool("cast-stop", false, "tear down the active cast (stop the device, restore MPD outputs) and exit")
 	flag.Parse()
 
 	if modeCount(*miniMode, *playlistPicker, *trackPicker, *lyricsLine, *trackInfo, *trackInfoUpdate) > 1 {
 		fmt.Fprintln(os.Stderr, "mpdtui: -mini, -p, -t, -lyrics-line, -i, and -iu are mutually exclusive")
+		os.Exit(1)
+	}
+
+	// -stop and the -cast-* actions are one-shot: do the thing, exit. They
+	// are mutually exclusive with each other and with any of the UI modes
+	// above -- checked separately so the message above (and its tests)
+	// stays untouched.
+	actionCount := modeCount(*stopFlag, *castList, *castTo != "", *castStop)
+	if actionCount > 1 {
+		fmt.Fprintln(os.Stderr, "mpdtui: -stop, -cast-list, -cast-to, and -cast-stop are mutually exclusive")
+		os.Exit(1)
+	}
+	if actionCount == 1 && modeCount(*miniMode, *playlistPicker, *trackPicker, *lyricsLine, *trackInfo, *trackInfoUpdate) > 0 {
+		fmt.Fprintln(os.Stderr, "mpdtui: -stop and -cast-* cannot be combined with -mini, -p, -t, -lyrics-line, -i, or -iu")
 		os.Exit(1)
 	}
 
@@ -76,7 +94,8 @@ func main() {
 	// short-lived processes each opening the same sqlite file produced a
 	// steady stream of "database is locked" (SQLITE_BUSY) warnings on
 	// stderr, even though none of them needed the database in the first place.
-	fullUIMode := !*miniMode && !*playlistPicker && !*trackPicker && !*lyricsLine && !*trackInfo && !*trackInfoUpdate
+	headlessAction := *stopFlag || *castList || *castTo != "" || *castStop
+	fullUIMode := !*miniMode && !*playlistPicker && !*trackPicker && !*lyricsLine && !*trackInfo && !*trackInfoUpdate && !headlessAction
 	var metaDB *metadata.DB
 	if (*miniMode || fullUIMode || *trackInfo || *trackInfoUpdate) && config.LoadTrackMetadataEnabled() {
 		metaDB, err = metadata.Open(config.DBFile())
@@ -96,7 +115,21 @@ func main() {
 		}
 	}
 
+	// Built once, shared by the headless -cast-* actions and the full UI.
+	var castMgr *cast.Manager
+	if fullUIMode || *castList || *castTo != "" || *castStop {
+		castMgr = cast.NewManager(cast.LoadConfig(cfg.Host), client)
+	}
+
 	switch {
+	case *stopFlag:
+		err = client.Stop()
+	case *castList:
+		err = cast.List(os.Stdout, castMgr)
+	case *castTo != "":
+		err = cast.Start(os.Stdout, castMgr, *castTo)
+	case *castStop:
+		err = cast.Stop(os.Stdout, castMgr)
 	case *playlistPicker:
 		err = picker.RunPlaylistPicker(client, config.LoadThemeFile())
 	case *trackPicker:
@@ -122,7 +155,6 @@ func main() {
 			DBFilePath:           config.DBFile(),
 			ThemeFile:            config.LoadThemeFile(),
 		}
-		castMgr := cast.NewManager(cast.LoadConfig(cfg.Host), client)
 		err = ui.Run(client, config.LoadMusicDir(), metaDB, summary, castMgr)
 	}
 	if err != nil {

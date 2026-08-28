@@ -35,6 +35,22 @@ theme_file = ./colors.toml
 # Local play-count/rating/mark/tags tracking, in a SQLite database next
 # to this file. Off by default.
 # track_metadata = true
+
+# Casting (P, and the -cast-list / -cast-to / -cast-stop flags). Chromecast
+# and Nest devices are auto-discovered on the network -- nothing here is
+# needed for them. Casting requires an "httpd" audio_output in mpd.conf
+# (see the README).
+#
+# Only set these if the auto-guessed stream URL (MPD's host + the httpd
+# port) is wrong -- e.g. MPD runs on localhost and the cast device is on
+# the LAN:
+# cast_stream_host = 192.168.1.10
+# httpd_port = 8000
+# cast_stream_url = http://192.168.1.10:8000/
+#
+# Also disable MPD's other (local) outputs while casting, so audio comes
+# out only the cast device:
+# cast_exclusive = true
 `
 
 // EnsureConfigFiles makes sure mpdtui's own settings file (ConfigFile)
