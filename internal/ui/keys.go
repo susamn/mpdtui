@@ -123,6 +123,9 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 		case 'i':
 			a.openTrackInfo()
 			return nil
+		case 'I':
+			a.handleReindexLyrics()
+			return nil
 		case 'y':
 			a.openLyricsViewer()
 			return nil

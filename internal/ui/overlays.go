@@ -127,7 +127,7 @@ func (a *App) confirm(text string, onYes func()) {
 func (a *App) openHelp() {
 	view := tview.NewTextView().SetDynamicColors(true).SetText(helpText)
 	view.SetBorder(true).SetTitle(" Help (Esc to close) ")
-	a.showOverlay("help", centered(view, 76, 22), view)
+	a.showOverlay("help", centered(view, 76, 25), view)
 }
 
 const helpText = `[::b]Global[-:-:-]
@@ -178,6 +178,11 @@ const helpText = `[::b]Global[-:-:-]
                  block-letter "STARTING" banner plus "....." shows in
                  place of the lyrics list -- .lrc only, plain .txt is
                  unaffected
+  I              rebuild the lyrics search index (needs music_dir) -- a
+                 background scan of every track's .txt/.lrc sidecar, with
+                 a progress overlay; Esc cancels a run. Incremental, so a
+                 rebuild after adding a few lyrics files only re-reads
+                 those. Index lives at ~/.config/mpdtui/lyrics_index.db
   v              cycle Now Playing visualizations
   L              locate the currently playing track in the Queue
   e              settings: Config tab (read-only: MPD host/port,

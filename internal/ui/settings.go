@@ -26,6 +26,7 @@ type ConfigSummary struct {
 	TrackMetadataEnabled bool
 	ConfigFilePath       string
 	DBFilePath           string
+	LyricsIndexPath      string
 
 	// ThemeFile is theme_file's configured value (see
 	// internal/config.LoadThemeFile), "" meaning internal/theme's own
@@ -211,6 +212,7 @@ func populateConfigTable(table *tview.Table, cfg ConfigSummary) {
 		{"Track Metadata", trackMetadata},
 		{"Config File", orPlaceholder(cfg.ConfigFilePath)},
 		{"Database File", orPlaceholder(cfg.DBFilePath)},
+		{"Lyrics Index File", orPlaceholder(cfg.LyricsIndexPath)},
 		{"Theme File", themeFile},
 		{"Theme Status", themeStatus},
 	}
