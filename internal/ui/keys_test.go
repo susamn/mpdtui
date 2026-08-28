@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
@@ -66,6 +67,22 @@ func TestEscapeClearsPlaylistsFilter(t *testing.T) {
 	}
 	if got := len(a.playlists.shown); got != 3 {
 		t.Errorf("item count after Escape = %d, want 3 (unfiltered)", got)
+	}
+}
+
+func TestReindexLyricsWithoutMusicDirJustFlashes(t *testing.T) {
+	a := newTestApp()
+	a.musicDir = ""
+
+	key := tcell.NewEventKey(tcell.KeyRune, 'I', tcell.ModNone)
+	if result := a.globalInputCapture(key); result != nil {
+		t.Errorf("'I' should be consumed, got %v", result)
+	}
+	if a.mode != modeNormal {
+		t.Errorf("mode = %d after 'I' with no music_dir, want modeNormal (no overlay)", a.mode)
+	}
+	if got := a.hintBar.GetText(true); !strings.Contains(got, "music_dir") {
+		t.Errorf("hint bar = %q, want a music_dir hint", got)
 	}
 }
 

@@ -44,6 +44,19 @@ func DBFile() string {
 	return filepath.Join(dir, "mpdtui.db")
 }
 
+// LyricsIndexFile is the path to mpdtui's persistent lyrics search index
+// (see internal/lyricsindex), a SQLite file inside ConfigDir next to
+// ConfigFile and DBFile. Returns "" when ConfigDir can't be determined,
+// same as the others -- the lyrics-index feature is then simply
+// unavailable, not an error.
+func LyricsIndexFile() string {
+	dir := ConfigDir()
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "lyrics_index.db")
+}
+
 // loadConfigValues parses ConfigFile into a key->value map, or nil if it
 // doesn't exist or can't be read. Shared by every LoadX function in this
 // file so the file is only ever parsed once per key looked up, not once
