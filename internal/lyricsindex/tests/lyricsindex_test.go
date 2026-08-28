@@ -34,10 +34,10 @@ func buildLibrary(t *testing.T) (musicDir string, tracks []lyricsindex.Track) {
 	mk("Björk/Post/Army of Me.txt", "Stand up, you've got to manage")
 
 	tracks = []lyricsindex.Track{
-		{File: "Simon & Garfunkel/Sounds of Silence/The Sound of Silence.flac", Display: "Simon & Garfunkel - The Sound of Silence"},
-		{File: "Beatles/Abbey Road/Here Comes the Sun.mp3", Display: "The Beatles - Here Comes the Sun"},
-		{File: "Björk/Post/Army of Me.mp3", Display: "Björk - Army of Me"},
-		{File: "Beatles/Abbey Road/Something.mp3", Display: "The Beatles - Something"}, // no sidecar
+		{File: "Simon & Garfunkel/Sounds of Silence/The Sound of Silence.flac", Artist: "Simon & Garfunkel", Title: "The Sound of Silence"},
+		{File: "Beatles/Abbey Road/Here Comes the Sun.mp3", Artist: "The Beatles", Title: "Here Comes the Sun"},
+		{File: "Björk/Post/Army of Me.mp3", Artist: "Björk", Title: "Army of Me"},
+		{File: "Beatles/Abbey Road/Something.mp3", Artist: "The Beatles", Title: "Something"}, // no sidecar
 	}
 	return musicDir, tracks
 }
@@ -68,8 +68,8 @@ func TestReindexAndLoad(t *testing.T) {
 	}
 
 	sos := byFile["Simon & Garfunkel/Sounds of Silence/The Sound of Silence.flac"]
-	if sos.Display != "Simon & Garfunkel - The Sound of Silence" {
-		t.Errorf("display = %q", sos.Display)
+	if sos.Artist != "Simon & Garfunkel" || sos.Title != "The Sound of Silence" {
+		t.Errorf("artist/title = %q / %q", sos.Artist, sos.Title)
 	}
 	if want := "hello darkness my old friend"; !contains(sos.TextFolded, want) {
 		t.Errorf("folded text %q missing %q", sos.TextFolded, want)
@@ -124,6 +124,36 @@ func TestReindexIsIncremental(t *testing.T) {
 	for _, e := range entries {
 		if e.File == "Björk/Post/Army of Me.mp3" && !contains(e.TextFolded, "i'm alright") {
 			t.Errorf("changed sidecar not re-read: %q", e.TextFolded)
+		}
+	}
+}
+
+func TestReindexRefreshesArtistTitleOnUnchangedSidecar(t *testing.T) {
+	musicDir, tracks := buildLibrary(t)
+	dbPath := filepath.Join(t.TempDir(), "idx.db")
+
+	if _, err := lyricsindex.Reindex(context.Background(), dbPath, musicDir, tracks, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// A retag: same file, same sidecar, different tags.
+	tracks[2].Artist = "Björk Guðmundsdóttir"
+	tracks[2].Title = "Army of Me (Remastered)"
+
+	stats, err := lyricsindex.Reindex(context.Background(), dbPath, musicDir, tracks, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Read != 0 || stats.Unchanged != 3 {
+		t.Fatalf("stats = %+v, want Read 0 / Unchanged 3 (a retag mustn't re-read the sidecar)", stats)
+	}
+
+	entries, _ := lyricsindex.Load(dbPath)
+	for _, e := range entries {
+		if e.File == "Björk/Post/Army of Me.mp3" {
+			if e.Artist != "Björk Guðmundsdóttir" || e.Title != "Army of Me (Remastered)" {
+				t.Errorf("names not refreshed: %q / %q", e.Artist, e.Title)
+			}
 		}
 	}
 }
