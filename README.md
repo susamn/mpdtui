@@ -347,7 +347,7 @@ theme_file = ~/.cache/mpdtui/colors.toml
 | `D` | Clear entire queue (confirm) |
 | `Tab`, `1`/`2`/`3` | Cycle / jump focus between panels |
 | `/` | Search (contextual: filters Library/Playlists, jumps to a match in Queue) |
-| `f` | Global search from any panel -- type `a`/`al`/`l`/`p`/`t` + a term (artist/album/lyrics/playlist/track); matches appear live as an fzf-style hint list. Up/Down (or Ctrl-P/Ctrl-N) move the highlight while typing; `Tab` (or `f` to return) switches focus to the hint list for `j`/`k`/`g`/`G` navigation, within the popup only. `Enter` acts on the highlight and closes the popup (track adds+plays, playlist loads+plays, artist/album jump into that group in the Library); from the hint list, `a` instead adds without playing (track) or appends (playlist) and leaves the popup open, so several tracks can be queued back-to-back. Stays open with "no X found" if nothing matches. `l` (lyrics) matches the term as a plain case/accent-insensitive substring against the words of each track's `.txt`/`.lrc` sidecar, read from the prebuilt lyrics index (`I` builds/refreshes it -- this search never touches the filesystem; an unbuilt index just returns nothing). Hits behave exactly like track hits (add+play on `Enter`, add on `a`) |
+| `f` | Global search from any panel -- type `a`/`al`/`l`/`p`/`t` + a term (artist/album/lyrics/playlist/track); matches appear live as an fzf-style hint list. Up/Down (or Ctrl-P/Ctrl-N) move the highlight while typing; `Tab` (or `f` to return) switches focus to the hint list for `j`/`k`/`g`/`G` navigation, within the popup only. `Enter` acts on the highlight and closes the popup (track adds+plays, playlist loads+plays, artist/album jump into that group in the Library); from the hint list, `a` instead adds without playing (track) or appends (playlist) and leaves the popup open, so several tracks can be queued back-to-back. Stays open with "no X found" if nothing matches. `l` (lyrics) matches the term as a plain case/accent-insensitive substring against the words of each track's `.txt`/`.lrc` sidecar, read from the prebuilt lyrics index (`I` builds/refreshes it -- this search never touches the filesystem; an unbuilt index just returns nothing). Each lyrics hit shows the track name plus a one-line excerpt of the matching lyrics with the search term colored; hits otherwise behave exactly like track hits (add+play on `Enter`, add on `a`) |
 | `I` | Rebuild the lyrics search index (needs `music_dir` set, see [Lyrics](#lyrics)) -- a background scan of every track's `.txt`/`.lrc` sidecar with a live progress overlay; incremental, so a rebuild after adding a few lyrics files only re-reads those. `Esc` cancels a run in flight (the existing index is left intact). The index lives at `~/.config/mpdtui/lyrics_index.db` |
 | `F` | Clear any active search/filter, in every panel at once (Library search, Playlists filter) -- unlike a panel's own `Esc`, works regardless of which panel is currently focused |
 | `i` | Track info card for the currently playing track -- Track/Album/Artist/Genre/Year, colored "LRC"/"TXT" text for whichever lyrics format(s) are found (needs `music_dir` set), live audio quality (bitrate, sample rate/bit depth/channels), and, when `track_metadata` is active, a Rating/Plays/Mark/Tags table. A small fixed-size card anchored to the bottom-right quadrant of the Queue panel |
@@ -464,6 +464,15 @@ would slot into the same `t` cycle once supported.
 case/accent-insensitive substring against the combined text of each
 track's `.txt` and flattened `.lrc` sidecar; a hit is added and played
 (or, with `a`, just added) exactly like a track hit.
+
+Each hint row shows the track name, a middle dot, and a one-line excerpt
+of the matching lyrics with the search term itself colored -- so it's
+obvious at a glance *why* a track matched:
+
+```
+Guns N' Roses - Sweet Child o' Mine  ·  …she's got a smile that it seems to me  …
+Guns N' Roses - Sweet Child o' Mine  ·  …woah oh oh oh  sweet child o' mine  …
+```
 
 This search reads a prebuilt index only -- it never walks the music
 directory itself, because that scan is thousands of syscalls and stalls

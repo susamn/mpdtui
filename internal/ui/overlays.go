@@ -127,7 +127,7 @@ func (a *App) confirm(text string, onYes func()) {
 func (a *App) openHelp() {
 	view := tview.NewTextView().SetDynamicColors(true).SetText(helpText)
 	view.SetBorder(true).SetTitle(" Help (Esc to close) ")
-	a.showOverlay("help", centered(view, 76, 25), view)
+	a.showOverlay("help", centered(view, 78, 28), view)
 }
 
 const helpText = `[::b]Global[-:-:-]
@@ -148,7 +148,9 @@ const helpText = `[::b]Global[-:-:-]
                  "al hello", "l never gonna give"), with live fzf-style
                  hints as you type. "l" matches words in each track's
                  .txt/.lrc sidecar against the prebuilt index (press 'I'
-                 to build/refresh it) and behaves like a track hit. Up/Down
+                 to build/refresh it); each hit shows a one-line lyrics
+                 excerpt with the term colored, and behaves like a track
+                 hit otherwise. Up/Down
                  (Ctrl-P/Ctrl-N) move the highlight while typing; Tab (or
                  'f' to come back) switches to the hint list for j/k/g/G
                  navigation. Enter acts on the highlight and closes the

@@ -43,6 +43,35 @@ func (k globalSearchKind) label() string {
 // once -- a glanceable fzf-style shortlist, not a full result dump.
 const maxGlobalSearchHints = 10
 
+// lyricsMatchColor tags the matched query text inside a lyrics hint's
+// excerpt (theme-derived, see deriveColors) -- everything else in the
+// row (track name, excerpt context) stays at the terminal's default
+// foreground so the highlight is the one thing that stands out.
+var lyricsMatchColor string
+
+// lyricsHintItem builds one row of the "l" search hint list: the track
+// label, a dim middle dot, then a one-line excerpt of the matching
+// lyrics with the search term colored (see lyricsindex.Snippet). Every
+// piece of data-derived text is escaped for tview's style-tag parser.
+// Falls back to just the (escaped) label when term is empty or no
+// excerpt can be found.
+func lyricsHintItem(label, rawText, term string) string {
+	label = tview.Escape(label)
+	before, match, after, ok := lyricsindex.Snippet(rawText, term, lyricsindex.SnippetRadius)
+	if !ok {
+		return label
+	}
+	parts := make([]string, 0, 3)
+	if before != "" {
+		parts = append(parts, tview.Escape(before))
+	}
+	parts = append(parts, fmt.Sprintf("[%s]%s[-]", lyricsMatchColor, tview.Escape(match)))
+	if after != "" {
+		parts = append(parts, tview.Escape(after))
+	}
+	return label + "  [::d]·[-:-:-]  " + strings.Join(parts, " ")
+}
+
 // parseGlobalSearchKind splits raw input into a search kind and term. The
 // first word selects the kind, case-insensitive: a leading "al" (e.g.
 // "al", "album") means album, any other word starting with "a" (e.g. "a",
@@ -243,6 +272,7 @@ func moveHintHighlight(current, n, delta int) int {
 type globalSearchHints struct {
 	kind      globalSearchKind
 	kindValid bool
+	term      string   // the search term from the last rebuild, for renderers that need it (lyrics excerpt highlighting)
 	labels    []string // the active kind's full candidate label slice, as returned by the last rebuild's labelsFor
 	order     []int    // indices into labels, best-match-first, capped to maxGlobalSearchHints
 	total     int      // true match count before the cap
@@ -264,9 +294,10 @@ type globalSearchHints struct {
 // looks the chosen hint's underlying Song up by the same index.
 func (h *globalSearchHints) rebuild(text string, labelsFor func(globalSearchKind) []string, matchTextFor ...func(globalSearchKind) []string) {
 	kind, term, ok := parseGlobalSearchKind(text)
-	h.kind, h.kindValid = kind, ok
+	h.kind, h.kindValid, h.term = kind, ok, term
 	h.labels, h.order, h.total, h.highlight = nil, nil, 0, -1
 	if !ok {
+		h.term = ""
 		return
 	}
 	h.labels = labelsFor(kind)
@@ -398,10 +429,11 @@ func (a *App) openGlobalSearch() {
 	var trackSongs []mpdclient.Song
 	var trackLabels, artistLabels, albumLabels, playlistNames []string
 	// Lyrics hits come from the prebuilt index (internal/lyricsindex), not
-	// a live MPD/filesystem scan, so all the popup keeps is three parallel
-	// slices: the track's MPD path, its display label, and its folded
-	// lyrics text to match against.
-	var lyricsFiles, lyricsLabels, lyricsTexts []string
+	// a live MPD/filesystem scan, so all the popup keeps is four parallel
+	// slices: the track's MPD path, its display label, its folded lyrics
+	// text to match against, and the raw lyrics text to excerpt for the
+	// hint row.
+	var lyricsFiles, lyricsLabels, lyricsTexts, lyricsRaw []string
 	tracksLoaded, artistsLoaded, albumsLoaded, lyricsLoaded := false, false, false, false
 
 	loadTracks := func() {
@@ -468,10 +500,12 @@ func (a *App) openGlobalSearch() {
 		lyricsFiles = make([]string, len(entries))
 		lyricsLabels = make([]string, len(entries))
 		lyricsTexts = make([]string, len(entries))
+		lyricsRaw = make([]string, len(entries))
 		for i, e := range entries {
 			lyricsFiles[i] = e.File
 			lyricsLabels[i] = e.Display
 			lyricsTexts[i] = e.TextFolded
+			lyricsRaw[i] = e.Text
 		}
 	}
 
@@ -524,7 +558,13 @@ func (a *App) openGlobalSearch() {
 	renderList := func() {
 		list.Clear()
 		for _, idx := range hints.order {
-			list.AddItem(hints.labels[idx], "", 0, nil)
+			text := hints.labels[idx]
+			// Lyrics hits show why they matched: the track name plus a
+			// one-line excerpt of the lyrics with the query term colored.
+			if hints.kind == globalSearchLyrics && hints.term != "" {
+				text = lyricsHintItem(hints.labels[idx], lyricsRaw[idx], hints.term)
+			}
+			list.AddItem(text, "", 0, nil)
 		}
 		syncHighlight()
 		switch {
@@ -702,5 +742,8 @@ func (a *App) openGlobalSearch() {
 		AddItem(field, 3, 0, true).
 		AddItem(list, 0, 1, false)
 
-	a.showOverlay("global-search", centered(layout, 70, 3+maxGlobalSearchHints+2), field)
+	// Wider than a plain name list needs, to give lyrics excerpts
+	// (track name + a middle dot + ~64 chars of context) room before
+	// tview.List truncates the row.
+	a.showOverlay("global-search", centered(layout, 96, 3+maxGlobalSearchHints+2), field)
 }
