@@ -115,6 +115,24 @@ func TestCLIFlagValidation(t *testing.T) {
 			wantStderr: "mpdtui: -mini, -p, -t, -lyrics-line, -i, and -iu are mutually exclusive",
 			wantExit:   1,
 		},
+		{
+			name:       "mutually exclusive cast-list and cast-stop",
+			args:       []string{"-cast-list", "-cast-stop"},
+			wantStderr: "mpdtui: -stop, -cast-list, -cast-to, and -cast-stop are mutually exclusive",
+			wantExit:   1,
+		},
+		{
+			name:       "mutually exclusive stop and cast-to",
+			args:       []string{"-stop", "-cast-to", "Kitchen"},
+			wantStderr: "mpdtui: -stop, -cast-list, -cast-to, and -cast-stop are mutually exclusive",
+			wantExit:   1,
+		},
+		{
+			name:       "cast action cannot combine with a UI mode",
+			args:       []string{"-cast-stop", "-mini"},
+			wantStderr: "mpdtui: -stop and -cast-* cannot be combined with -mini, -p, -t, -lyrics-line, -i, or -iu",
+			wantExit:   1,
+		},
 	}
 
 	for _, tc := range cases {
