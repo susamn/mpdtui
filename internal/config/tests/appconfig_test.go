@@ -256,6 +256,13 @@ func TestDBFileIsInsideConfigDir(t *testing.T) {
 	}
 }
 
+func TestLyricsIndexFileIsInsideConfigDir(t *testing.T) {
+	withEnv(t, "XDG_CONFIG_HOME", "/xdg")
+	if got, want := config.LyricsIndexFile(), filepath.Join("/xdg", "mpdtui", "lyrics_index.db"); got != want {
+		t.Errorf("LyricsIndexFile() = %q, want %q", got, want)
+	}
+}
+
 func TestEnsureConfigFilesCreatesBothFiles(t *testing.T) {
 	withEnv(t, "XDG_CONFIG_HOME", t.TempDir())
 
