@@ -24,7 +24,15 @@ func newChromecastProvider(cfg Config) CastProvider {
 func (p *chromecastProvider) Kind() Kind { return KindChromecast }
 
 func (p *chromecastProvider) Discover(ctx context.Context) ([]Target, error) {
-	return nil, nil
+	devices, err := discoverCast(ctx)
+	if err != nil {
+		return nil, err
+	}
+	targets := make([]Target, 0, len(devices))
+	for _, d := range devices {
+		targets = append(targets, d.target())
+	}
+	return targets, nil
 }
 
 func (p *chromecastProvider) Play(ctx context.Context, t Target, streamURL string, meta MediaMeta) error {
