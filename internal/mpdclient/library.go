@@ -16,6 +16,30 @@ func (c *Client) Albums(artist string) ([]string, error) {
 	return call(c, func(conn *mpd.Client) ([]string, error) { return conn.List("Album", "Artist", artist) })
 }
 
+// AlbumArtists returns a map from album name to its AlbumArtist tag, for
+// every album that has a non-empty one. Albums with no AlbumArtist tag
+// are simply absent from the map -- the caller decides how to present
+// "unknown". Built from `list albumartist group album`; an album
+// credited to several album-artists reports whichever MPD lists last.
+func (c *Client) AlbumArtists() (map[string]string, error) {
+	groups, err := call(c, func(conn *mpd.Client) ([]mpd.Attrs, error) {
+		return conn.Command("list albumartist group album").AttrsList("Album")
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(groups))
+	for _, g := range groups {
+		album := g["Album"]
+		artist := g["AlbumArtist"]
+		if album == "" || artist == "" {
+			continue
+		}
+		out[album] = artist
+	}
+	return out, nil
+}
+
 // ArtistTracks returns every track by artist, across all their albums.
 func (c *Client) ArtistTracks(artist string) ([]Song, error) {
 	list, err := call(c, func(conn *mpd.Client) ([]mpd.Attrs, error) { return conn.Find("Artist", artist) })

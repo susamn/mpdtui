@@ -138,6 +138,38 @@ func TestLibraryListing(t *testing.T) {
 	}
 }
 
+func TestAlbumArtists(t *testing.T) {
+	c := dialOrSkip(t)
+
+	albums, err := c.Albums("")
+	if err != nil {
+		t.Fatalf("Albums: %v", err)
+	}
+	if len(albums) == 0 {
+		t.Skip("library has no tagged albums")
+	}
+
+	byAlbum, err := c.AlbumArtists()
+	if err != nil {
+		t.Fatalf("AlbumArtists: %v", err)
+	}
+
+	// Every key must be a real album name, and every value non-empty
+	// (albums with no AlbumArtist tag are omitted, not mapped to "").
+	known := make(map[string]bool, len(albums))
+	for _, a := range albums {
+		known[a] = true
+	}
+	for album, artist := range byAlbum {
+		if artist == "" {
+			t.Errorf("AlbumArtists[%q] is empty; empty values should be omitted", album)
+		}
+		if !known[album] {
+			t.Errorf("AlbumArtists has album %q not present in Albums(\"\")", album)
+		}
+	}
+}
+
 func TestPlaylistsListing(t *testing.T) {
 	c := dialOrSkip(t)
 
