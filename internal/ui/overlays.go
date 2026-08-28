@@ -127,7 +127,7 @@ func (a *App) confirm(text string, onYes func()) {
 func (a *App) openHelp() {
 	view := tview.NewTextView().SetDynamicColors(true).SetText(helpText)
 	view.SetBorder(true).SetTitle(" Help (Esc to close) ")
-	a.showOverlay("help", centered(view, 76, 25), view)
+	a.showOverlay("help", centered(view, 78, 28), view)
 }
 
 const helpText = `[::b]Global[-:-:-]
@@ -143,18 +143,23 @@ const helpText = `[::b]Global[-:-:-]
   D              clear entire queue (confirm)
   Tab, 1/2/3     cycle / jump focus between panels
   /              search (contextual: Library/Playlists filter, Queue jump)
-  f              global search from any panel: "a/al/p/t <term>" for
-                 artist/album/playlist/track (e.g. "a queen", "al hello"),
-                 with live fzf-style hints as you type. Up/Down
-                 (Ctrl-P/Ctrl-N) move the highlight while typing; Tab (or
-                 'f' to come back) switches to the hint list for j/k/g/G
-                 navigation. Enter acts on the highlight and closes the
-                 popup: track adds+plays, playlist loads+plays, artist/
-                 album jump into that group in the Library. From the hint
-                 list, 'a' instead adds without playing (track) or appends
-                 (playlist) and leaves the popup open, so several tracks
-                 can be queued back-to-back -- accent-insensitive, so
-                 "buble" matches "Bublé"
+  f              global search from any panel: "a/al/l/p/t <term>" for
+                 artist/album/lyrics/playlist/track (e.g. "a queen",
+                 "al hello", "l never gonna give"). Matches appear live in
+                 a per-kind results table (track: Track+Artist; lyrics:
+                 those plus a matched-lyrics excerpt with the term
+                 colored; album: Album+Album Artist; artist/playlist: one
+                 column). "l" matches words in each track's .txt/.lrc
+                 sidecar against the prebuilt index (press 'I' to
+                 build/refresh it). Up/Down (Ctrl-P/Ctrl-N) move the
+                 highlight while typing; Tab (or 'f' to come back)
+                 switches to the table for j/k/g/G navigation. Enter acts
+                 on the highlight and closes the popup: track adds+plays,
+                 playlist loads+plays, artist/album jump into that group
+                 in the Library. From the table, 'a' instead adds without
+                 playing (track) or appends (playlist) and leaves the
+                 popup open, so several tracks can be queued back-to-back
+                 -- accent-insensitive, so "buble" matches "Bublé"
   F              clear any active search/filter, in every panel at once
   i              track info card for the currently playing track --
                  Track/Album/Artist/Genre/Year, colored "LRC"/"TXT" text
@@ -180,9 +185,8 @@ const helpText = `[::b]Global[-:-:-]
                  unaffected
   I              rebuild the lyrics search index (needs music_dir) -- a
                  background scan of every track's .txt/.lrc sidecar, with
-                 a progress overlay; Esc cancels a run. Incremental, so a
-                 rebuild after adding a few lyrics files only re-reads
-                 those. Index lives at ~/.config/mpdtui/lyrics_index.db
+                 a progress overlay; Esc cancels a run. The "l" mode of
+                 'f' reads only this index, never the filesystem
   v              cycle Now Playing visualizations
   L              locate the currently playing track in the Queue
   e              settings: Config tab (read-only: MPD host/port,

@@ -34,10 +34,10 @@ func buildLibrary(t *testing.T) (musicDir string, tracks []lyricsindex.Track) {
 	mk("Björk/Post/Army of Me.txt", "Stand up, you've got to manage")
 
 	tracks = []lyricsindex.Track{
-		{File: "Simon & Garfunkel/Sounds of Silence/The Sound of Silence.flac", Display: "Simon & Garfunkel - The Sound of Silence"},
-		{File: "Beatles/Abbey Road/Here Comes the Sun.mp3", Display: "The Beatles - Here Comes the Sun"},
-		{File: "Björk/Post/Army of Me.mp3", Display: "Björk - Army of Me"},
-		{File: "Beatles/Abbey Road/Something.mp3", Display: "The Beatles - Something"}, // no sidecar
+		{File: "Simon & Garfunkel/Sounds of Silence/The Sound of Silence.flac", Artist: "Simon & Garfunkel", Title: "The Sound of Silence"},
+		{File: "Beatles/Abbey Road/Here Comes the Sun.mp3", Artist: "The Beatles", Title: "Here Comes the Sun"},
+		{File: "Björk/Post/Army of Me.mp3", Artist: "Björk", Title: "Army of Me"},
+		{File: "Beatles/Abbey Road/Something.mp3", Artist: "The Beatles", Title: "Something"}, // no sidecar
 	}
 	return musicDir, tracks
 }
@@ -68,11 +68,14 @@ func TestReindexAndLoad(t *testing.T) {
 	}
 
 	sos := byFile["Simon & Garfunkel/Sounds of Silence/The Sound of Silence.flac"]
-	if sos.Display != "Simon & Garfunkel - The Sound of Silence" {
-		t.Errorf("display = %q", sos.Display)
+	if sos.Artist != "Simon & Garfunkel" || sos.Title != "The Sound of Silence" {
+		t.Errorf("artist/title = %q / %q", sos.Artist, sos.Title)
 	}
 	if want := "hello darkness my old friend"; !contains(sos.TextFolded, want) {
 		t.Errorf("folded text %q missing %q", sos.TextFolded, want)
+	}
+	if want := "Hello darkness my old friend"; !contains(sos.Text, want) {
+		t.Errorf("raw text %q missing verbatim %q", sos.Text, want)
 	}
 
 	// .lrc is flattened: line text kept, timestamps and [ti:] tag gone.
@@ -121,6 +124,36 @@ func TestReindexIsIncremental(t *testing.T) {
 	for _, e := range entries {
 		if e.File == "Björk/Post/Army of Me.mp3" && !contains(e.TextFolded, "i'm alright") {
 			t.Errorf("changed sidecar not re-read: %q", e.TextFolded)
+		}
+	}
+}
+
+func TestReindexRefreshesArtistTitleOnUnchangedSidecar(t *testing.T) {
+	musicDir, tracks := buildLibrary(t)
+	dbPath := filepath.Join(t.TempDir(), "idx.db")
+
+	if _, err := lyricsindex.Reindex(context.Background(), dbPath, musicDir, tracks, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// A retag: same file, same sidecar, different tags.
+	tracks[2].Artist = "Björk Guðmundsdóttir"
+	tracks[2].Title = "Army of Me (Remastered)"
+
+	stats, err := lyricsindex.Reindex(context.Background(), dbPath, musicDir, tracks, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Read != 0 || stats.Unchanged != 3 {
+		t.Fatalf("stats = %+v, want Read 0 / Unchanged 3 (a retag mustn't re-read the sidecar)", stats)
+	}
+
+	entries, _ := lyricsindex.Load(dbPath)
+	for _, e := range entries {
+		if e.File == "Björk/Post/Army of Me.mp3" {
+			if e.Artist != "Björk Guðmundsdóttir" || e.Title != "Army of Me (Remastered)" {
+				t.Errorf("names not refreshed: %q / %q", e.Artist, e.Title)
+			}
 		}
 	}
 }
@@ -198,6 +231,54 @@ func TestReadInfo(t *testing.T) {
 	}
 	if !info.Exists || info.Count != 3 || info.MusicDir != musicDir || info.IndexedAt.IsZero() {
 		t.Fatalf("ReadInfo = %+v", info)
+	}
+}
+
+func TestSnippet(t *testing.T) {
+	text := "We're no strangers to love\nYou know the rules and so do I\nA full commitment's what I'm thinking of"
+
+	before, match, after, ok := lyricsindex.Snippet(text, "KNOW the", 12)
+	if !ok {
+		t.Fatal("expected a match")
+	}
+	if match != "know the" {
+		t.Errorf("match = %q, want %q (verbatim original case)", match, "know the")
+	}
+	// Newlines in the surrounding context are collapsed to spaces.
+	if strings.Contains(before, "\n") || strings.Contains(after, "\n") {
+		t.Errorf("context still has newlines: before=%q after=%q", before, after)
+	}
+	if !strings.HasPrefix(before, "…") {
+		t.Errorf("before = %q, want a leading ellipsis (text was cut)", before)
+	}
+	if !strings.HasSuffix(after, "…") {
+		t.Errorf("after = %q, want a trailing ellipsis", after)
+	}
+	if !strings.Contains(before, "love") || !strings.Contains(after, "rules") {
+		t.Errorf("context words missing: before=%q after=%q", before, after)
+	}
+}
+
+func TestSnippetAtStartHasNoLeadingEllipsis(t *testing.T) {
+	before, match, _, ok := lyricsindex.Snippet("Hello darkness my old friend", "hello", 4)
+	if !ok || match != "Hello" || before != "" {
+		t.Fatalf("before=%q match=%q ok=%v, want before empty, match \"Hello\"", before, match, ok)
+	}
+}
+
+func TestSnippetAccentInsensitive(t *testing.T) {
+	_, match, _, ok := lyricsindex.Snippet("Björk sings here", "bjork", 8)
+	if !ok || match != "Björk" {
+		t.Fatalf("match=%q ok=%v, want the accented original \"Björk\"", match, ok)
+	}
+}
+
+func TestSnippetNotFound(t *testing.T) {
+	if _, _, _, ok := lyricsindex.Snippet("some lyrics", "absent", 8); ok {
+		t.Fatal("expected ok=false for a term that isn't present")
+	}
+	if _, _, _, ok := lyricsindex.Snippet("some lyrics", "", 8); ok {
+		t.Fatal("expected ok=false for an empty query")
 	}
 }
 

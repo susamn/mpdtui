@@ -86,6 +86,11 @@ single-line inline player for a shell or tmux pane.
   karaoke-style highlighting: the currently-singing line is colored and
   auto-scrolled into view live as the track plays; see
   [Lyrics](#lyrics) for setup
+- **Lyrics search** (`f` → `l <words>`, `I`) — find tracks by a phrase in
+  their lyrics, matched against a prebuilt on-disk index of every `.txt`/
+  `.lrc` sidecar. `I` (re)builds the index in the background with a
+  progress overlay; it's incremental and cancellable. See
+  [Searching by lyrics](#searching-by-lyrics)
 - **Track metadata** (`1`-`5`, `m`) — local play count, 1-5 star rating,
   and a mark-with-reason flag (e.g. "mark for deletion"), stored in a
   SQLite database separate from MPD's own library; see
@@ -342,11 +347,11 @@ theme_file = ~/.cache/mpdtui/colors.toml
 | `D` | Clear entire queue (confirm) |
 | `Tab`, `1`/`2`/`3` | Cycle / jump focus between panels |
 | `/` | Search (contextual: filters Library/Playlists, jumps to a match in Queue) |
-| `f` | Global search from any panel -- type `a`/`al`/`p`/`t` + a term (artist/album/playlist/track); matches appear live as an fzf-style hint list. Up/Down (or Ctrl-P/Ctrl-N) move the highlight while typing; `Tab` (or `f` to return) switches focus to the hint list for `j`/`k`/`g`/`G` navigation, within the popup only. `Enter` acts on the highlight and closes the popup (track adds+plays, playlist loads+plays, artist/album jump into that group in the Library); from the hint list, `a` instead adds without playing (track) or appends (playlist) and leaves the popup open, so several tracks can be queued back-to-back. Stays open with "no X found" if nothing matches |
+| `f` | Global search from any panel -- type `a`/`al`/`l`/`p`/`t` + a term (artist/album/lyrics/playlist/track); matches appear live in a results table laid out per kind: track = 🎵 Track + 🎤 Artist, lyrics = those two plus 📝 a matched-lyrics excerpt, album = 💿 Album + 🎤 Album Artist ("Not available" when untagged), artist and playlist = a single column. Up/Down (or Ctrl-P/Ctrl-N) move the highlight while typing; `Tab` (or `f` to return) switches focus to the table for `j`/`k`/`g`/`G` navigation, within the popup only. `Enter` acts on the highlight and closes the popup (track adds+plays, playlist loads+plays, artist/album jump into that group in the Library); from the table, `a` instead adds without playing (track) or appends (playlist) and leaves the popup open, so several tracks can be queued back-to-back. Stays open with "no X found" if nothing matches. `l` (lyrics) matches the term as a plain case/accent-insensitive substring against the words of each track's `.txt`/`.lrc` sidecar, read from the prebuilt lyrics index (`I` builds/refreshes it -- this search never touches the filesystem; an unbuilt index just returns nothing), with the matched term colored in the excerpt; hits otherwise behave exactly like track hits (add+play on `Enter`, add on `a`) |
+| `I` | Rebuild the lyrics search index (needs `music_dir` set, see [Lyrics](#lyrics)) -- a background scan of every track's `.txt`/`.lrc` sidecar with a live progress overlay; incremental, so a rebuild after adding a few lyrics files only re-reads those. `Esc` cancels a run in flight (the existing index is left intact). The index lives at `~/.config/mpdtui/lyrics_index.db` |
 | `F` | Clear any active search/filter, in every panel at once (Library search, Playlists filter) -- unlike a panel's own `Esc`, works regardless of which panel is currently focused |
 | `i` | Track info card for the currently playing track -- Track/Album/Artist/Genre/Year, colored "LRC"/"TXT" text for whichever lyrics format(s) are found (needs `music_dir` set), live audio quality (bitrate, sample rate/bit depth/channels), and, when `track_metadata` is active, a Rating/Plays/Mark/Tags table. A small fixed-size card anchored to the bottom-right quadrant of the Queue panel |
 | `y` | Lyrics viewer for the currently playing track (needs `music_dir` set, see [Lyrics](#lyrics) below) -- `j`/`k`/`g`/`G`/Ctrl-F/Ctrl-B to scroll, `y` or `Esc` to close. Transport controls (`Space`/`s`/`n`/`p`/`,`/`.`/`-`/`=`/`z`/`x`/`c`/`Z`) keep working while it's open. Shows synced (`.lrc`) lyrics with the current line auto-highlighted and scrolled into view when available, otherwise plain `.txt`; a colored LRC/TXT badge sits top-right in the title. `t` switches between whichever formats exist for the track (choice sticks across track changes); before an `.lrc`'s first timestamp, a big blinking block-letter "STARTING" banner shows instead of the lyrics list |
-| `I` | Rebuild the lyrics search index (needs `music_dir` set, see [Lyrics](#lyrics)) -- a background scan of every track's `.txt`/`.lrc` sidecar with a live progress overlay; incremental, so a rebuild after adding a few lyrics files only re-reads those. `Esc` cancels a run in flight (the existing index is left intact). The index lives at `~/.config/mpdtui/lyrics_index.db` |
 | `v` | Cycle Now Playing visualizations (right half of the Now Playing bar) |
 | `L` | Locate the currently playing track: selects it in the Queue and moves focus there, from any panel, and also reveals it in the Library tree (expanding every folder along its path and selecting it there, without moving focus away from Queue). The Queue-selecting part also happens automatically, whenever the playing track actually changes (explicit play action or natural auto-advance alike) -- except while an overlay is open, or on startup; the Library reveal is only on the explicit keypress |
 | `e` | Settings: a two-tab overlay -- **Config** (read-only: MPD host/port, `music_dir`, `track_metadata` status and file paths) and **Database** (browse/add/delete `mark_reason`/`tags` catalog rows, only when `track_metadata` is active; otherwise explains why it isn't). `Tab`/`Backtab` switches tabs; on Database, `Left`/`Right` switches which catalog table, `j`/`k`/`g`/`G` navigates rows, `a` adds (bordered edit box), `d` deletes (`y`/`n` to confirm); `Esc` closes |
@@ -451,6 +456,34 @@ once keeps applying as you skip through the queue, falling back
 gracefully on any individual track that doesn't have your preferred
 format. A future word-level/enhanced-LRC format (sometimes called A2)
 would slot into the same `t` cycle once supported.
+
+### Searching by lyrics
+
+`f` then `l <words>` finds tracks by a phrase in their lyrics -- e.g.
+`l never gonna give you up`. The term is matched as a plain
+case/accent-insensitive substring against the combined text of each
+track's `.txt` and flattened `.lrc` sidecar; a hit is added and played
+(or, with `a`, just added) exactly like a track hit.
+
+Results land in a three-column table -- 🎵 Track, 🎤 Artist, 📝 a
+one-line excerpt of the matching lyrics with the search term itself
+colored -- so it's obvious at a glance *why* a track matched:
+
+```
+🎵 Sweet Child o' Mine     🎤 Guns N' Roses   📝 …she's got a smile that it seems to me …
+🎵 Cats in the Cradle      🎤 Harry Chapin    📝 …my child arrived just the other day …
+```
+
+This search reads a prebuilt index only -- it never walks the music
+directory itself, because that scan is thousands of syscalls and stalls
+the UI on a large library. Build or refresh the index with `I`: a
+background scan with a live progress overlay (`Esc` cancels; the
+existing index is left intact on cancel or failure). It's incremental --
+a sidecar unchanged since the last run is not re-read -- so refreshing
+after dropping in a few new lyrics files is near-instant. The index is a
+single SQLite file at `~/.config/mpdtui/lyrics_index.db` (next to
+`config` and `mpdtui.db`); deleting it just means the next `I` rebuilds
+from scratch. Until the first `I`, `l` searches return nothing.
 
 Which format(s) exist for a track is also visible without opening the
 viewer at all: the Queue's Lyr column shows a green tick for `.lrc`, an

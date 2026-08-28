@@ -143,6 +143,7 @@ func deriveColors() {
 	lyricsColor = colorActiveBorder
 	lyricsLRCColor = nowPlayingTrackColor
 	lyricsTxtColor = string(palette.Orange)
+	lyricsMatchColor = string(palette.Yellow)
 
 	stateGlyphPlayColor = string(palette.BrightGreen)
 	stateGlyphPauseColor = string(palette.BrightYellow)

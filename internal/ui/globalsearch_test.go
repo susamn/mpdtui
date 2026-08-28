@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
@@ -26,6 +27,9 @@ func TestParseGlobalSearchKind(t *testing.T) {
 		{"AL Hello World", globalSearchAlbum, "Hello World", true},
 		{"p Rock Oldies", globalSearchPlaylist, "Rock Oldies", true},
 		{"playlist Rock Oldies", globalSearchPlaylist, "Rock Oldies", true},
+		{"l never gonna", globalSearchLyrics, "never gonna", true},
+		{"lyrics never gonna", globalSearchLyrics, "never gonna", true},
+		{"l", globalSearchLyrics, "", true},
 		{"t help me", globalSearchTrack, "help me", true},
 		{"track help me", globalSearchTrack, "help me", true},
 		{"  t   spaced term  ", globalSearchTrack, "spaced term", true},
@@ -50,6 +54,78 @@ func TestParseGlobalSearchKind(t *testing.T) {
 		if term != tc.wantTerm {
 			t.Errorf("parseGlobalSearchKind(%q) term = %q, want %q", tc.input, term, tc.wantTerm)
 		}
+	}
+}
+
+func TestFilterSubstringHints(t *testing.T) {
+	// targets arrive already folded (lyricsindex.Fold), as stored in the
+	// index -- lowercased, diacritics stripped.
+	targets := []string{
+		"we're no strangers to love",
+		"never gonna give you up",
+		"never gonna let you down",
+		"is this the real life",
+	}
+	// Query is folded by filterSubstringHints itself, so mixed case is fine.
+	shown, total := filterSubstringHints("NEVER Gonna", targets)
+	if total != 2 {
+		t.Fatalf("total = %d, want 2", total)
+	}
+	if len(shown) != 2 || shown[0] != 1 || shown[1] != 2 {
+		t.Errorf("shown = %v, want [1 2] in target order", shown)
+	}
+
+	// Empty term matches everything, order preserved.
+	shown, total = filterSubstringHints("", targets)
+	if total != 4 || len(shown) != 4 || shown[0] != 0 {
+		t.Errorf("empty term: shown = %v total = %d, want all four in order", shown, total)
+	}
+}
+
+func TestLyricsExcerptCell(t *testing.T) {
+	raw := "We're no strangers to love\nYou know the rules and so do I"
+
+	got := lyricsExcerptCell(raw, "know the")
+	if !strings.Contains(got, "["+lyricsMatchColor+"]know the[-]") {
+		t.Errorf("cell %q should color the matched term", got)
+	}
+	if !strings.Contains(got, "rules") {
+		t.Errorf("cell %q should carry trailing context", got)
+	}
+
+	if got := lyricsExcerptCell(raw, ""); got != "" {
+		t.Errorf("empty term: got %q, want empty", got)
+	}
+	if got := lyricsExcerptCell(raw, "absent"); got != "" {
+		t.Errorf("no match: got %q, want empty", got)
+	}
+
+	// A bracket in the lyrics context is escaped so tview doesn't eat it.
+	if got := lyricsExcerptCell("shout [chorus] know the way", "know the"); !strings.Contains(got, "[chorus[]") {
+		t.Errorf("context brackets not escaped: %q", got)
+	}
+}
+
+func TestRebuildLyricsMatchesAgainstTextNotLabels(t *testing.T) {
+	labels := []string{"Rick Astley - Never Gonna Give You Up", "Queen - Bohemian Rhapsody"}
+	texts := []string{"we're no strangers to love", "is this the real life is this just fantasy"}
+
+	h := &globalSearchHints{}
+	h.rebuild("l real life",
+		func(globalSearchKind) []string { return labels },
+		func(k globalSearchKind) []string {
+			if k == globalSearchLyrics {
+				return texts
+			}
+			return nil
+		},
+	)
+	label, idx := h.current()
+	if idx != 1 {
+		t.Fatalf("current idx = %d, want 1 (matched by lyrics text, not track title)", idx)
+	}
+	if label != labels[1] {
+		t.Errorf("current label = %q, want the track title %q", label, labels[1])
 	}
 }
 
@@ -90,6 +166,13 @@ func TestFuzzyFilterSortIndexRanksAndFilters(t *testing.T) {
 	if got := fuzzyFilterSortIndex("zzz", labels); len(got) != 0 {
 		t.Fatalf("expected no matches, got %v", got)
 	}
+}
+
+// curRow is the selected data-row index of the results table (there is
+// no header row, so it maps straight to hints.highlight).
+func curRow(tbl *tview.Table) int {
+	r, _ := tbl.GetSelection()
+	return r
 }
 
 func indexLabels(order []int, labels []string) []string {
@@ -671,7 +754,7 @@ func TestOpenGlobalSearchArtistMatchNeedsLiveMPD(t *testing.T) {
 
 // --- Tab-toggled hint-list navigation (Tab/'f'/j/k/g/G/'a') ---
 
-func TestOpenGlobalSearchTabTogglesFocusBetweenFieldAndList(t *testing.T) {
+func TestOpenGlobalSearchTabTogglesFocusBetweenFieldAndTable(t *testing.T) {
 	a := newTestApp()
 	setPlaylistsForTest(a.playlists, []string{"Rock Anthems"})
 	a.tv.SetFocus(a.queue.table)
@@ -685,21 +768,21 @@ func TestOpenGlobalSearchTabTogglesFocusBetweenFieldAndList(t *testing.T) {
 	tab := tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone)
 	field.InputHandler()(tab, func(tview.Primitive) {})
 
-	list, ok := a.tv.GetFocus().(*tview.List)
+	table, ok := a.tv.GetFocus().(*tview.Table)
 	if !ok {
-		t.Fatalf("focus after Tab from field = %T, want *tview.List", a.tv.GetFocus())
+		t.Fatalf("focus after Tab from field = %T, want *tview.Table", a.tv.GetFocus())
 	}
 	if a.mode != modeOverlay {
 		t.Error("mode after Tab within the popup should stay modeOverlay")
 	}
 
-	list.InputHandler()(tab, func(tview.Primitive) {})
+	table.InputHandler()(tab, func(tview.Primitive) {})
 	if a.tv.GetFocus() != field {
-		t.Errorf("focus after Tab from list = %T, want the original field back", a.tv.GetFocus())
+		t.Errorf("focus after Tab from the table = %T, want the original field back", a.tv.GetFocus())
 	}
 }
 
-func TestOpenGlobalSearchFKeyReturnsFocusFromListToField(t *testing.T) {
+func TestOpenGlobalSearchFKeyReturnsFocusFromTableToField(t *testing.T) {
 	a := newTestApp()
 	setPlaylistsForTest(a.playlists, []string{"Rock Anthems"})
 	a.tv.SetFocus(a.queue.table)
@@ -707,14 +790,14 @@ func TestOpenGlobalSearchFKeyReturnsFocusFromListToField(t *testing.T) {
 	field := a.tv.GetFocus().(*tview.InputField)
 
 	field.InputHandler()(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone), func(tview.Primitive) {})
-	list, ok := a.tv.GetFocus().(*tview.List)
+	table, ok := a.tv.GetFocus().(*tview.Table)
 	if !ok {
-		t.Fatalf("setup: focus = %T, want *tview.List", a.tv.GetFocus())
+		t.Fatalf("setup: focus = %T, want *tview.Table", a.tv.GetFocus())
 	}
 
-	list.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'f', tcell.ModNone), func(tview.Primitive) {})
+	table.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'f', tcell.ModNone), func(tview.Primitive) {})
 	if a.tv.GetFocus() != field {
-		t.Errorf("focus after 'f' from list = %T, want the field back", a.tv.GetFocus())
+		t.Errorf("focus after 'f' from the table = %T, want the field back", a.tv.GetFocus())
 	}
 }
 
@@ -747,7 +830,7 @@ func TestOpenGlobalSearchLettersUsedForNavigationStayTypeableInField(t *testing.
 	}
 }
 
-func TestOpenGlobalSearchListJKGNavigateHighlight(t *testing.T) {
+func TestOpenGlobalSearchTableJKGNavigateHighlight(t *testing.T) {
 	a := newTestApp()
 	setPlaylistsForTest(a.playlists, []string{"Rock Anthems", "Rock Ballads", "Rock Classics"})
 	a.tv.SetFocus(a.queue.table)
@@ -763,35 +846,35 @@ func TestOpenGlobalSearchListJKGNavigateHighlight(t *testing.T) {
 	field.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'k', tcell.ModNone), func(tview.Primitive) {})
 
 	field.InputHandler()(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone), func(tview.Primitive) {})
-	list, ok := a.tv.GetFocus().(*tview.List)
+	table, ok := a.tv.GetFocus().(*tview.Table)
 	if !ok {
-		t.Fatalf("focus after Tab = %T, want *tview.List", a.tv.GetFocus())
+		t.Fatalf("focus after Tab = %T, want *tview.Table", a.tv.GetFocus())
 	}
-	if list.GetItemCount() != 3 {
-		t.Fatalf("hint count = %d, want 3 (Rock Anthems, Rock Ballads, Rock Classics)", list.GetItemCount())
+	if table.GetRowCount() != 3 {
+		t.Fatalf("hint count = %d, want 3 (Rock Anthems, Rock Ballads, Rock Classics)", table.GetRowCount())
 	}
-	if list.GetCurrentItem() != 0 {
-		t.Fatalf("initial highlight = %d, want 0", list.GetCurrentItem())
-	}
-
-	list.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'j', tcell.ModNone), func(tview.Primitive) {})
-	if list.GetCurrentItem() != 1 {
-		t.Errorf("highlight after 'j' = %d, want 1", list.GetCurrentItem())
+	if curRow(table) != 0 {
+		t.Fatalf("initial highlight = %d, want 0", curRow(table))
 	}
 
-	list.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'G', tcell.ModNone), func(tview.Primitive) {})
-	if list.GetCurrentItem() != 2 {
-		t.Errorf("highlight after 'G' = %d, want 2 (last)", list.GetCurrentItem())
+	table.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'j', tcell.ModNone), func(tview.Primitive) {})
+	if curRow(table) != 1 {
+		t.Errorf("highlight after 'j' = %d, want 1", curRow(table))
 	}
 
-	list.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'g', tcell.ModNone), func(tview.Primitive) {})
-	if list.GetCurrentItem() != 0 {
-		t.Errorf("highlight after 'g' = %d, want 0 (first)", list.GetCurrentItem())
+	table.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'G', tcell.ModNone), func(tview.Primitive) {})
+	if curRow(table) != 2 {
+		t.Errorf("highlight after 'G' = %d, want 2 (last)", curRow(table))
 	}
 
-	list.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'k', tcell.ModNone), func(tview.Primitive) {})
-	if list.GetCurrentItem() != 2 {
-		t.Errorf("highlight after 'k' from the first item = %d, want 2 (wraps to the last)", list.GetCurrentItem())
+	table.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'g', tcell.ModNone), func(tview.Primitive) {})
+	if curRow(table) != 0 {
+		t.Errorf("highlight after 'g' = %d, want 0 (first)", curRow(table))
+	}
+
+	table.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'k', tcell.ModNone), func(tview.Primitive) {})
+	if curRow(table) != 2 {
+		t.Errorf("highlight after 'k' from the first item = %d, want 2 (wraps to the last)", curRow(table))
 	}
 }
 
@@ -811,15 +894,15 @@ func TestOpenGlobalSearchAddToQueueNoopWhenNothingHighlighted(t *testing.T) {
 	field.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'z', tcell.ModNone), func(tview.Primitive) {})
 
 	field.InputHandler()(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone), func(tview.Primitive) {})
-	list, ok := a.tv.GetFocus().(*tview.List)
+	table, ok := a.tv.GetFocus().(*tview.Table)
 	if !ok {
-		t.Fatalf("focus after Tab = %T, want *tview.List", a.tv.GetFocus())
+		t.Fatalf("focus after Tab = %T, want *tview.Table", a.tv.GetFocus())
 	}
-	if list.GetItemCount() != 0 {
-		t.Fatalf("setup: hint count = %d, want 0", list.GetItemCount())
+	if table.GetRowCount() != 0 {
+		t.Fatalf("setup: hint count = %d, want 0", table.GetRowCount())
 	}
 
-	list.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'a', tcell.ModNone), func(tview.Primitive) {})
+	table.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'a', tcell.ModNone), func(tview.Primitive) {})
 	if a.mode != modeOverlay {
 		t.Error("mode after a no-op 'a' should stay modeOverlay (popup stays open)")
 	}
@@ -845,19 +928,19 @@ func TestOpenGlobalSearchAddToQueueInvalidForArtistKindNeedsLiveMPD(t *testing.T
 	field.InputHandler()(tcell.NewEventKey(tcell.KeyRune, runes[len(runes)-1], tcell.ModNone), func(tview.Primitive) {})
 
 	field.InputHandler()(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone), func(tview.Primitive) {})
-	list, ok := a.tv.GetFocus().(*tview.List)
+	table, ok := a.tv.GetFocus().(*tview.Table)
 	if !ok {
-		t.Fatalf("focus after Tab = %T, want *tview.List", a.tv.GetFocus())
+		t.Fatalf("focus after Tab = %T, want *tview.Table", a.tv.GetFocus())
 	}
-	if list.GetItemCount() == 0 {
+	if table.GetRowCount() == 0 {
 		t.Fatalf("setup: expected at least one artist hint for %q", artist)
 	}
 
-	list.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'a', tcell.ModNone), func(tview.Primitive) {})
+	table.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'a', tcell.ModNone), func(tview.Primitive) {})
 	if a.mode != modeOverlay {
 		t.Error("'a' on an artist hint should be invalid (flashed), not close the popup")
 	}
-	if a.tv.GetFocus() != list {
-		t.Errorf("focus after an invalid 'a' = %T, want to stay on the hint list", a.tv.GetFocus())
+	if a.tv.GetFocus() != table {
+		t.Errorf("focus after an invalid 'a' = %T, want to stay on the results table", a.tv.GetFocus())
 	}
 }

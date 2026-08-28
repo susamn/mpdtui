@@ -8,6 +8,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
+	"mpdtui/internal/lyricsindex"
 	"mpdtui/internal/mpdclient"
 )
 
@@ -20,6 +21,7 @@ const (
 	globalSearchArtist
 	globalSearchAlbum
 	globalSearchPlaylist
+	globalSearchLyrics
 )
 
 func (k globalSearchKind) label() string {
@@ -30,6 +32,8 @@ func (k globalSearchKind) label() string {
 		return "album"
 	case globalSearchPlaylist:
 		return "playlist"
+	case globalSearchLyrics:
+		return "lyrics"
 	default:
 		return "track"
 	}
@@ -39,12 +43,47 @@ func (k globalSearchKind) label() string {
 // once -- a glanceable fzf-style shortlist, not a full result dump.
 const maxGlobalSearchHints = 10
 
+// lyricsMatchColor tags the matched query text inside a lyrics hint's
+// excerpt (theme-derived, see deriveColors) -- everything else in the
+// row (track name, excerpt context) stays at the terminal's default
+// foreground so the highlight is the one thing that stands out.
+var lyricsMatchColor string
+
+// lyricsExcerptRadius is how many characters of context the lyrics
+// column keeps on each side of the matched term.
+const lyricsExcerptRadius = 24
+
+// lyricsExcerptCell renders the Lyrics column of an "l" search hit: a
+// one-line excerpt of rawText around the first occurrence of term, with
+// the matched span colored (see lyricsindex.Snippet). Every data-derived
+// piece is escaped for tview's style-tag parser. Returns "" -- leaving
+// the column blank -- when term is empty or no excerpt is found.
+func lyricsExcerptCell(rawText, term string) string {
+	if term == "" {
+		return ""
+	}
+	before, match, after, ok := lyricsindex.Snippet(rawText, term, lyricsExcerptRadius)
+	if !ok {
+		return ""
+	}
+	parts := make([]string, 0, 3)
+	if before != "" {
+		parts = append(parts, tview.Escape(before))
+	}
+	parts = append(parts, fmt.Sprintf("[%s]%s[-]", lyricsMatchColor, tview.Escape(match)))
+	if after != "" {
+		parts = append(parts, tview.Escape(after))
+	}
+	return strings.Join(parts, " ")
+}
+
 // parseGlobalSearchKind splits raw input into a search kind and term. The
 // first word selects the kind, case-insensitive: a leading "al" (e.g.
 // "al", "album") means album, any other word starting with "a" (e.g. "a",
-// "artist") means artist, "p"/"playlist" means playlist, "t"/"track" means
-// track -- only that leading prefix matters, so "t", "track", and "trk"
-// are all equivalent. Everything after the first word is the term.
+// "artist") means artist, "l"/"lyrics" means lyrics, "p"/"playlist" means
+// playlist, "t"/"track" means track -- only that leading prefix matters,
+// so "t", "track", and "trk" are all equivalent. Everything after the
+// first word is the term.
 // Unlike a stricter parse that requires a term too, this succeeds the
 // moment the prefix word is recognized -- even with no term yet -- since
 // live hints should populate (unfiltered, showing the first
@@ -64,6 +103,8 @@ func parseGlobalSearchKind(input string) (kind globalSearchKind, term string, ok
 		return globalSearchAlbum, rest, true
 	case strings.HasPrefix(word, "a"):
 		return globalSearchArtist, rest, true
+	case strings.HasPrefix(word, "l"):
+		return globalSearchLyrics, rest, true
 	case strings.HasPrefix(word, "p"):
 		return globalSearchPlaylist, rest, true
 	case strings.HasPrefix(word, "t"):
@@ -129,6 +170,31 @@ func fuzzyScore(query, candidate string) (score int, ok bool) {
 // unit-testable without constructing a live popup or touching MPD.
 func rankGlobalSearchHints(term string, labels []string) (shown []int, total int) {
 	matched := fuzzyFilterSortIndex(term, labels)
+	total = len(matched)
+	if total > maxGlobalSearchHints {
+		matched = matched[:maxGlobalSearchHints]
+	}
+	return matched, total
+}
+
+// filterSubstringHints is rankGlobalSearchHints' counterpart for lyrics
+// search: it keeps the indices of targets that contain term as a case-
+// and diacritic-insensitive substring, in targets' own order. Lyrics
+// search has no meaningful relevance score to sort by -- a phrase is
+// either somewhere in a track's lyrics or it isn't -- and prose is long
+// enough that fuzzyScore's subsequence match would pair almost any short
+// query with almost every track. targets are expected already folded
+// (lyricsindex.Fold, as stored in the index); only the term is folded
+// here, with the same function. An empty term matches everything; total
+// is the full match count before the maxGlobalSearchHints cap.
+func filterSubstringHints(term string, targets []string) (shown []int, total int) {
+	needle := lyricsindex.Fold(term)
+	matched := make([]int, 0, len(targets))
+	for i, t := range targets {
+		if needle == "" || strings.Contains(t, needle) {
+			matched = append(matched, i)
+		}
+	}
 	total = len(matched)
 	if total > maxGlobalSearchHints {
 		matched = matched[:maxGlobalSearchHints]
@@ -211,6 +277,7 @@ func moveHintHighlight(current, n, delta int) int {
 type globalSearchHints struct {
 	kind      globalSearchKind
 	kindValid bool
+	term      string   // the search term from the last rebuild, for renderers that need it (lyrics excerpt highlighting)
 	labels    []string // the active kind's full candidate label slice, as returned by the last rebuild's labelsFor
 	order     []int    // indices into labels, best-match-first, capped to maxGlobalSearchHints
 	total     int      // true match count before the cap
@@ -224,15 +291,32 @@ type globalSearchHints struct {
 // popup session regardless of how many times rebuild runs -- then
 // fuzzy-ranks it against the term. The highlight resets to the top match,
 // or -1 if there are none (unrecognized prefix, or zero matches).
-func (h *globalSearchHints) rebuild(text string, labelsFor func(globalSearchKind) []string) {
+// The optional matchTextFor, when supplied and returning a non-nil slice
+// for the active kind, is what term is ranked against instead of the
+// display labels -- lyrics search shows track names in h.labels but
+// matches against a parallel slice of each track's sidecar-lyrics text.
+// That slice must stay index-aligned with labelsFor(kind), since confirm
+// looks the chosen hint's underlying Song up by the same index.
+func (h *globalSearchHints) rebuild(text string, labelsFor func(globalSearchKind) []string, matchTextFor ...func(globalSearchKind) []string) {
 	kind, term, ok := parseGlobalSearchKind(text)
-	h.kind, h.kindValid = kind, ok
+	h.kind, h.kindValid, h.term = kind, ok, term
 	h.labels, h.order, h.total, h.highlight = nil, nil, 0, -1
 	if !ok {
+		h.term = ""
 		return
 	}
 	h.labels = labelsFor(kind)
-	h.order, h.total = rankGlobalSearchHints(term, h.labels)
+	targets := h.labels
+	if len(matchTextFor) > 0 && matchTextFor[0] != nil {
+		if mt := matchTextFor[0](kind); mt != nil {
+			targets = mt
+		}
+	}
+	if kind == globalSearchLyrics {
+		h.order, h.total = filterSubstringHints(term, targets)
+	} else {
+		h.order, h.total = rankGlobalSearchHints(term, targets)
+	}
 	if len(h.order) > 0 {
 		h.highlight = 0
 	}
@@ -273,10 +357,16 @@ func (h *globalSearchHints) current() (label string, idx int) {
 }
 
 // openGlobalSearch opens a "f" search reachable from any panel: type a
-// prefix word (a/al/p/t) plus a search term, e.g. "a queen" for artists
+// prefix word (a/al/l/p/t) plus a search term, e.g. "a queen" for artists
 // or "al hello" for albums. Matching candidates for the active kind
 // appear live, fzf-style, in a hint list below the input as each
-// character is typed, ranked by fuzzyScore.
+// character is typed, ranked by fuzzyScore -- except lyrics ("l"), which
+// matches the term as a plain case/accent-insensitive substring against
+// each track's sidecar lyrics text (see filterSubstringHints) and shows
+// the matching tracks. Lyrics hits are read from the prebuilt index
+// (internal/lyricsindex, rebuilt with the 'I' key); this popup never
+// scans the filesystem itself. An index that's missing or empty just
+// yields no lyrics hits, with a hint to build one.
 //
 // The popup has two focus states, toggled with Tab/Backtab (from the hint
 // list, 'f' also returns to typing -- the same muscle memory that opened
@@ -295,9 +385,10 @@ func (h *globalSearchHints) current() (label string, idx int) {
 //
 // Enter (from either focus state) acts on whichever hint is currently
 // highlighted:
-//   - track: added to the queue and played immediately (mirrors Library's
-//     Enter-on-a-file, and the `-t` CLI picker); 'a' instead only adds it
-//     (mirrors Library/Playlists' own Enter-vs-'a' convention)
+//   - track / lyrics: added to the queue and played immediately (mirrors
+//     Library's Enter-on-a-file, and the `-t` CLI picker); 'a' instead
+//     only adds it (mirrors Library/Playlists' own Enter-vs-'a'
+//     convention). A lyrics hint is just a track found by its words.
 //   - artist/album: scopes the Library panel to that exact group, the same
 //     presentation showArtistSearch/showAlbumSearch already give a typed
 //     substring search, just landing on it directly instead of requiring
@@ -331,18 +422,29 @@ func (h *globalSearchHints) current() (label string, idx int) {
 func (a *App) openGlobalSearch() {
 	field := tview.NewInputField().SetLabel("Search: ").SetFieldWidth(50)
 	field.SetText("t ")
-	field.SetBorder(true).SetTitle(" a:artist  al:album  p:playlist  t:track ")
+	field.SetBorder(true).SetTitle(" a:artist  al:album  l:lyrics  p:playlist  t:track ")
 
-	list := tview.NewList()
-	list.ShowSecondaryText(false)
-	list.SetHighlightFullLine(true)
-	list.SetSelectedTextColor(colorSelectedFg)
-	list.SetSelectedBackgroundColor(colorSelectedBg)
-	list.SetBorder(true)
+	table := tview.NewTable()
+	table.SetSelectable(true, false)
+	table.SetSelectedStyle(tcell.StyleDefault.Background(colorSelectedBg).Foreground(colorSelectedFg))
+	table.SetBorder(true)
 
 	var trackSongs []mpdclient.Song
 	var trackLabels, artistLabels, albumLabels, playlistNames []string
-	tracksLoaded, artistsLoaded, albumsLoaded := false, false, false
+	// albumArtistByName maps an album name to its album-artist, lazily
+	// fetched (loadAlbumArtists) the first time album results actually
+	// render. Missing entries fall back to albumArtistUnknown.
+	var albumArtistByName map[string]string
+	albumArtistsLoaded := false
+	// Lyrics hits come from the prebuilt index (internal/lyricsindex), not
+	// a live MPD/filesystem scan, so the popup keeps a set of parallel
+	// slices: the track's MPD path, a reconstructed "Artist - Title"
+	// label (for fuzzy bookkeeping and the add-to-queue message), the
+	// Artist and Title apart (for the results table's own columns), the
+	// folded lyrics text to match against, and the raw lyrics text to
+	// excerpt for the Lyrics column.
+	var lyricsFiles, lyricsLabels, lyricsArtists, lyricsTitles, lyricsTexts, lyricsRaw []string
+	tracksLoaded, artistsLoaded, albumsLoaded, lyricsLoaded := false, false, false, false
 
 	loadTracks := func() {
 		if tracksLoaded {
@@ -385,11 +487,67 @@ func (a *App) openGlobalSearch() {
 		albumLabels = nonEmptyStrings(names)
 	}
 
+	// loadLyrics reads the prebuilt lyrics index off disk once per popup
+	// session (lazily, the first keystroke after an "l" prefix) -- a single
+	// sequential SQLite read, no MPD call and no music-directory walk. The
+	// index is only ever as fresh as its last rebuild (the 'I' key, see
+	// handleReindexLyrics); an empty or missing one just yields no hits,
+	// with a nudge toward building it.
+	loadLyrics := func() {
+		if lyricsLoaded {
+			return
+		}
+		lyricsLoaded = true
+		entries, err := lyricsindex.Load(a.cfg.LyricsIndexPath)
+		if err != nil {
+			a.showError(err)
+			return
+		}
+		if len(entries) == 0 {
+			a.showMessage("lyrics index is empty -- press 'I' to build it (needs music_dir)")
+			return
+		}
+		lyricsFiles = make([]string, len(entries))
+		lyricsLabels = make([]string, len(entries))
+		lyricsArtists = make([]string, len(entries))
+		lyricsTitles = make([]string, len(entries))
+		lyricsTexts = make([]string, len(entries))
+		lyricsRaw = make([]string, len(entries))
+		for i, e := range entries {
+			lyricsFiles[i] = e.File
+			lyricsLabels[i] = mpdclient.Song{File: e.File, Artist: e.Artist, Title: e.Title}.DisplayName()
+			lyricsArtists[i] = e.Artist
+			lyricsTitles[i] = e.Title
+			lyricsTexts[i] = e.TextFolded
+			lyricsRaw[i] = e.Text
+		}
+	}
+
+	// loadAlbumArtists fetches the album -> album-artist map once, the
+	// first time an album result needs it. A failure is surfaced and
+	// treated as "no data" (every album then shows albumArtistUnknown)
+	// rather than blocking the results.
+	loadAlbumArtists := func() map[string]string {
+		if !albumArtistsLoaded {
+			albumArtistsLoaded = true
+			m, err := a.client.AlbumArtists()
+			if err != nil {
+				a.showError(err)
+				m = map[string]string{}
+			}
+			albumArtistByName = m
+		}
+		return albumArtistByName
+	}
+
 	labelsFor := func(kind globalSearchKind) []string {
 		switch kind {
 		case globalSearchTrack:
 			loadTracks()
 			return trackLabels
+		case globalSearchLyrics:
+			loadLyrics()
+			return lyricsLabels
 		case globalSearchArtist:
 			loadArtists()
 			return artistLabels
@@ -403,31 +561,65 @@ func (a *App) openGlobalSearch() {
 		return nil
 	}
 
+	// matchTextFor feeds lyrics search its per-track lyrics text to rank
+	// against; every other kind ranks against its display labels, so nil.
+	matchTextFor := func(kind globalSearchKind) []string {
+		if kind == globalSearchLyrics {
+			return lyricsTexts
+		}
+		return nil
+	}
+
 	hints := &globalSearchHints{}
 
-	// syncHighlight pushes hints.highlight onto the actual list widget --
-	// shared by renderList (a full rebuild) and the arrow-key handlers
-	// below (which only move the highlight, not the underlying matches).
+	// syncHighlight pushes hints.highlight onto the results table -- shared
+	// by renderResults (a full rebuild) and the arrow-key handlers below
+	// (which only move the highlight, not the underlying matches).
 	syncHighlight := func() {
 		if hints.highlight >= 0 {
-			list.SetCurrentItem(hints.highlight)
+			table.Select(hints.highlight, 0)
 		}
 	}
 
-	// renderList repaints the hint list and title from hints' current
-	// state -- called after rebuild(), never after a plain move() (an
-	// arrow key doesn't change which matches exist, only which one's
-	// highlighted, so re-adding every item on every keypress would be
-	// wasted work).
-	renderList := func() {
-		list.Clear()
-		for _, idx := range hints.order {
-			list.AddItem(hints.labels[idx], "", 0, nil)
+	// rowFor returns the display cells for one matched result of kind,
+	// column-aligned with that kind's searchLayout. This is where each
+	// kind's per-column data lives; the table mechanics (icons, widths,
+	// truncation) are all in renderSearchResults.
+	rowFor := func(kind globalSearchKind, idx int) []string {
+		switch kind {
+		case globalSearchTrack:
+			s := trackSongs[idx]
+			return []string{s.Title, s.Artist}
+		case globalSearchLyrics:
+			return []string{lyricsTitles[idx], lyricsArtists[idx], lyricsExcerptCell(lyricsRaw[idx], hints.term)}
+		case globalSearchAlbum:
+			album := albumLabels[idx]
+			artist := loadAlbumArtists()[album]
+			if artist == "" {
+				artist = albumArtistUnknown
+			}
+			return []string{album, artist}
+		case globalSearchArtist:
+			return []string{artistLabels[idx]}
+		case globalSearchPlaylist:
+			return []string{playlistNames[idx]}
 		}
-		syncHighlight()
+		return nil
+	}
+
+	// renderResults repaints the results table and the field title from
+	// hints' current state -- called after rebuild(), never after a plain
+	// move() (an arrow key doesn't change which matches exist, only which
+	// one's highlighted).
+	renderResults := func() {
+		rows := make([][]string, 0, len(hints.order))
+		for _, idx := range hints.order {
+			rows = append(rows, rowFor(hints.kind, idx))
+		}
+		renderSearchResults(table, hints.kind, rows, hints.highlight)
 		switch {
 		case !hints.kindValid:
-			field.SetTitle(" a:artist  al:album  p:playlist  t:track ")
+			field.SetTitle(" a:artist  al:album  l:lyrics  p:playlist  t:track ")
 		case hints.total == 0:
 			field.SetTitle(fmt.Sprintf(" no %s found ", hints.kind.label()))
 		default:
@@ -436,8 +628,8 @@ func (a *App) openGlobalSearch() {
 	}
 
 	rebuild := func() {
-		hints.rebuild(field.GetText(), labelsFor)
-		renderList()
+		hints.rebuild(field.GetText(), labelsFor, matchTextFor)
+		renderResults()
 	}
 	// Deliberately not called eagerly here: rebuild() is what triggers a
 	// kind's MPD fetch (loadTracks/loadArtists/loadAlbums), and running it
@@ -460,6 +652,10 @@ func (a *App) openGlobalSearch() {
 			song := trackSongs[idx]
 			a.closeOverlay()
 			a.addAndPlay(song)
+			a.focusPanelPrimitive(a.queue.table)
+		case globalSearchLyrics:
+			a.closeOverlay()
+			a.addAndPlay(mpdclient.Song{File: lyricsFiles[idx]})
 			a.focusPanelPrimitive(a.queue.table)
 		case globalSearchArtist:
 			a.closeOverlay()
@@ -498,14 +694,17 @@ func (a *App) openGlobalSearch() {
 			return
 		}
 		switch hints.kind {
-		case globalSearchTrack:
-			song := trackSongs[idx]
-			if err := a.client.QueueAdd(song.File); err != nil {
+		case globalSearchTrack, globalSearchLyrics:
+			file, name := trackSongs[idx].File, trackSongs[idx].DisplayName()
+			if hints.kind == globalSearchLyrics {
+				file, name = lyricsFiles[idx], lyricsLabels[idx]
+			}
+			if err := a.client.QueueAdd(file); err != nil {
 				a.showError(err)
 				return
 			}
 			a.queue.refresh()
-			a.showMessage("added to queue: " + song.DisplayName())
+			a.showMessage("added to queue: " + name)
 		case globalSearchPlaylist:
 			a.appendPlaylist(label)
 		default:
@@ -513,14 +712,14 @@ func (a *App) openGlobalSearch() {
 		}
 	}
 
-	// focusList/focusField toggle between typing (field) and navigating
-	// the hint list (list has no text input of its own, so Down/Up/j/k/
-	// g/G/Enter/a only make sense once it actually holds keyboard focus).
-	// Bound to Tab/Backtab in both directions (either key toggles,
-	// forgiving of however a given terminal reports Shift-Tab) and to 'f'
-	// from list back to field specifically -- 'f' is already the muscle
-	// memory for "start searching" everywhere else in this app.
-	focusList := func() { a.tv.SetFocus(list) }
+	// focusResults/focusField toggle between typing (field) and navigating
+	// the results table (the table has no text input of its own, so
+	// Down/Up/j/k/g/G/Enter/a only make sense once it actually holds
+	// keyboard focus). Bound to Tab/Backtab in both directions (either key
+	// toggles, forgiving of however a given terminal reports Shift-Tab)
+	// and to 'f' from the table back to the field specifically -- 'f' is
+	// already the muscle memory for "start searching" everywhere else.
+	focusResults := func() { a.tv.SetFocus(table) }
 	focusField := func() { a.tv.SetFocus(field) }
 
 	field.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -534,7 +733,7 @@ func (a *App) openGlobalSearch() {
 			syncHighlight()
 			return nil
 		case tcell.KeyTab, tcell.KeyBacktab:
-			focusList()
+			focusResults()
 			return nil
 		case tcell.KeyEnter:
 			rebuild()
@@ -544,7 +743,7 @@ func (a *App) openGlobalSearch() {
 		return event
 	})
 
-	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+	table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
 		case tcell.KeyDown, tcell.KeyCtrlN:
 			hints.move(1)
@@ -591,7 +790,10 @@ func (a *App) openGlobalSearch() {
 
 	layout := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(field, 3, 0, true).
-		AddItem(list, 0, 1, false)
+		AddItem(table, 0, 1, false)
 
-	a.showOverlay("global-search", centered(layout, 70, 3+maxGlobalSearchHints+2), field)
+	// Wide enough for the lyrics kind's three columns (Track + Artist +
+	// an excerpt) before the excerpt column starts truncating; the
+	// narrower kinds simply leave the rest of the row empty.
+	a.showOverlay("global-search", centered(layout, 108, 3+maxGlobalSearchHints+2), field)
 }
