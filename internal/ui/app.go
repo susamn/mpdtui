@@ -75,8 +75,14 @@ type App struct {
 	trackInfo    *trackInfoCard
 	lyricsViewer *lyricsViewer
 	markPicker   *markPicker
+	castPicker   *castPicker
 	settings     *settingsView
 	visualizer   *visualizerPanel
+
+	// cast drives the 'P' casting overlay and the Now Playing cast
+	// indicator. nil when casting is unavailable (e.g. tests) -- every
+	// use is nil-guarded, same convention as metaDB.
+	cast castController
 
 	// currentSong is refreshNowPlaying's own last-fetched CurrentSong,
 	// kept around so openLyricsViewer can show it without a redundant
@@ -130,7 +136,7 @@ type App struct {
 // closes metaDB -- that's the caller's (cmd/mpdtui's) responsibility,
 // same as the MPD client. cfg is a read-only snapshot shown in the
 // Settings overlay's Config tab ('e') -- see ConfigSummary.
-func Run(client *mpdclient.Client, musicDir string, metaDB *metadata.DB, cfg ConfigSummary) error {
+func Run(client *mpdclient.Client, musicDir string, metaDB *metadata.DB, cfg ConfigSummary, castCtl castController) error {
 	SetThemeFile(cfg.ThemeFile)
 
 	a := &App{
@@ -139,6 +145,7 @@ func Run(client *mpdclient.Client, musicDir string, metaDB *metadata.DB, cfg Con
 		musicDir:          musicDir,
 		metaDB:            metaDB,
 		cfg:               cfg,
+		cast:              castCtl,
 		playCountedSongID: -1,
 		done:              make(chan struct{}),
 	}
@@ -188,6 +195,7 @@ func Run(client *mpdclient.Client, musicDir string, metaDB *metadata.DB, cfg Con
 
 	a.build()
 	a.refreshAll()
+	a.reattachCast()
 	go a.eventLoop()
 
 	return a.tv.Run()
@@ -233,6 +241,7 @@ func (a *App) build() {
 	a.trackInfo = newTrackInfoCard(a)
 	a.lyricsViewer = newLyricsViewer(a)
 	a.markPicker = newMarkPicker(a)
+	a.castPicker = newCastPicker(a)
 	a.settings = newSettingsView(a)
 	a.visualizer = newVisualizerPanel(a)
 
@@ -622,6 +631,7 @@ var globalHints = []hint{
 	{"y", "lyrics"},
 	{"v", "visualizer"},
 	{"L", "locate"},
+	{"P", "cast"},
 	{"?", "help"},
 	{"Tab/1-3", "panels"},
 	{"q", "quit"},
