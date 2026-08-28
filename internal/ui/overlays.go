@@ -143,9 +143,12 @@ const helpText = `[::b]Global[-:-:-]
   D              clear entire queue (confirm)
   Tab, 1/2/3     cycle / jump focus between panels
   /              search (contextual: Library/Playlists filter, Queue jump)
-  f              global search from any panel: "a/al/p/t <term>" for
-                 artist/album/playlist/track (e.g. "a queen", "al hello"),
-                 with live fzf-style hints as you type. Up/Down
+  f              global search from any panel: "a/al/l/p/t <term>" for
+                 artist/album/lyrics/playlist/track (e.g. "a queen",
+                 "al hello", "l never gonna give"), with live fzf-style
+                 hints as you type. "l" matches words in each track's
+                 .txt/.lrc sidecar against the prebuilt index (press 'I'
+                 to build/refresh it) and behaves like a track hit. Up/Down
                  (Ctrl-P/Ctrl-N) move the highlight while typing; Tab (or
                  'f' to come back) switches to the hint list for j/k/g/G
                  navigation. Enter acts on the highlight and closes the
@@ -180,9 +183,8 @@ const helpText = `[::b]Global[-:-:-]
                  unaffected
   I              rebuild the lyrics search index (needs music_dir) -- a
                  background scan of every track's .txt/.lrc sidecar, with
-                 a progress overlay; Esc cancels a run. Incremental, so a
-                 rebuild after adding a few lyrics files only re-reads
-                 those. Index lives at ~/.config/mpdtui/lyrics_index.db
+                 a progress overlay; Esc cancels a run. The "l" mode of
+                 'f' reads only this index, never the filesystem
   v              cycle Now Playing visualizations
   L              locate the currently playing track in the Queue
   e              settings: Config tab (read-only: MPD host/port,

@@ -26,6 +26,9 @@ func TestParseGlobalSearchKind(t *testing.T) {
 		{"AL Hello World", globalSearchAlbum, "Hello World", true},
 		{"p Rock Oldies", globalSearchPlaylist, "Rock Oldies", true},
 		{"playlist Rock Oldies", globalSearchPlaylist, "Rock Oldies", true},
+		{"l never gonna", globalSearchLyrics, "never gonna", true},
+		{"lyrics never gonna", globalSearchLyrics, "never gonna", true},
+		{"l", globalSearchLyrics, "", true},
 		{"t help me", globalSearchTrack, "help me", true},
 		{"track help me", globalSearchTrack, "help me", true},
 		{"  t   spaced term  ", globalSearchTrack, "spaced term", true},
@@ -50,6 +53,54 @@ func TestParseGlobalSearchKind(t *testing.T) {
 		if term != tc.wantTerm {
 			t.Errorf("parseGlobalSearchKind(%q) term = %q, want %q", tc.input, term, tc.wantTerm)
 		}
+	}
+}
+
+func TestFilterSubstringHints(t *testing.T) {
+	// targets arrive already folded (lyricsindex.Fold), as stored in the
+	// index -- lowercased, diacritics stripped.
+	targets := []string{
+		"we're no strangers to love",
+		"never gonna give you up",
+		"never gonna let you down",
+		"is this the real life",
+	}
+	// Query is folded by filterSubstringHints itself, so mixed case is fine.
+	shown, total := filterSubstringHints("NEVER Gonna", targets)
+	if total != 2 {
+		t.Fatalf("total = %d, want 2", total)
+	}
+	if len(shown) != 2 || shown[0] != 1 || shown[1] != 2 {
+		t.Errorf("shown = %v, want [1 2] in target order", shown)
+	}
+
+	// Empty term matches everything, order preserved.
+	shown, total = filterSubstringHints("", targets)
+	if total != 4 || len(shown) != 4 || shown[0] != 0 {
+		t.Errorf("empty term: shown = %v total = %d, want all four in order", shown, total)
+	}
+}
+
+func TestRebuildLyricsMatchesAgainstTextNotLabels(t *testing.T) {
+	labels := []string{"Rick Astley - Never Gonna Give You Up", "Queen - Bohemian Rhapsody"}
+	texts := []string{"we're no strangers to love", "is this the real life is this just fantasy"}
+
+	h := &globalSearchHints{}
+	h.rebuild("l real life",
+		func(globalSearchKind) []string { return labels },
+		func(k globalSearchKind) []string {
+			if k == globalSearchLyrics {
+				return texts
+			}
+			return nil
+		},
+	)
+	label, idx := h.current()
+	if idx != 1 {
+		t.Fatalf("current idx = %d, want 1 (matched by lyrics text, not track title)", idx)
+	}
+	if label != labels[1] {
+		t.Errorf("current label = %q, want the track title %q", label, labels[1])
 	}
 }
 
