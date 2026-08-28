@@ -119,6 +119,7 @@ func main() {
 			TrackMetadataEnabled: config.LoadTrackMetadataEnabled(),
 			ConfigFilePath:       config.ConfigFile(),
 			DBFilePath:           config.DBFile(),
+			LyricsIndexPath:      config.LyricsIndexFile(),
 			ThemeFile:            config.LoadThemeFile(),
 		}
 		err = ui.Run(client, config.LoadMusicDir(), metaDB, summary)
