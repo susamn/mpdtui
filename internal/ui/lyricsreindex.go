@@ -69,7 +69,7 @@ func (a *App) handleReindexLyrics() {
 		}
 		tracks := make([]lyricsindex.Track, len(songs))
 		for i, s := range songs {
-			tracks[i] = lyricsindex.Track{File: s.File, Display: s.DisplayName()}
+			tracks[i] = lyricsindex.Track{File: s.File, Artist: s.Artist, Title: s.Title}
 		}
 
 		lastPaint := time.Now()

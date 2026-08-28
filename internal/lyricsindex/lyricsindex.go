@@ -40,7 +40,7 @@ import (
 // table; Open wipes and recreates the index when it finds an older one,
 // since the index is a pure derived cache -- losing it just means the
 // user rebuilds.
-const schemaVersion = 2
+const schemaVersion = 3
 
 const metaSchema = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -52,7 +52,8 @@ CREATE TABLE IF NOT EXISTS meta (
 const entriesSchema = `
 CREATE TABLE IF NOT EXISTS entries (
 	file        TEXT PRIMARY KEY,
-	display     TEXT NOT NULL,
+	artist      TEXT NOT NULL,
+	title       TEXT NOT NULL,
 	kinds       TEXT NOT NULL,
 	mtime_ns    INTEGER NOT NULL,
 	text        TEXT NOT NULL,
@@ -61,17 +62,20 @@ CREATE TABLE IF NOT EXISTS entries (
 `
 
 // Track is the minimal per-song input Reindex needs: MPD's own
-// forward-slash-relative file path, and a display label to snapshot so
-// search hints don't need a second MPD round-trip to render.
+// forward-slash-relative file path, plus the Artist and Title tags to
+// snapshot so search hints don't need a second MPD round-trip to render
+// (and can lay them out as separate columns).
 type Track struct {
-	File    string
-	Display string
+	File   string
+	Artist string
+	Title  string
 }
 
 // Entry is one indexed track, as returned by Load.
 type Entry struct {
-	File    string
-	Display string
+	File   string
+	Artist string
+	Title  string
 	// Text is the sidecar lyrics verbatim (original case and punctuation,
 	// .lrc flattened to line text) -- used to build a readable match
 	// excerpt for the hint list (see Snippet).
@@ -163,7 +167,7 @@ func Load(dbPath string) ([]Entry, error) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query(`SELECT file, display, text, text_folded FROM entries`)
+	rows, err := db.Query(`SELECT file, artist, title, text, text_folded FROM entries`)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +176,7 @@ func Load(dbPath string) ([]Entry, error) {
 	var out []Entry
 	for rows.Next() {
 		var e Entry
-		if err := rows.Scan(&e.File, &e.Display, &e.Text, &e.TextFolded); err != nil {
+		if err := rows.Scan(&e.File, &e.Artist, &e.Title, &e.Text, &e.TextFolded); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
@@ -256,10 +260,11 @@ func Reindex(ctx context.Context, dbPath, musicDir string, tracks []Track, p Pro
 	defer tx.Rollback()
 
 	upsert, err := tx.Prepare(`
-		INSERT INTO entries (file, display, kinds, mtime_ns, text, text_folded)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO entries (file, artist, title, kinds, mtime_ns, text, text_folded)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(file) DO UPDATE SET
-			display = excluded.display,
+			artist = excluded.artist,
+			title = excluded.title,
 			kinds = excluded.kinds,
 			mtime_ns = excluded.mtime_ns,
 			text = excluded.text,
@@ -270,11 +275,11 @@ func Reindex(ctx context.Context, dbPath, musicDir string, tracks []Track, p Pro
 	}
 	defer upsert.Close()
 
-	touchDisplay, err := tx.Prepare(`UPDATE entries SET display = ? WHERE file = ?`)
+	touchNames, err := tx.Prepare(`UPDATE entries SET artist = ?, title = ? WHERE file = ?`)
 	if err != nil {
 		return stats, err
 	}
-	defer touchDisplay.Close()
+	defer touchNames.Close()
 
 	// candidatesByDir memoises the per-directory sidecar listing so an
 	// album's worth of tracks costs one ReadDir, not one per track.
@@ -307,8 +312,8 @@ func Reindex(ctx context.Context, dbPath, musicDir string, tracks []Track, p Pro
 		if prev, ok := existing[tr.File]; ok && prev.kinds == kinds && prev.mtimeNS == mtime {
 			stats.Unchanged++
 			stats.Indexed++
-			if prev.display != tr.Display {
-				if _, err := touchDisplay.Exec(tr.Display, tr.File); err != nil {
+			if prev.artist != tr.Artist || prev.title != tr.Title {
+				if _, err := touchNames.Exec(tr.Artist, tr.Title, tr.File); err != nil {
 					return stats, err
 				}
 			}
@@ -319,7 +324,7 @@ func Reindex(ctx context.Context, dbPath, musicDir string, tracks []Track, p Pro
 		}
 
 		text := readSidecarText(dir, txtName, hasTxt, lrcName, hasLRC)
-		if _, err := upsert.Exec(tr.File, tr.Display, kinds, mtime, text, Fold(text)); err != nil {
+		if _, err := upsert.Exec(tr.File, tr.Artist, tr.Title, kinds, mtime, text, Fold(text)); err != nil {
 			return stats, err
 		}
 		stats.Read++
@@ -357,13 +362,14 @@ func Reindex(ctx context.Context, dbPath, musicDir string, tracks []Track, p Pro
 }
 
 type rowMeta struct {
-	display string
+	artist  string
+	title   string
 	kinds   string
 	mtimeNS int64
 }
 
 func loadRowMeta(db *sql.DB) (map[string]rowMeta, error) {
-	rows, err := db.Query(`SELECT file, display, kinds, mtime_ns FROM entries`)
+	rows, err := db.Query(`SELECT file, artist, title, kinds, mtime_ns FROM entries`)
 	if err != nil {
 		return nil, err
 	}
@@ -373,7 +379,7 @@ func loadRowMeta(db *sql.DB) (map[string]rowMeta, error) {
 	for rows.Next() {
 		var file string
 		var rm rowMeta
-		if err := rows.Scan(&file, &rm.display, &rm.kinds, &rm.mtimeNS); err != nil {
+		if err := rows.Scan(&file, &rm.artist, &rm.title, &rm.kinds, &rm.mtimeNS); err != nil {
 			return nil, err
 		}
 		out[file] = rm

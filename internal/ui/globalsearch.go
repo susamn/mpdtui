@@ -503,7 +503,7 @@ func (a *App) openGlobalSearch() {
 		lyricsRaw = make([]string, len(entries))
 		for i, e := range entries {
 			lyricsFiles[i] = e.File
-			lyricsLabels[i] = e.Display
+			lyricsLabels[i] = mpdclient.Song{File: e.File, Artist: e.Artist, Title: e.Title}.DisplayName()
 			lyricsTexts[i] = e.TextFolded
 			lyricsRaw[i] = e.Text
 		}
