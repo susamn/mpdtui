@@ -145,21 +145,21 @@ const helpText = `[::b]Global[-:-:-]
   /              search (contextual: Library/Playlists filter, Queue jump)
   f              global search from any panel: "a/al/l/p/t <term>" for
                  artist/album/lyrics/playlist/track (e.g. "a queen",
-                 "al hello", "l never gonna give"), with live fzf-style
-                 hints as you type. "l" matches words in each track's
-                 .txt/.lrc sidecar against the prebuilt index (press 'I'
-                 to build/refresh it); each hit shows a one-line lyrics
-                 excerpt with the term colored, and behaves like a track
-                 hit otherwise. Up/Down
-                 (Ctrl-P/Ctrl-N) move the highlight while typing; Tab (or
-                 'f' to come back) switches to the hint list for j/k/g/G
-                 navigation. Enter acts on the highlight and closes the
-                 popup: track adds+plays, playlist loads+plays, artist/
-                 album jump into that group in the Library. From the hint
-                 list, 'a' instead adds without playing (track) or appends
-                 (playlist) and leaves the popup open, so several tracks
-                 can be queued back-to-back -- accent-insensitive, so
-                 "buble" matches "Bublé"
+                 "al hello", "l never gonna give"). Matches appear live in
+                 a per-kind results table (track: Track+Artist; lyrics:
+                 those plus a matched-lyrics excerpt with the term
+                 colored; album: Album+Album Artist; artist/playlist: one
+                 column). "l" matches words in each track's .txt/.lrc
+                 sidecar against the prebuilt index (press 'I' to
+                 build/refresh it). Up/Down (Ctrl-P/Ctrl-N) move the
+                 highlight while typing; Tab (or 'f' to come back)
+                 switches to the table for j/k/g/G navigation. Enter acts
+                 on the highlight and closes the popup: track adds+plays,
+                 playlist loads+plays, artist/album jump into that group
+                 in the Library. From the table, 'a' instead adds without
+                 playing (track) or appends (playlist) and leaves the
+                 popup open, so several tracks can be queued back-to-back
+                 -- accent-insensitive, so "buble" matches "Bublé"
   F              clear any active search/filter, in every panel at once
   i              track info card for the currently playing track --
                  Track/Album/Artist/Genre/Year, colored "LRC"/"TXT" text
