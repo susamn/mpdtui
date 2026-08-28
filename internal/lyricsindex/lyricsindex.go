@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/text/runes"
 	"golang.org/x/text/transform"
@@ -39,18 +40,22 @@ import (
 // table; Open wipes and recreates the index when it finds an older one,
 // since the index is a pure derived cache -- losing it just means the
 // user rebuilds.
-const schemaVersion = 1
+const schemaVersion = 2
 
-const schema = `
+const metaSchema = `
 CREATE TABLE IF NOT EXISTS meta (
 	key   TEXT PRIMARY KEY,
 	value TEXT NOT NULL
 );
+`
+
+const entriesSchema = `
 CREATE TABLE IF NOT EXISTS entries (
 	file        TEXT PRIMARY KEY,
 	display     TEXT NOT NULL,
 	kinds       TEXT NOT NULL,
 	mtime_ns    INTEGER NOT NULL,
+	text        TEXT NOT NULL,
 	text_folded TEXT NOT NULL
 );
 `
@@ -67,9 +72,13 @@ type Track struct {
 type Entry struct {
 	File    string
 	Display string
-	// TextFolded is the sidecar text lowercased with diacritics stripped
-	// (see Fold) -- ready to match a Fold'd query against with a plain
-	// strings.Contains, no per-search re-folding of the whole corpus.
+	// Text is the sidecar lyrics verbatim (original case and punctuation,
+	// .lrc flattened to line text) -- used to build a readable match
+	// excerpt for the hint list (see Snippet).
+	Text string
+	// TextFolded is Text lowercased with diacritics stripped (see Fold) --
+	// ready to match a Fold'd query against with a plain strings.Contains,
+	// no per-search re-folding of the whole corpus.
 	TextFolded string
 }
 
@@ -110,7 +119,7 @@ func open(dbPath string) (*sql.DB, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	if _, err := db.Exec(metaSchema); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -121,7 +130,10 @@ func open(dbPath string) (*sql.DB, error) {
 		return nil, err
 	}
 	if stored != schemaVersion {
-		if _, err := db.Exec(`DELETE FROM entries`); err != nil {
+		// The index is a pure derived cache -- on any schema change just
+		// drop the table and let the next Reindex repopulate it, rather
+		// than carry migration code for a rebuildable artifact.
+		if _, err := db.Exec(`DROP TABLE IF EXISTS entries`); err != nil {
 			db.Close()
 			return nil, err
 		}
@@ -133,6 +145,10 @@ func open(dbPath string) (*sql.DB, error) {
 			db.Close()
 			return nil, err
 		}
+	}
+	if _, err := db.Exec(entriesSchema); err != nil {
+		db.Close()
+		return nil, err
 	}
 	return db, nil
 }
@@ -147,7 +163,7 @@ func Load(dbPath string) ([]Entry, error) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query(`SELECT file, display, text_folded FROM entries`)
+	rows, err := db.Query(`SELECT file, display, text, text_folded FROM entries`)
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +172,7 @@ func Load(dbPath string) ([]Entry, error) {
 	var out []Entry
 	for rows.Next() {
 		var e Entry
-		if err := rows.Scan(&e.File, &e.Display, &e.TextFolded); err != nil {
+		if err := rows.Scan(&e.File, &e.Display, &e.Text, &e.TextFolded); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
@@ -240,12 +256,13 @@ func Reindex(ctx context.Context, dbPath, musicDir string, tracks []Track, p Pro
 	defer tx.Rollback()
 
 	upsert, err := tx.Prepare(`
-		INSERT INTO entries (file, display, kinds, mtime_ns, text_folded)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO entries (file, display, kinds, mtime_ns, text, text_folded)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(file) DO UPDATE SET
 			display = excluded.display,
 			kinds = excluded.kinds,
 			mtime_ns = excluded.mtime_ns,
+			text = excluded.text,
 			text_folded = excluded.text_folded
 	`)
 	if err != nil {
@@ -302,7 +319,7 @@ func Reindex(ctx context.Context, dbPath, musicDir string, tracks []Track, p Pro
 		}
 
 		text := readSidecarText(dir, txtName, hasTxt, lrcName, hasLRC)
-		if _, err := upsert.Exec(tr.File, tr.Display, kinds, mtime, Fold(text)); err != nil {
+		if _, err := upsert.Exec(tr.File, tr.Display, kinds, mtime, text, Fold(text)); err != nil {
 			return stats, err
 		}
 		stats.Read++
@@ -453,4 +470,76 @@ func Fold(s string) string {
 		folded = s
 	}
 	return strings.ToLower(folded)
+}
+
+// SnippetRadius is the default number of characters Snippet keeps on
+// each side of the matched span.
+const SnippetRadius = 32
+
+// Snippet locates the first case/accent-insensitive occurrence of query
+// in text and returns a one-line excerpt around it: the text just before
+// the match, the matched text verbatim (its own original case and
+// punctuation), and the text just after -- each side trimmed to about
+// radius characters with a leading/trailing "…" where text was cut.
+// Newlines and runs of whitespace collapse to single spaces so the
+// excerpt fits on one line. ok is false when query is empty or not found
+// (the latter only on a fold edge case, since the caller has already
+// matched query against this text's folded form).
+func Snippet(text, query string, radius int) (before, match, after string, ok bool) {
+	q := Fold(query)
+	if q == "" {
+		return "", "", "", false
+	}
+	folded, src := foldRunes(text)
+	bytePos := strings.Index(string(folded), q)
+	if bytePos < 0 {
+		return "", "", "", false
+	}
+	fi := utf8.RuneCountInString(string(folded)[:bytePos])
+	fend := fi + utf8.RuneCountInString(q)
+
+	orig := []rune(text)
+	startOrig := src[fi]
+	endOrig := len(orig)
+	if fend < len(src) {
+		endOrig = src[fend]
+	}
+
+	ctxStart := max(0, startOrig-radius)
+	ctxEnd := min(len(orig), endOrig+radius)
+
+	before = collapseWS(string(orig[ctxStart:startOrig]))
+	match = collapseWS(string(orig[startOrig:endOrig]))
+	after = collapseWS(string(orig[endOrig:ctxEnd]))
+	if ctxStart > 0 {
+		before = "…" + before
+	}
+	if ctxEnd < len(orig) {
+		after += "…"
+	}
+	return before, match, after, true
+}
+
+// foldRunes folds s one rune at a time (see Fold), returning the folded
+// rune slice together with, for each folded rune, the index into []rune(s)
+// of the source rune it came from. A source rune that folds away entirely
+// (a combining mark) contributes nothing; one that folds to several runes
+// (a ligature) maps each of them back to its single source index. Doing
+// it per rune -- rather than folding the whole string and trying to align
+// the result -- is what keeps the offset map exact; it only ever runs on
+// the handful of excerpts actually shown, never the whole corpus.
+func foldRunes(s string) (folded []rune, srcIdx []int) {
+	for i, r := range []rune(s) {
+		for _, fr := range Fold(string(r)) {
+			folded = append(folded, fr)
+			srcIdx = append(srcIdx, i)
+		}
+	}
+	return folded, srcIdx
+}
+
+// collapseWS replaces every run of whitespace (including newlines) in s
+// with a single space and trims the ends.
+func collapseWS(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }

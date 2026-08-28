@@ -74,6 +74,9 @@ func TestReindexAndLoad(t *testing.T) {
 	if want := "hello darkness my old friend"; !contains(sos.TextFolded, want) {
 		t.Errorf("folded text %q missing %q", sos.TextFolded, want)
 	}
+	if want := "Hello darkness my old friend"; !contains(sos.Text, want) {
+		t.Errorf("raw text %q missing verbatim %q", sos.Text, want)
+	}
 
 	// .lrc is flattened: line text kept, timestamps and [ti:] tag gone.
 	sun := byFile["Beatles/Abbey Road/Here Comes the Sun.mp3"]
@@ -198,6 +201,54 @@ func TestReadInfo(t *testing.T) {
 	}
 	if !info.Exists || info.Count != 3 || info.MusicDir != musicDir || info.IndexedAt.IsZero() {
 		t.Fatalf("ReadInfo = %+v", info)
+	}
+}
+
+func TestSnippet(t *testing.T) {
+	text := "We're no strangers to love\nYou know the rules and so do I\nA full commitment's what I'm thinking of"
+
+	before, match, after, ok := lyricsindex.Snippet(text, "KNOW the", 12)
+	if !ok {
+		t.Fatal("expected a match")
+	}
+	if match != "know the" {
+		t.Errorf("match = %q, want %q (verbatim original case)", match, "know the")
+	}
+	// Newlines in the surrounding context are collapsed to spaces.
+	if strings.Contains(before, "\n") || strings.Contains(after, "\n") {
+		t.Errorf("context still has newlines: before=%q after=%q", before, after)
+	}
+	if !strings.HasPrefix(before, "…") {
+		t.Errorf("before = %q, want a leading ellipsis (text was cut)", before)
+	}
+	if !strings.HasSuffix(after, "…") {
+		t.Errorf("after = %q, want a trailing ellipsis", after)
+	}
+	if !strings.Contains(before, "love") || !strings.Contains(after, "rules") {
+		t.Errorf("context words missing: before=%q after=%q", before, after)
+	}
+}
+
+func TestSnippetAtStartHasNoLeadingEllipsis(t *testing.T) {
+	before, match, _, ok := lyricsindex.Snippet("Hello darkness my old friend", "hello", 4)
+	if !ok || match != "Hello" || before != "" {
+		t.Fatalf("before=%q match=%q ok=%v, want before empty, match \"Hello\"", before, match, ok)
+	}
+}
+
+func TestSnippetAccentInsensitive(t *testing.T) {
+	_, match, _, ok := lyricsindex.Snippet("Björk sings here", "bjork", 8)
+	if !ok || match != "Björk" {
+		t.Fatalf("match=%q ok=%v, want the accented original \"Björk\"", match, ok)
+	}
+}
+
+func TestSnippetNotFound(t *testing.T) {
+	if _, _, _, ok := lyricsindex.Snippet("some lyrics", "absent", 8); ok {
+		t.Fatal("expected ok=false for a term that isn't present")
+	}
+	if _, _, _, ok := lyricsindex.Snippet("some lyrics", "", 8); ok {
+		t.Fatal("expected ok=false for an empty query")
 	}
 }
 

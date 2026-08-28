@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
@@ -78,6 +79,36 @@ func TestFilterSubstringHints(t *testing.T) {
 	shown, total = filterSubstringHints("", targets)
 	if total != 4 || len(shown) != 4 || shown[0] != 0 {
 		t.Errorf("empty term: shown = %v total = %d, want all four in order", shown, total)
+	}
+}
+
+func TestLyricsHintItem(t *testing.T) {
+	raw := "We're no strangers to love\nYou know the rules and so do I"
+
+	got := lyricsHintItem("Rick Astley - Never Gonna Give You Up", raw, "know the")
+	if !strings.HasPrefix(got, "Rick Astley - Never Gonna Give You Up  ") {
+		t.Errorf("item %q should start with the track label", got)
+	}
+	if !strings.Contains(got, "["+lyricsMatchColor+"]know the[-]") {
+		t.Errorf("item %q should color the matched term", got)
+	}
+	if !strings.Contains(got, "·") {
+		t.Errorf("item %q should carry the separator dot", got)
+	}
+
+	// Empty term -> just the (escaped) label, no excerpt.
+	if got := lyricsHintItem("Some Track", raw, ""); got != "Some Track" {
+		t.Errorf("empty term: got %q, want just the label", got)
+	}
+
+	// A term that isn't in the lyrics -> fall back to the label.
+	if got := lyricsHintItem("Some Track", raw, "absent"); got != "Some Track" {
+		t.Errorf("no match: got %q, want just the label", got)
+	}
+
+	// Bracket in the label is escaped so tview doesn't eat it as a tag.
+	if got := lyricsHintItem("Album [2024]", raw, ""); !strings.Contains(got, "[2024[]") {
+		t.Errorf("label brackets not escaped: %q", got)
 	}
 }
 
