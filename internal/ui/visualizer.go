@@ -79,6 +79,7 @@ func newVisualizerPanel(app *App) *visualizerPanel {
 		// cycles through them.
 		vizs: []Visualization{
 			equalizerVisualization{},
+			newCliampVisualization(),
 		},
 	}
 	p.view.SetTitle(" " + p.current().Name() + " ")
@@ -95,6 +96,9 @@ func (p *visualizerPanel) current() Visualization {
 func (p *visualizerPanel) next() {
 	p.idx = (p.idx + 1) % len(p.vizs)
 	p.view.SetTitle(" " + p.current().Name() + " ")
+	if p.app != nil {
+		p.tick(p.app.currentStatus)
+	}
 }
 
 // tick redraws the active visualization from the current playback status
