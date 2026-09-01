@@ -75,11 +75,27 @@ func TestVisualizerPanelNextCyclesAndWraps(t *testing.T) {
 }
 
 func TestVisualizerPanelNextWithSingleVisualizationIsNoOp(t *testing.T) {
-	a := newTestApp()
-	before := a.visualizer.current().Name()
-	a.visualizer.next()
-	if got := a.visualizer.current().Name(); got != before {
+	v := tview.NewTextView().SetDynamicColors(true)
+	p := &visualizerPanel{view: v, vizs: []Visualization{fakeViz{"Solo"}}}
+	before := p.current().Name()
+	p.next()
+	if got := p.current().Name(); got != before {
 		t.Errorf("next() with a single registered visualization changed it: %q -> %q", before, got)
+	}
+}
+
+func TestAppVisualizerPanelCyclesRegisteredVisualizations(t *testing.T) {
+	a := newTestApp()
+	if got := a.visualizer.current().Name(); got != "Equalizer" {
+		t.Fatalf("initial visualization = %q, want %q", got, "Equalizer")
+	}
+	a.visualizer.next()
+	if got := a.visualizer.current().Name(); got != "Cliamp" {
+		t.Errorf("after next() = %q, want %q", got, "Cliamp")
+	}
+	a.visualizer.next()
+	if got := a.visualizer.current().Name(); got != "Equalizer" {
+		t.Errorf("after wrapping next() = %q, want %q", got, "Equalizer")
 	}
 }
 
@@ -112,8 +128,20 @@ func TestVisualizerPanelTickPassesRealElapsedTime(t *testing.T) {
 
 func TestVKeyCyclesVisualizerPanel(t *testing.T) {
 	a := newTestApp()
+	if got := a.visualizer.current().Name(); got != "Equalizer" {
+		t.Fatalf("initial visualization = %q, want %q", got, "Equalizer")
+	}
 	vKey := tcell.NewEventKey(tcell.KeyRune, 'v', tcell.ModNone)
 	if result := a.globalInputCapture(vKey); result != nil {
 		t.Errorf("'v' should be consumed by the visualizer cycle, got %v", result)
+	}
+	if got := a.visualizer.current().Name(); got != "Cliamp" {
+		t.Errorf("after 'v' visualization = %q, want %q", got, "Cliamp")
+	}
+	if result := a.globalInputCapture(vKey); result != nil {
+		t.Errorf("'v' should be consumed by the visualizer cycle, got %v", result)
+	}
+	if got := a.visualizer.current().Name(); got != "Equalizer" {
+		t.Errorf("after second 'v' visualization = %q, want %q", got, "Equalizer")
 	}
 }

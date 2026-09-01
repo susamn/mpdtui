@@ -360,6 +360,8 @@ const playlistCountRefreshInterval = 10 * time.Minute
 func (a *App) eventLoop() {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
+	animTicker := time.NewTicker(40 * time.Millisecond)
+	defer animTicker.Stop()
 	countTicker := time.NewTicker(playlistCountRefreshInterval)
 	defer countTicker.Stop()
 
@@ -381,6 +383,12 @@ func (a *App) eventLoop() {
 			return
 		case <-ticker.C:
 			a.tv.QueueUpdateDraw(func() { a.refreshNowPlaying() })
+		case <-animTicker.C:
+			a.tv.QueueUpdateDraw(func() {
+				if a.currentStatus.State == mpdclient.StatePlay {
+					a.visualizer.tick(a.currentStatus)
+				}
+			})
 		case <-countTicker.C:
 			a.refreshTrackCounts(true) // silent: automatic background refresh
 		case <-a.done:
