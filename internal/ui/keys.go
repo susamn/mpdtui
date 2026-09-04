@@ -398,12 +398,12 @@ func (a *App) handleCycleSort() {
 //
 // Both panels center the located row/node vertically rather than leaving
 // it wherever tview's scroll-just-enough-to-be-visible put it (typically
-// the very top or bottom line), so the answer to "where is it?" lands in
-// the middle of the panel with its neighbours around it instead of
-// pinned to an edge. Centering is only done here, on the explicit
-// keypress -- not in the automatic jump-to-current on track change
-// (maybeJumpToCurrentTrack), which would re-scroll the whole Queue under
-// the user on every natural auto-advance.
+// the very top or bottom line), and the Queue row flashes briefly, so the
+// answer to "where is it?" lands in the middle of the panel with its
+// neighbours around it instead of pinned to an edge. Centering is only
+// done here, on the explicit keypress -- not in the automatic
+// jump-to-current on track change (maybeJumpToCurrentTrack), which would
+// re-scroll the whole Queue under the user on every natural auto-advance.
 func (a *App) jumpToCurrentTrack() {
 	if !a.queue.jumpToCurrent() {
 		a.showMessage("nothing playing")
@@ -416,6 +416,7 @@ func (a *App) jumpToCurrentTrack() {
 		}
 	}
 	a.focusPanelPrimitive(a.queue.table)
+	a.flashLocatedRow()
 }
 
 func (a *App) handleAdd() {

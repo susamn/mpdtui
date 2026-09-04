@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
@@ -185,3 +186,94 @@ func TestCenterCurrentNodeNoopWithoutASelection(t *testing.T) {
 	}
 }
 
+// --- The flash ---
+
+// selectedRowBackground draws the Queue table to a simulation screen and
+// reports the background color actually painted on the selected row --
+// tview has no getter for a table's selected style, so this reads back
+// what a user would really see.
+func selectedRowBackground(t *testing.T, a *App) tcell.Color {
+	t.Helper()
+	screen := tcell.NewSimulationScreen("")
+	if err := screen.Init(); err != nil {
+		t.Fatalf("screen.Init: %v", err)
+	}
+	defer screen.Fini()
+	screen.SetSize(150, 40)
+	a.queue.table.Draw(screen)
+
+	row, _ := a.queue.table.GetSelection()
+	off, _ := a.queue.table.GetOffset()
+	y := 1 + (row - off) // 1 for the table's own top border
+	_, _, style, _ := screen.GetContent(2, y)
+	_, bg, _ := style.Decompose()
+	return bg
+}
+
+func TestFlashLocatedRowLightsUpThenRestoresTheSelection(t *testing.T) {
+	// Without this the rest of the test would pass vacuously: a palette
+	// whose accent equalled its selection color would make the flash
+	// invisible while every assertion below still held.
+	if locateFlashBg == colorSelectedBg {
+		t.Fatalf("flash background %v equals the normal selection background -- the flash would be invisible", locateFlashBg)
+	}
+	a := newTestApp()
+	queueWithSongs(a, 5)
+	a.queue.table.Select(2, 0)
+	a.tv.SetFocus(a.queue.table)
+
+	a.flashLocatedRow()
+	if got := selectedRowBackground(t, a); got != locateFlashBg {
+		t.Errorf("selected row background during the flash = %v, want the flash color %v", got, locateFlashBg)
+	}
+
+	// Run the sequence out, as the scheduled phases would.
+	a.runLocateFlashPhase(a.locateFlashSeq, len(locateFlashPhases))
+	if got := selectedRowBackground(t, a); got != colorSelectedBg {
+		t.Errorf("selected row background after the flash = %v, want the normal selection %v", got, colorSelectedBg)
+	}
+}
+
+// TestFlashLocatedRowSupersedesAnEarlierFlash: pressing L again mid-flash
+// must not leave the older sequence repainting over the new one.
+func TestFlashLocatedRowSupersedesAnEarlierFlash(t *testing.T) {
+	a := newTestApp()
+	queueWithSongs(a, 5)
+	a.queue.table.Select(2, 0)
+	a.tv.SetFocus(a.queue.table)
+
+	a.flashLocatedRow()
+	stale := a.locateFlashSeq
+	a.flashLocatedRow()
+	if a.locateFlashSeq == stale {
+		t.Fatal("a second flash should start a new sequence")
+	}
+
+	// The stale sequence's final phase would restore the normal
+	// selection style mid-flash; it must be ignored instead.
+	a.runLocateFlashPhase(stale, len(locateFlashPhases))
+	if got := selectedRowBackground(t, a); got != locateFlashBg {
+		t.Errorf("selected row background = %v, want the newer flash still showing (%v)", got, locateFlashBg)
+	}
+}
+
+// TestLocateFlashEndsOnTheNormalSelection guards the phase table itself:
+// however many blinks it lists, the row must not be left lit.
+func TestLocateFlashEndsOnTheNormalSelection(t *testing.T) {
+	if n := len(locateFlashPhases); n == 0 || !locateFlashPhases[0].on {
+		t.Fatalf("locateFlashPhases = %v, want it to start lit", locateFlashPhases)
+	}
+	a := newTestApp()
+	queueWithSongs(a, 5)
+	a.queue.table.Select(2, 0)
+	a.tv.SetFocus(a.queue.table)
+
+	a.flashLocatedRow()
+	for i := 1; i <= len(locateFlashPhases); i++ {
+		a.runLocateFlashPhase(a.locateFlashSeq, i)
+	}
+
+	if got := selectedRowBackground(t, a); got != colorSelectedBg {
+		t.Errorf("selected row background after every phase = %v, want the normal selection %v", got, colorSelectedBg)
+	}
+}

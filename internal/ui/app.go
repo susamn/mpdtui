@@ -127,6 +127,12 @@ type App struct {
 
 	msgSeq int
 
+	// locateFlashSeq identifies the current post-'L' row flash, so a
+	// second 'L' pressed mid-flash supersedes the first rather than
+	// having two overlapping blink sequences fight over the Queue's
+	// selected-row style -- the same guard msgSeq gives the hint bar.
+	locateFlashSeq int
+
 	done chan struct{}
 }
 

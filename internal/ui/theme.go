@@ -110,6 +110,9 @@ func deriveColors() {
 	colorSelectedBg = hexColor(palette.Selection)
 	colorSelectedFg = contrastColor(colorSelectedBg)
 
+	locateFlashBg = hexColor(palette.Accent)
+	locateFlashFg = contrastColor(locateFlashBg)
+
 	queueTitleColor = hexColor(palette.Green)
 	queueHeaderBg = hexColor(palette.BrightForeground)
 	queueHeaderFg = hexColor(palette.DarkerBackground)
