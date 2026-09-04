@@ -18,6 +18,7 @@ import (
 func newTestAppWithMusicDir(musicDir string) *App {
 	a := &App{tv: tview.NewApplication(), musicDir: musicDir}
 	a.build()
+	a.queue.table.SetRect(0, 0, 150, 40)
 	return a
 }
 
@@ -151,7 +152,7 @@ func TestQueueRenderShowsLyricsIconInLyrColumnOnlyWhenAvailable(t *testing.T) {
 		{ID: 2, Title: "Without Lyrics", File: "artist/Without Lyrics.mp3"},
 	}
 	a.queue.render(-1)
-	lyrCol := newQueueColumns(true, false).lyr
+	lyrCol := a.queue.cols.lyr
 
 	if got, want := a.queue.table.GetCell(queueHeaderRows, lyrCol).Text, txtTickText(); got != want {
 		t.Errorf("Lyr cell for the track with a .txt = %q, want %q", got, want)
@@ -188,7 +189,7 @@ func TestQueueRenderShowsBothTicksWhenBothFormatsPresent(t *testing.T) {
 	a := newTestAppWithMusicDir(dir)
 	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track", File: "artist/Track.mp3"}}
 	a.queue.render(-1)
-	lyrCol := newQueueColumns(true, false).lyr
+	lyrCol := a.queue.cols.lyr
 
 	got := a.queue.table.GetCell(queueHeaderRows, lyrCol).Text
 	want := lrcTickText() + txtTickText()
@@ -212,7 +213,7 @@ func TestQueueRenderRechecksLyricsOnEveryRender(t *testing.T) {
 	a := newTestAppWithMusicDir(dir)
 	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track", File: "artist/Track.mp3"}}
 	a.queue.render(-1)
-	lyrCol := newQueueColumns(true, false).lyr
+	lyrCol := a.queue.cols.lyr
 
 	if got := a.queue.table.GetCell(queueHeaderRows, lyrCol).Text; got != "" {
 		t.Fatalf("setup: Lyr cell = %q, want empty (no lyrics file yet)", got)

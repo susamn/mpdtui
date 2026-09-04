@@ -154,6 +154,7 @@ Requires Go 1.26+ and a reachable MPD server.
 ./mpdtui -t         # fuzzy-search tracks; Enter adds it to the queue and plays it
 ./mpdtui -i         # print info for the currently playing track
 ./mpdtui -iu -r 4   # update rating of the currently playing track (1-5)
+./mpdtui -v       # print version and exit
 ```
 
 `-mini`, `-p`, `-t`, `-lyrics-line`, `-i`, and `-iu` are mutually exclusive.

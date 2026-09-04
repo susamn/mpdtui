@@ -313,8 +313,14 @@ func resolveLyricsViewerColumnBounds(qx, qw, yearX, durationX int) (int, int) {
 // layout, not a stale one.
 func (v *lyricsViewer) positionOverQueueColumns() {
 	qx, qy, qw, qh := v.app.queue.table.GetRect()
-	cols := newQueueColumns(v.app.musicDir != "", v.app.metaDB != nil)
-	yearX, _, _ := v.app.queue.table.GetCell(0, cols.year).GetLastPosition()
+	cols := v.app.queue.cols
+	var yearX int
+	if cols.year >= 0 {
+		yearX, _, _ = v.app.queue.table.GetCell(0, cols.year).GetLastPosition()
+	} else {
+		// In compact mode (no Year column), position lyrics viewer over the right 50% of the Queue table.
+		yearX = qx + qw/2
+	}
 	durationX, _, _ := v.app.queue.table.GetCell(0, cols.duration).GetLastPosition()
 	yearX, durationX = resolveLyricsViewerColumnBounds(qx, qw, yearX, durationX)
 	v.SetRect(lyricsViewerRect(qy, qh, yearX, durationX))

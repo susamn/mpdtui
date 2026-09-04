@@ -14,9 +14,11 @@ import (
 	"mpdtui/internal/picker"
 	"mpdtui/internal/trackinfo"
 	"mpdtui/internal/ui"
+	"mpdtui/internal/version"
 )
 
 func main() {
+	showVersion := flag.Bool("v", false, "print version and exit")
 	miniMode := flag.Bool("mini", false, "run the lightweight inline player instead of the full panel UI")
 	playlistPicker := flag.Bool("p", false, "fuzzy-search playlists; Enter clears the queue and plays the selection")
 	trackPicker := flag.Bool("t", false, "fuzzy-search tracks; Enter adds the selection to the queue and plays it")
@@ -25,6 +27,11 @@ func main() {
 	trackInfoUpdate := flag.Bool("iu", false, "update metadata for the currently playing track and exit")
 	ratingFlag := flag.Int("r", 0, "rating value (1-5) to update when used with -iu")
 	flag.Parse()
+  
+  if *showVersion {
+		fmt.Println(version.String)
+		return
+	}
 
 	if modeCount(*miniMode, *playlistPicker, *trackPicker, *lyricsLine, *trackInfo, *trackInfoUpdate) > 1 {
 		fmt.Fprintln(os.Stderr, "mpdtui: -mini, -p, -t, -lyrics-line, -i, and -iu are mutually exclusive")
