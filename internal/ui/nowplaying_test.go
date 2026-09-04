@@ -158,5 +158,3 @@ func TestRenderNowPlayingSyncsExternalPlayCountChangeToQueue(t *testing.T) {
 		t.Errorf("queue playcount cell after external increment = %q, want %q", got, "1")
 	}
 }
-
-
