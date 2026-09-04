@@ -500,7 +500,7 @@ func (a *App) refreshNowPlaying() {
 
 	a.queue.setCurrent(st.SongID)
 	a.albumArt.onTrackChanged(song.File)
-	a.trackInfo.render(song, st)
+	a.renderTrackInfo()
 	a.maybeRefreshLyricsViewer(song, trackChanged)
 	a.maybeUpdateLyricsHighlight(st)
 	a.maybeTrackPlayCount(st, song)

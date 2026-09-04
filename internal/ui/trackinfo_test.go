@@ -410,3 +410,66 @@ func TestRefreshNowPlayingUpdatesTrackInfoLive(t *testing.T) {
 		t.Errorf("card = %q, want it to contain the newly rendered track %q", got, "New Track")
 	}
 }
+
+// TestRenderTrackInfoShowsPlayingTrackNotSelection: the 'i' card follows
+// App.targetSong like every other track-level Queue action.
+func TestRenderTrackInfoShowsPlayingTrackNotSelection(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{
+		{ID: 1, Title: "Playing", File: "artist/playing.mp3"},
+		{ID: 2, Title: "Other", File: "artist/other.mp3"},
+	}
+	a.queue.render(1)
+	a.queue.table.Select(queueHeaderRows+1, 0)
+	a.currentSong = a.queue.songs[0]
+	a.currentStatus = mpdclient.Status{State: mpdclient.StatePlay, SongID: 1, Bitrate: 320}
+
+	a.renderTrackInfo()
+
+	got := a.trackInfo.identity.GetText(true)
+	if !strings.Contains(got, "Playing") {
+		t.Errorf("card = %q, want it to show the playing track", got)
+	}
+	if !strings.Contains(got, "320kbps") {
+		t.Errorf("card = %q, want the live audio quality for the playing track", got)
+	}
+}
+
+// TestRenderTrackInfoFallsBackToSelectionWhenStopped: with playback
+// stopped the card describes whatever you've scrolled to, instead of the
+// bare "Nothing playing" it used to show -- but without attributing any
+// live decoder numbers to it, since nothing is decoding.
+func TestRenderTrackInfoFallsBackToSelectionWhenStopped(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{
+		{ID: 1, Title: "Resume point", File: "artist/resume.mp3"},
+		{ID: 2, Title: "Selected", File: "artist/selected.mp3"},
+	}
+	a.queue.render(-1)
+	a.queue.table.Select(queueHeaderRows+1, 0)
+	a.currentSong = a.queue.songs[0]
+	a.currentStatus = mpdclient.Status{State: mpdclient.StateStop, SongID: 1, Bitrate: 320}
+
+	a.renderTrackInfo()
+
+	got := a.trackInfo.identity.GetText(true)
+	if !strings.Contains(got, "Selected") {
+		t.Errorf("card = %q, want it to show the selected track while stopped", got)
+	}
+	if strings.Contains(got, "kbps") {
+		t.Errorf("card = %q, want no live audio quality for a merely-selected track", got)
+	}
+}
+
+// TestRenderTrackInfoNothingPlayingWithEmptyQueue: no playback and no
+// selection is still the original "Nothing playing" card.
+func TestRenderTrackInfoNothingPlayingWithEmptyQueue(t *testing.T) {
+	a := newTestApp()
+	a.currentStatus = mpdclient.Status{State: mpdclient.StateStop}
+
+	a.renderTrackInfo()
+
+	if got := a.trackInfo.identity.GetText(true); !strings.Contains(got, "Nothing playing") {
+		t.Errorf("card = %q, want \"Nothing playing\"", got)
+	}
+}
