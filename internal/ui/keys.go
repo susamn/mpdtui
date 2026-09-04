@@ -162,11 +162,11 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			}
 			switch event.Rune() {
 			case '1':
-				a.focusPanel(0)
+				a.focusPanel(libraryPanelIdx)
 			case '2':
-				a.focusPanel(1)
+				a.focusPanel(playlistsPanelIdx)
 			case '3':
-				a.focusPanel(2)
+				a.focusPanel(queuePanelIdx)
 			default:
 				a.invalidKey(string(event.Rune()))
 			}
@@ -395,15 +395,29 @@ func (a *App) handleCycleSort() {
 // along its path and selecting it there), without moving focus away from
 // Queue. Flashes a message instead of silently doing nothing when there's
 // no current track (queue empty, or nothing playing/selected).
+//
+// Both panels center the located row/node vertically rather than leaving
+// it wherever tview's scroll-just-enough-to-be-visible put it (typically
+// the very top or bottom line), and both the Queue row and the Library
+// node flash briefly, so the answer to "where is it?" lands in the middle
+// of the panel with its neighbours around it instead of pinned to an
+// edge. Centering is only
+// done here, on the explicit keypress -- not in the automatic
+// jump-to-current on track change (maybeJumpToCurrentTrack), which would
+// re-scroll the whole Queue under the user on every natural auto-advance.
 func (a *App) jumpToCurrentTrack() {
 	if !a.queue.jumpToCurrent() {
 		a.showMessage("nothing playing")
 		return
 	}
+	a.queue.centerSelection()
 	if song, ok := a.queue.selectedSong(); ok {
-		a.library.revealInLibrary(song.File)
+		if a.library.revealInLibrary(song.File) {
+			a.library.centerCurrentNode()
+		}
 	}
 	a.focusPanelPrimitive(a.queue.table)
+	a.flashLocatedTrack()
 }
 
 func (a *App) handleAdd() {

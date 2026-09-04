@@ -21,6 +21,15 @@ const (
 	modeOverlay
 )
 
+// Indices into App.panels, which is the one place the panel order is
+// defined (see build) -- focusPanel and the '1'/'2'/'3' shortcuts both
+// address panels by these rather than by bare numbers.
+const (
+	libraryPanelIdx = iota
+	playlistsPanelIdx
+	queuePanelIdx
+)
+
 // flashDuration is how long a transient hint-bar message (an error, a
 // "added N tracks" confirmation, etc.) stays up before the hint bar
 // reverts to showing keybindings again.
@@ -112,11 +121,25 @@ type App struct {
 	// completes -- that call is the app *learning* whatever MPD was
 	// already playing before mpdtui started, not a real track change, so
 	// it must not trigger the auto-jump-to-Queue in refreshNowPlaying
-	// (which would override the deliberate default startup focus on
-	// Library before the user's done anything).
+	// (which would move the Queue selection off row 0 before the user
+	// has done anything).
 	startedUp bool
 
 	msgSeq int
+
+	// locateFlashSeq identifies the current post-'L' flash, so a second
+	// 'L' pressed mid-flash supersedes the first rather than having two
+	// overlapping blink sequences fight over the same styles -- the same
+	// guard msgSeq gives the hint bar.
+	locateFlashSeq int
+
+	// locateFlashNode is the Library node that flash is blinking, with
+	// locateFlashNodeStyle its selected style from before the flash
+	// started, restored verbatim at the end (see App.setLocateFlash for
+	// why this one is saved rather than rebuilt). nil when 'L' revealed
+	// nothing in the tree -- a track that isn't in the library at all.
+	locateFlashNode      *tview.TreeNode
+	locateFlashNodeStyle tcell.Style
 
 	done chan struct{}
 }
@@ -275,8 +298,14 @@ func (a *App) build() {
 	a.pages = tview.NewPages().AddPage("main", a.root, true, true)
 
 	a.tv.SetInputCapture(a.globalInputCapture)
-	a.tv.SetRoot(a.pages, true).SetFocus(a.library.tree)
-	a.updateHintBar()
+	a.tv.SetRoot(a.pages, true)
+	// Queue, not Library, is where a session starts: whatever is already
+	// queued (and playing) is what you act on first almost every time --
+	// rating, reordering, jumping around it -- while the Library is where
+	// you go deliberately, to add something new. focusPanel rather than a
+	// bare SetFocus so panelIdx agrees with it from the start, otherwise
+	// the first Tab would cycle from Library's index instead of Queue's.
+	a.focusPanel(queuePanelIdx)
 
 	a.tv.SetAfterDrawFunc(func(tcell.Screen) {
 		a.albumArt.draw()
@@ -485,7 +514,7 @@ func (a *App) refreshNowPlaying() {
 
 	a.queue.setCurrent(st.SongID)
 	a.albumArt.onTrackChanged(song.File)
-	a.trackInfo.render(song, st)
+	a.renderTrackInfo()
 	a.maybeRefreshLyricsViewer(song, trackChanged)
 	a.maybeUpdateLyricsHighlight(st)
 	a.maybeTrackPlayCount(st, song)
@@ -535,6 +564,43 @@ func (a *App) maybeJumpToCurrentTrack(trackChanged bool) {
 	if trackChanged && a.mode == modeNormal && a.queue.jumpToCurrent() {
 		a.focusPanelPrimitive(a.queue.table)
 	}
+}
+
+// hasLivePlayback reports whether there is a track actually being
+// listened to right now. State (rather than a non-empty currentSong.File)
+// is what decides: MPD keeps reporting a current song while stopped --
+// the position it would resume from -- which is not a track anyone is
+// listening to. Paused counts: it is still the track you are on, just
+// not moving.
+func (a *App) hasLivePlayback() bool {
+	switch a.currentStatus.State {
+	case mpdclient.StatePlay, mpdclient.StatePause:
+		return a.currentSong.File != ""
+	}
+	return false
+}
+
+// targetSong is the track every track-level Queue action acts on --
+// rating ('1'-'5'), marking ('m'), add-to-playlist ('a') and the track
+// info card ('i'): the one actually playing if there is one, otherwise
+// whatever is selected in the Queue.
+//
+// These are all judgements or bookkeeping about the music you are
+// *listening to*, and scrolling the Queue to look at something else
+// mid-track is a normal thing to do -- so the cursor's position must
+// not silently redirect them onto the row it happens to be parked on.
+// With playback stopped there is nothing being listened to, so the
+// selection is the only sensible target and takes over.
+//
+// Deliberately NOT used by the Queue's positional actions -- 'd'
+// (remove), 'J'/'K' (move), 'Enter' (play): those are operations on a
+// row of the list, where the selection *is* the subject and redirecting
+// them onto the playing track would be actively wrong.
+func (a *App) targetSong() (mpdclient.Song, bool) {
+	if a.hasLivePlayback() {
+		return a.currentSong, true
+	}
+	return a.queue.selectedSong()
 }
 
 func (a *App) cycleFocus(delta int) {

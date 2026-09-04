@@ -27,18 +27,19 @@ func ratingStars(rating int) string {
 }
 
 // handleRateSelectedTrack is '1'-'5', scoped to the Queue panel (see
-// globalInputCapture): rates whichever track is currently selected there
-// -- not necessarily the one playing. A no-op (flashed) if the feature
-// isn't active or nothing is selected. The confirmation flash is
-// immediate; the actual database write and the Queue panel's Rating
-// cell repaint both happen in the background (see App.runAsync) so
-// rating a track never makes the keypress wait on disk I/O.
+// globalInputCapture): rates the currently playing track, falling back
+// to the Queue selection when nothing is playing -- see App.targetSong.
+// A no-op (flashed) if the feature isn't active, or if nothing is
+// playing and nothing is selected. The confirmation flash is immediate;
+// the actual database write and the Queue panel's Rating cell repaint
+// both happen in the background (see App.runAsync) so rating a track
+// never makes the keypress wait on disk I/O.
 func (a *App) handleRateSelectedTrack(rating int) {
 	if a.metaDB == nil {
 		a.metadataNotEnabled()
 		return
 	}
-	song, ok := a.queue.selectedSong()
+	song, ok := a.targetSong()
 	if !ok {
 		return
 	}
@@ -107,16 +108,24 @@ func (a *App) maybeTrackPlayCount(st mpdclient.Status, song mpdclient.Song) {
 	})
 }
 
-// markPicker lets you assign (or clear) a mark reason on the Queue-
-// selected track, from internal/metadata's mark_reason catalog. Built
-// once (like trackInfoCard/lyricsViewer) and repopulated fresh from the
-// catalog every time it's opened, in case reasons were added since (the
-// catalog is meant to be edited by hand for now, see
+// markPicker lets you assign (or clear) a mark reason on the track
+// App.targetSong resolves to, from internal/metadata's mark_reason
+// catalog. Built once (like trackInfoCard/lyricsViewer) and repopulated
+// fresh from the catalog every time it's opened, in case reasons were
+// added since (the catalog is meant to be edited by hand for now, see
 // internal/metadata's own doc comment).
 type markPicker struct {
 	*tview.List
 	app     *App
 	reasons []metadata.MarkReason
+
+	// song is the track this popup was opened for, captured once by
+	// render rather than re-resolved in apply. Transport controls stay
+	// live while an overlay is up (see globalInputCapture's modeOverlay
+	// branch) and a track can auto-advance on its own, so re-resolving
+	// the target on Enter could mark a track other than the one the
+	// popup's own title said it was for.
+	song mpdclient.Song
 }
 
 func newMarkPicker(app *App) *markPicker {
@@ -167,8 +176,13 @@ func newMarkPicker(app *App) *markPicker {
 
 // render repopulates the list from reasons, plus a synthetic leading
 // "(clear mark)" entry so an already-marked track can be unmarked from
-// the same popup rather than needing a separate mechanism.
-func (m *markPicker) render(reasons []metadata.MarkReason) {
+// the same popup rather than needing a separate mechanism. song is the
+// track the popup acts on for as long as it stays open (see the field's
+// own comment), and names it in the title so there's no doubt which
+// track is about to be marked.
+func (m *markPicker) render(song mpdclient.Song, reasons []metadata.MarkReason) {
+	m.song = song
+	m.SetTitle(" Mark \"" + song.DisplayName() + "\" (Enter to apply, Esc to cancel) ")
 	m.reasons = reasons
 	m.Clear()
 	m.AddItem("(clear mark)", "", 0, nil)
@@ -186,8 +200,8 @@ func (m *markPicker) render(reasons []metadata.MarkReason) {
 // database write and the Queue panel's Mark cell repaint both happen in
 // the background (see App.runAsync).
 func (m *markPicker) apply(index int) {
-	song, ok := m.app.queue.selectedSong()
-	if !ok {
+	song := m.song
+	if song.File == "" {
 		m.app.closeOverlay()
 		return
 	}
@@ -220,8 +234,9 @@ func (m *markPicker) apply(index int) {
 }
 
 // handleOpenMarkPicker is 'm', scoped to the Queue panel like rating:
-// opens the mark-reason popup for whichever track is currently selected
-// there. j/k/g/G navigate, Enter applies and closes, Esc cancels;
+// opens the mark-reason popup for the currently playing track, falling
+// back to the Queue selection when nothing is playing (see
+// App.targetSong). j/k/g/G navigate, Enter applies and closes, Esc cancels;
 // transport controls stay live while it's open (see
 // globalInputCapture's modeOverlay branch), same reasoning as the lyrics
 // viewer -- explicitly requested regardless of which overlay is up.
@@ -234,7 +249,8 @@ func (a *App) handleOpenMarkPicker() {
 		a.metadataNotEnabled()
 		return
 	}
-	if _, ok := a.queue.selectedSong(); !ok {
+	song, ok := a.targetSong()
+	if !ok {
 		return
 	}
 	reasons, err := a.metaDB.ListMarkReasons()
@@ -242,7 +258,7 @@ func (a *App) handleOpenMarkPicker() {
 		a.showError(err)
 		return
 	}
-	a.markPicker.render(reasons)
+	a.markPicker.render(song, reasons)
 	// Height follows the item count (plus the list's own top/bottom
 	// border), with a floor so the popup doesn't look cramped for just
 	// the seeded "(clear mark)"+"mark for deletion" pair.

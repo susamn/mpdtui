@@ -27,8 +27,8 @@ func main() {
 	trackInfoUpdate := flag.Bool("iu", false, "update metadata for the currently playing track and exit")
 	ratingFlag := flag.Int("r", 0, "rating value (1-5) to update when used with -iu")
 	flag.Parse()
-  
-  if *showVersion {
+
+	if *showVersion {
 		fmt.Println(version.String)
 		return
 	}

@@ -485,3 +485,261 @@ func TestMarkPickerEscRestoresOriginalFocus(t *testing.T) {
 		t.Errorf("focus after Escape = %T, want the originally-focused Queue table", a.tv.GetFocus())
 	}
 }
+
+// TestHandleRateSelectedTrackRatesPlayingTrackNotSelection is the whole
+// point of ratingTarget: scrolling the Queue away from the playing track
+// (to look at what's coming up, say) and then pressing 1-5 must rate what
+// is actually playing, not the row the cursor was left on.
+func TestHandleRateSelectedTrackRatesPlayingTrackNotSelection(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.queue.songs = []mpdclient.Song{
+		{ID: 1, Title: "Playing", File: "artist/playing.mp3"},
+		{ID: 2, Title: "Other", File: "artist/other.mp3"},
+	}
+	a.queue.render(1)
+	a.queue.table.Select(queueHeaderRows+1, 0) // selection scrolled to "Other"
+	a.currentStatus = mpdclient.Status{State: mpdclient.StatePlay, SongID: 1}
+	a.currentSong = a.queue.songs[0]
+
+	a.handleRateSelectedTrack(4)
+
+	playing, err := a.metaDB.Get("artist/playing.mp3")
+	if err != nil {
+		t.Fatalf("Get(playing): %v", err)
+	}
+	if playing.Rating != 4 {
+		t.Errorf("playing track rating = %d, want 4", playing.Rating)
+	}
+	other, err := a.metaDB.Get("artist/other.mp3")
+	if err != nil {
+		t.Fatalf("Get(other): %v", err)
+	}
+	if other.Rating != 0 {
+		t.Errorf("selected-but-not-playing track rating = %d, want 0 (untouched)", other.Rating)
+	}
+	if got := a.hintBar.GetText(true); !strings.Contains(got, "Playing") {
+		t.Errorf("hint bar = %q, want it to name the playing track", got)
+	}
+}
+
+// TestHandleRateSelectedTrackRatesPlayingTrackWhilePaused: paused is
+// still "the track you're listening to", so it targets the same way play
+// does -- only a stop hands the target back to the selection.
+func TestHandleRateSelectedTrackRatesPlayingTrackWhilePaused(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.queue.songs = []mpdclient.Song{
+		{ID: 1, Title: "Paused", File: "artist/paused.mp3"},
+		{ID: 2, Title: "Other", File: "artist/other.mp3"},
+	}
+	a.queue.render(1)
+	a.queue.table.Select(queueHeaderRows+1, 0)
+	a.currentStatus = mpdclient.Status{State: mpdclient.StatePause, SongID: 1}
+	a.currentSong = a.queue.songs[0]
+
+	a.handleRateSelectedTrack(2)
+
+	paused, err := a.metaDB.Get("artist/paused.mp3")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if paused.Rating != 2 {
+		t.Errorf("paused track rating = %d, want 2", paused.Rating)
+	}
+}
+
+// TestHandleRateSelectedTrackFallsBackToSelectionWhenStopped: MPD still
+// reports a current song while stopped (the resume position), but nobody
+// is listening to it, so the Queue selection is what gets rated.
+func TestHandleRateSelectedTrackFallsBackToSelectionWhenStopped(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.queue.songs = []mpdclient.Song{
+		{ID: 1, Title: "Resume point", File: "artist/resume.mp3"},
+		{ID: 2, Title: "Selected", File: "artist/selected.mp3"},
+	}
+	a.queue.render(-1)
+	a.queue.table.Select(queueHeaderRows+1, 0)
+	a.currentStatus = mpdclient.Status{State: mpdclient.StateStop, SongID: 1}
+	a.currentSong = a.queue.songs[0]
+
+	a.handleRateSelectedTrack(5)
+
+	selected, err := a.metaDB.Get("artist/selected.mp3")
+	if err != nil {
+		t.Fatalf("Get(selected): %v", err)
+	}
+	if selected.Rating != 5 {
+		t.Errorf("selected track rating = %d, want 5", selected.Rating)
+	}
+	resume, err := a.metaDB.Get("artist/resume.mp3")
+	if err != nil {
+		t.Fatalf("Get(resume): %v", err)
+	}
+	if resume.Rating != 0 {
+		t.Errorf("stopped-at track rating = %d, want 0 (untouched)", resume.Rating)
+	}
+}
+
+// TestBuildFocusesQueuePanelOnStartup: the Queue is where a session
+// starts, and panelIdx has to agree with it so the first Tab cycles from
+// Queue rather than from Library.
+func TestBuildFocusesQueuePanelOnStartup(t *testing.T) {
+	a := newTestApp()
+
+	if a.tv.GetFocus() != a.queue.table {
+		t.Errorf("startup focus = %T, want the Queue table", a.tv.GetFocus())
+	}
+	if a.panelIdx != queuePanelIdx {
+		t.Errorf("panelIdx = %d, want queuePanelIdx (%d)", a.panelIdx, queuePanelIdx)
+	}
+}
+
+// setPlayingForTest puts the app in the state refreshNowPlaying would
+// leave it in with song actually playing -- the precondition for
+// App.targetSong preferring it over the Queue selection.
+func setPlayingForTest(a *App, song mpdclient.Song) {
+	a.currentSong = song
+	a.currentStatus = mpdclient.Status{State: mpdclient.StatePlay, SongID: song.ID}
+}
+
+// TestMarkPickerMarksPlayingTrackNotSelection: 'm' follows the same
+// target rule as rating -- the popup is about the track you're listening
+// to, not the row the cursor was left on.
+func TestMarkPickerMarksPlayingTrackNotSelection(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.queue.songs = []mpdclient.Song{
+		{ID: 1, Title: "Playing", File: "artist/playing.mp3"},
+		{ID: 2, Title: "Other", File: "artist/other.mp3"},
+	}
+	a.queue.render(1)
+	a.queue.table.Select(queueHeaderRows+1, 0)
+	setPlayingForTest(a, a.queue.songs[0])
+	a.tv.SetFocus(a.queue.table)
+
+	a.handleOpenMarkPicker()
+
+	if a.markPicker.song.File != "artist/playing.mp3" {
+		t.Fatalf("mark picker target = %q, want the playing track", a.markPicker.song.File)
+	}
+	if got := a.markPicker.GetTitle(); !strings.Contains(got, "Playing") {
+		t.Errorf("mark picker title = %q, want it to name the playing track", got)
+	}
+
+	a.markPicker.apply(1) // first real mark reason (index 0 is "(clear mark)")
+
+	playing, err := a.metaDB.Get("artist/playing.mp3")
+	if err != nil {
+		t.Fatalf("Get(playing): %v", err)
+	}
+	if playing.Mark == nil {
+		t.Error("playing track should have been marked")
+	}
+	other, err := a.metaDB.Get("artist/other.mp3")
+	if err != nil {
+		t.Fatalf("Get(other): %v", err)
+	}
+	if other.Mark != nil {
+		t.Errorf("selected-but-not-playing track mark = %+v, want nil (untouched)", other.Mark)
+	}
+}
+
+// TestMarkPickerAppliesToTheTrackItWasOpenedFor is why markPicker
+// captures its target at open time: transport controls stay live while
+// the popup is up, so the track can auto-advance between opening it and
+// pressing Enter -- the mark must still land on the track the title
+// named, not on whatever happens to be playing by then.
+func TestMarkPickerAppliesToTheTrackItWasOpenedFor(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.queue.songs = []mpdclient.Song{
+		{ID: 1, Title: "First", File: "artist/first.mp3"},
+		{ID: 2, Title: "Second", File: "artist/second.mp3"},
+	}
+	a.queue.render(1)
+	a.queue.table.Select(queueHeaderRows, 0)
+	setPlayingForTest(a, a.queue.songs[0])
+	a.tv.SetFocus(a.queue.table)
+
+	a.handleOpenMarkPicker()
+	setPlayingForTest(a, a.queue.songs[1]) // track auto-advanced under the open popup
+	a.markPicker.apply(1)
+
+	first, err := a.metaDB.Get("artist/first.mp3")
+	if err != nil {
+		t.Fatalf("Get(first): %v", err)
+	}
+	if first.Mark == nil {
+		t.Error("the track the popup was opened for should have been marked")
+	}
+	second, err := a.metaDB.Get("artist/second.mp3")
+	if err != nil {
+		t.Fatalf("Get(second): %v", err)
+	}
+	if second.Mark != nil {
+		t.Errorf("the newly-advanced-to track mark = %+v, want nil (untouched)", second.Mark)
+	}
+}
+
+// TestMarkPickerFallsBackToSelectionWhenStopped mirrors rating's own
+// stopped-playback fallback.
+func TestMarkPickerFallsBackToSelectionWhenStopped(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.queue.songs = []mpdclient.Song{
+		{ID: 1, Title: "Resume point", File: "artist/resume.mp3"},
+		{ID: 2, Title: "Selected", File: "artist/selected.mp3"},
+	}
+	a.queue.render(-1)
+	a.queue.table.Select(queueHeaderRows+1, 0)
+	a.currentStatus = mpdclient.Status{State: mpdclient.StateStop, SongID: 1}
+	a.currentSong = a.queue.songs[0]
+	a.tv.SetFocus(a.queue.table)
+
+	a.handleOpenMarkPicker()
+
+	if a.markPicker.song.File != "artist/selected.mp3" {
+		t.Errorf("mark picker target = %q, want the selected track (playback stopped)", a.markPicker.song.File)
+	}
+}
+
+// --- App.targetSong itself ---
+
+func TestTargetSong(t *testing.T) {
+	playing := mpdclient.Song{ID: 1, Title: "Playing", File: "artist/playing.mp3"}
+	selected := mpdclient.Song{ID: 2, Title: "Selected", File: "artist/selected.mp3"}
+
+	cases := []struct {
+		name  string
+		state mpdclient.State
+		want  string
+	}{
+		{"playing wins over the selection", mpdclient.StatePlay, playing.File},
+		{"paused still counts as playing", mpdclient.StatePause, playing.File},
+		{"stopped falls back to the selection", mpdclient.StateStop, selected.File},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newTestApp()
+			a.queue.songs = []mpdclient.Song{playing, selected}
+			a.queue.render(1)
+			a.queue.table.Select(queueHeaderRows+1, 0)
+			a.currentSong = playing
+			a.currentStatus = mpdclient.Status{State: tc.state, SongID: playing.ID}
+
+			got, ok := a.targetSong()
+			if !ok {
+				t.Fatal("targetSong returned ok=false, want a target")
+			}
+			if got.File != tc.want {
+				t.Errorf("targetSong = %q, want %q", got.File, tc.want)
+			}
+		})
+	}
+}
+
+func TestTargetSongNoneWhenStoppedAndQueueEmpty(t *testing.T) {
+	a := newTestApp()
+	a.currentSong = mpdclient.Song{File: "artist/resume.mp3"}
+	a.currentStatus = mpdclient.Status{State: mpdclient.StateStop}
+
+	if _, ok := a.targetSong(); ok {
+		t.Error("targetSong should report no target with playback stopped and an empty queue")
+	}
+}

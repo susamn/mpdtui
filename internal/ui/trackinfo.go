@@ -117,13 +117,42 @@ func (c *trackInfoCard) Draw(screen tcell.Screen) {
 	c.Flex.Draw(screen)
 }
 
-// render fills in the card from the currently playing song/status, or
-// "Nothing playing" if there is none -- the same emptiness check
-// (DisplayName == "") App.renderNowPlaying already uses for the Now
-// Playing bar, so the two stay consistent about what counts as "nothing
-// playing". st supplies the live audio-quality line (Song carries no
-// bitrate/format of its own -- that's a property of the active decoder,
-// not the track's tags).
+// renderTrackInfo re-renders the 'i' card for whichever track
+// App.targetSong resolves to -- the playing one, or the Queue selection
+// when nothing is playing, so the card is still useful (and still shows
+// local rating/plays/mark) for a track you have merely scrolled to with
+// playback stopped, instead of the bare "Nothing playing" it used to be.
+//
+// The live status is only passed through when it actually describes that
+// track: bitrate and sample format are properties of the running decoder,
+// not of the track's tags, so attributing the playing track's numbers to
+// a merely-selected one would be a lie. A zero Status renders the quality
+// line as empty (see FormatAudioQuality), which is the honest answer.
+//
+// Called on every ~500ms refresh tick regardless of whether the card is
+// open, same as before -- resolving the target is an in-memory table
+// lookup, no MPD round-trip of its own.
+func (a *App) renderTrackInfo() {
+	song, ok := a.targetSong()
+	if !ok {
+		a.trackInfo.render(mpdclient.Song{}, mpdclient.Status{})
+		return
+	}
+	st := mpdclient.Status{}
+	if a.hasLivePlayback() {
+		st = a.currentStatus
+	}
+	a.trackInfo.render(song, st)
+}
+
+// render fills in the card from song/status, or "Nothing playing" if
+// there is no song at all -- the same emptiness check (DisplayName == "")
+// App.renderNowPlaying already uses for the Now Playing bar, so the two
+// stay consistent about what counts as "nothing playing". st supplies the
+// live audio-quality line (Song carries no bitrate/format of its own --
+// that's a property of the active decoder, not the track's tags), and is
+// passed zeroed when song isn't the one actually playing (see
+// App.renderTrackInfo).
 func (c *trackInfoCard) render(song mpdclient.Song, st mpdclient.Status) {
 	if song.DisplayName() == "" {
 		c.identity.SetText("[::d]Nothing playing[-:-:-]")
