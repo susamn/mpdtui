@@ -27,18 +27,19 @@ func ratingStars(rating int) string {
 }
 
 // handleRateSelectedTrack is '1'-'5', scoped to the Queue panel (see
-// globalInputCapture): rates whichever track is currently selected there
-// -- not necessarily the one playing. A no-op (flashed) if the feature
-// isn't active or nothing is selected. The confirmation flash is
-// immediate; the actual database write and the Queue panel's Rating
-// cell repaint both happen in the background (see App.runAsync) so
-// rating a track never makes the keypress wait on disk I/O.
+// globalInputCapture): rates the currently playing track, falling back
+// to the Queue selection when nothing is playing -- see App.targetSong.
+// A no-op (flashed) if the feature isn't active, or if nothing is
+// playing and nothing is selected. The confirmation flash is immediate;
+// the actual database write and the Queue panel's Rating cell repaint
+// both happen in the background (see App.runAsync) so rating a track
+// never makes the keypress wait on disk I/O.
 func (a *App) handleRateSelectedTrack(rating int) {
 	if a.metaDB == nil {
 		a.metadataNotEnabled()
 		return
 	}
-	song, ok := a.queue.selectedSong()
+	song, ok := a.targetSong()
 	if !ok {
 		return
 	}

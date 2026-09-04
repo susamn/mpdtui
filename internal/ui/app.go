@@ -552,6 +552,43 @@ func (a *App) maybeJumpToCurrentTrack(trackChanged bool) {
 	}
 }
 
+// hasLivePlayback reports whether there is a track actually being
+// listened to right now. State (rather than a non-empty currentSong.File)
+// is what decides: MPD keeps reporting a current song while stopped --
+// the position it would resume from -- which is not a track anyone is
+// listening to. Paused counts: it is still the track you are on, just
+// not moving.
+func (a *App) hasLivePlayback() bool {
+	switch a.currentStatus.State {
+	case mpdclient.StatePlay, mpdclient.StatePause:
+		return a.currentSong.File != ""
+	}
+	return false
+}
+
+// targetSong is the track every track-level Queue action acts on --
+// rating ('1'-'5'), marking ('m'), add-to-playlist ('a') and the track
+// info card ('i'): the one actually playing if there is one, otherwise
+// whatever is selected in the Queue.
+//
+// These are all judgements or bookkeeping about the music you are
+// *listening to*, and scrolling the Queue to look at something else
+// mid-track is a normal thing to do -- so the cursor's position must
+// not silently redirect them onto the row it happens to be parked on.
+// With playback stopped there is nothing being listened to, so the
+// selection is the only sensible target and takes over.
+//
+// Deliberately NOT used by the Queue's positional actions -- 'd'
+// (remove), 'J'/'K' (move), 'Enter' (play): those are operations on a
+// row of the list, where the selection *is* the subject and redirecting
+// them onto the playing track would be actively wrong.
+func (a *App) targetSong() (mpdclient.Song, bool) {
+	if a.hasLivePlayback() {
+		return a.currentSong, true
+	}
+	return a.queue.selectedSong()
+}
+
 func (a *App) cycleFocus(delta int) {
 	a.panelIdx = (a.panelIdx + delta + len(a.panels)) % len(a.panels)
 	a.tv.SetFocus(a.panels[a.panelIdx])
