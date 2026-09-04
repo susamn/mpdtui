@@ -197,11 +197,17 @@ const (
 	queueArtistCompactMaxLen = 20
 	queueColumnGap           = "  "
 
-	// queueCompactWidthThreshold is the Queue table width (runes) below
-	// which the table drops Year, Genre, and Composer columns to preserve
-	// space for Title, Album, Artist, Play count, Mark, Rating, Type, and
-	// Duration on smaller or scaled screens (e.g. 1080p @ 1.5x scaling).
-	queueCompactWidthThreshold = 130
+	// queueYearWidth, queueGenreWidth, queueComposerWidth, and
+	// queueTypeWidth are each optional column's on-screen width (label/
+	// value plus its trailing queueColumnGap), used by both
+	// queueOptionalColumns (deciding which columns fit) and
+	// queueColumnTruncation (sizing Title/Album/Artist once that's
+	// decided) via the shared queueBaseFixedWidth helper below, so the
+	// two stay in lockstep.
+	queueYearWidth     = 6  // 4 + 2 gap
+	queueGenreWidth    = 11 // 9 + 2 gap
+	queueComposerWidth = 16 // 14 + 2 gap
+	queueTypeWidth     = 6  // 4 + 2 gap
 )
 
 // queueTitleColor tints the Title cell with the active theme's Green,
@@ -367,6 +373,25 @@ func setQueueHeader(t *tview.Table, cols queueColumns) {
 	set(cols.duration, "Duration", tview.AlignRight)
 }
 
+// queueBaseFixedWidth returns the width (runes) consumed by the always-
+// present Queue columns -- marker, position, duration, and the table's
+// own border -- plus Lyr when lyricsActive and Playcount/Mark/Rating when
+// metadataActive. Both queueOptionalColumns (deciding which optional
+// columns fit) and queueColumnTruncation (sizing Title/Album/Artist once
+// that's decided) derive their fixed-width budget from this single place
+// so the two formulas can't drift apart and silently reintroduce columns
+// being pushed off screen.
+func queueBaseFixedWidth(lyricsActive, metadataActive bool) int {
+	fixed := 2 + 3 + 8 + 2 // marker(2) + pos(3) + duration(8) + border(2)
+	if lyricsActive {
+		fixed += 3
+	}
+	if metadataActive {
+		fixed += 7 + 4 + 8 // plays(7) + mark(4) + rating(8)
+	}
+	return fixed
+}
+
 // queueOptionalColumns determines which optional columns (Year, Genre,
 // Composer, Type) should be shown given the available table width and active
 // features. The core columns (Title, Lyr, Album, Artist, Plays, Mark,
@@ -377,26 +402,19 @@ func queueOptionalColumns(width int, lyricsActive, metadataActive bool) (showYea
 	if width <= 0 {
 		return false, false, false, false
 	}
-	fixed := 2 + 3 + 8 + 2 // marker(2) + pos(3) + duration(8) + border(2)
-	if lyricsActive {
-		fixed += 3
-	}
-	if metadataActive {
-		fixed += 7 + 4 + 8 // plays(7) + mark(4) + rating(8)
-	}
-	avail := width - fixed
+	avail := width - queueBaseFixedWidth(lyricsActive, metadataActive)
 	// Base comfortable text space for Title (24), Album (16), Artist (22) + gaps (6) = 68
 	const baseTextSpace = 68
-	if avail >= baseTextSpace+6 { // Priority 1: Year (4 + 2 gap = 6)
+	if avail >= baseTextSpace+queueYearWidth { // Priority 1: Year
 		showYear = true
 	}
-	if avail >= baseTextSpace+6+11 { // Priority 2: Genre (9 + 2 gap = 11)
+	if avail >= baseTextSpace+queueYearWidth+queueGenreWidth { // Priority 2: Genre
 		showGenre = true
 	}
-	if avail >= baseTextSpace+6+11+16 { // Priority 3: Composer (14 + 2 gap = 16)
+	if avail >= baseTextSpace+queueYearWidth+queueGenreWidth+queueComposerWidth { // Priority 3: Composer
 		showComposer = true
 	}
-	if avail >= baseTextSpace+6+11+16+6 { // Priority 4 (Last): Type (4 + 2 gap = 6)
+	if avail >= baseTextSpace+queueYearWidth+queueGenreWidth+queueComposerWidth+queueTypeWidth { // Priority 4 (Last): Type
 		showType = true
 	}
 	return showYear, showGenre, showComposer, showType
@@ -416,24 +434,18 @@ func queueColumnTruncation(width int, lyricsActive, metadataActive, showYear, sh
 	if width <= 0 {
 		return queueTitleCompactMaxLen, queueAlbumCompactMaxLen, queueArtistCompactMaxLen
 	}
-	fixed := 2 + 3 + 8 + 2
-	if lyricsActive {
-		fixed += 3
-	}
-	if metadataActive {
-		fixed += 7 + 4 + 8
-	}
+	fixed := queueBaseFixedWidth(lyricsActive, metadataActive)
 	if showYear {
-		fixed += 6
+		fixed += queueYearWidth
 	}
 	if showGenre {
-		fixed += 11
+		fixed += queueGenreWidth
 	}
 	if showComposer {
-		fixed += 16
+		fixed += queueComposerWidth
 	}
 	if showType {
-		fixed += 6
+		fixed += queueTypeWidth
 	}
 	avail := width - fixed
 	if avail <= 0 {
