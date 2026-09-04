@@ -485,3 +485,17 @@ func TestMarkPickerEscRestoresOriginalFocus(t *testing.T) {
 		t.Errorf("focus after Escape = %T, want the originally-focused Queue table", a.tv.GetFocus())
 	}
 }
+
+// TestBuildFocusesQueuePanelOnStartup: the Queue is where a session
+// starts, and panelIdx has to agree with it so the first Tab cycles from
+// Queue rather than from Library.
+func TestBuildFocusesQueuePanelOnStartup(t *testing.T) {
+	a := newTestApp()
+
+	if a.tv.GetFocus() != a.queue.table {
+		t.Errorf("startup focus = %T, want the Queue table", a.tv.GetFocus())
+	}
+	if a.panelIdx != queuePanelIdx {
+		t.Errorf("panelIdx = %d, want queuePanelIdx (%d)", a.panelIdx, queuePanelIdx)
+	}
+}

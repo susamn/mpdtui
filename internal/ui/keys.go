@@ -162,11 +162,11 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			}
 			switch event.Rune() {
 			case '1':
-				a.focusPanel(0)
+				a.focusPanel(libraryPanelIdx)
 			case '2':
-				a.focusPanel(1)
+				a.focusPanel(playlistsPanelIdx)
 			case '3':
-				a.focusPanel(2)
+				a.focusPanel(queuePanelIdx)
 			default:
 				a.invalidKey(string(event.Rune()))
 			}

@@ -21,6 +21,15 @@ const (
 	modeOverlay
 )
 
+// Indices into App.panels, which is the one place the panel order is
+// defined (see build) -- focusPanel and the '1'/'2'/'3' shortcuts both
+// address panels by these rather than by bare numbers.
+const (
+	libraryPanelIdx = iota
+	playlistsPanelIdx
+	queuePanelIdx
+)
+
 // flashDuration is how long a transient hint-bar message (an error, a
 // "added N tracks" confirmation, etc.) stays up before the hint bar
 // reverts to showing keybindings again.
@@ -112,8 +121,8 @@ type App struct {
 	// completes -- that call is the app *learning* whatever MPD was
 	// already playing before mpdtui started, not a real track change, so
 	// it must not trigger the auto-jump-to-Queue in refreshNowPlaying
-	// (which would override the deliberate default startup focus on
-	// Library before the user's done anything).
+	// (which would move the Queue selection off row 0 before the user
+	// has done anything).
 	startedUp bool
 
 	msgSeq int
@@ -275,8 +284,14 @@ func (a *App) build() {
 	a.pages = tview.NewPages().AddPage("main", a.root, true, true)
 
 	a.tv.SetInputCapture(a.globalInputCapture)
-	a.tv.SetRoot(a.pages, true).SetFocus(a.library.tree)
-	a.updateHintBar()
+	a.tv.SetRoot(a.pages, true)
+	// Queue, not Library, is where a session starts: whatever is already
+	// queued (and playing) is what you act on first almost every time --
+	// rating, reordering, jumping around it -- while the Library is where
+	// you go deliberately, to add something new. focusPanel rather than a
+	// bare SetFocus so panelIdx agrees with it from the start, otherwise
+	// the first Tab would cycle from Library's index instead of Queue's.
+	a.focusPanel(queuePanelIdx)
 
 	a.tv.SetAfterDrawFunc(func(tcell.Screen) {
 		a.albumArt.draw()
