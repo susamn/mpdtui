@@ -469,6 +469,56 @@ func (p *libraryPanel) revealInLibrary(file string) bool {
 	return true
 }
 
+// centerCurrentNode scrolls the Library tree so the selected node sits
+// vertically centered, the same way queuePanel.centerSelection does for
+// the Queue -- revealing a track deep in the tree is a lot easier to read
+// with its siblings visible around it than pinned to the top or bottom
+// edge, which is all tview's own scroll-just-far-enough-to-be-visible
+// gives you.
+//
+// TreeView, unlike Table, exposes no way to set the scroll offset
+// directly (only GetScrollOffset), so this steers it through the one
+// exported lever there is: Move, which shifts the selection and then
+// scrolls only as far as needed to bring it back into view. Moving half
+// a screen down, a full screen up, then half a screen back down leaves
+// the offset half a screen above the node regardless of where the view
+// started -- above it, below it, or already showing it:
+//
+//   - down half a screen: if the node was visible at or below the middle
+//     (or off-screen below entirely), that target lands past the bottom
+//     edge, pulling the offset to half a screen above the node
+//   - up a full screen: that target is now above the top edge in every
+//     remaining case, so the offset follows it up to exactly half a
+//     screen above the node
+//   - down half a screen: back onto the node itself, which is now
+//     centered, so nothing scrolls
+//
+// Near either end of the tree the Moves stop at the first/last node and
+// the offset pins to the top/bottom -- as close to centered as the tree
+// allows, same as the Queue. SetCurrentNode restores the selection
+// afterwards rather than trusting the Moves to land back on it exactly:
+// Move counts *selectable* nodes while the scrolling is in visible rows,
+// and a non-selectable placeholder row ("(empty)") in between would
+// otherwise leave the selection a row off.
+//
+// A no-op before the first draw, or in a viewport too short for a
+// meaningful middle.
+func (p *libraryPanel) centerCurrentNode() {
+	node := p.tree.GetCurrentNode()
+	if node == nil {
+		return
+	}
+	_, _, _, h := p.tree.GetInnerRect()
+	if h < 4 {
+		return
+	}
+	half := h / 2
+	p.tree.Move(half)
+	p.tree.Move(-h)
+	p.tree.Move(half)
+	p.tree.SetCurrentNode(node)
+}
+
 // findChildByPath returns node's direct child whose DirEntry.Path equals
 // path, or nil if there's no such child (e.g. an album-search group, or a
 // placeholder with no DirEntry reference at all).

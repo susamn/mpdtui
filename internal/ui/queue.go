@@ -855,6 +855,44 @@ func (q *queuePanel) jumpToCurrent() bool {
 	return false
 }
 
+// centerRowOffset is the Table row offset (see Table.SetOffset) that puts
+// row at the vertical middle of a viewport height lines tall. tview's own
+// scrolling only ever moves a row just far enough to *be* visible, so
+// jumping to a track otherwise parks it on the very first or very last
+// line, with no surrounding queue visible to place it in.
+//
+// A negative offset clamps to 0: a row in the first half-screen simply
+// can't be centered, and there's no scrolling further up than the top.
+// The bottom end needs no clamp of its own -- tview's Draw pins the
+// offset to the last screenful once it runs past the end (its trackEnd
+// handling), which is the same "as close to centered as the list allows"
+// answer.
+func centerRowOffset(row, height int) int {
+	off := row - height/2
+	if off < 0 {
+		return 0
+	}
+	return off
+}
+
+// centerSelection scrolls the Queue so the currently selected row sits
+// vertically centered. Call it after Select (jumpToCurrent and friends),
+// never instead of it: this only moves the viewport, not the selection.
+//
+// The offset survives the next draw because a centered row is, by
+// definition, still visible -- Table.Draw's clamp-to-selection only
+// overrides the offset when the selection would otherwise fall outside
+// the viewport. A no-op before the first draw, when the table has no
+// height to center within yet.
+func (q *queuePanel) centerSelection() {
+	_, _, _, h := q.table.GetInnerRect()
+	if h <= 0 {
+		return
+	}
+	row, _ := q.table.GetSelection()
+	q.table.SetOffset(centerRowOffset(row, h), 0)
+}
+
 // jumpToMatch selects (but does not remove or hide) the first queued track
 // whose display name contains query, case- and diacritic-insensitive (see
 // containsFold). Returns false if nothing matched, leaving the current
