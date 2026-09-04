@@ -377,3 +377,56 @@ func TestOpenAddToPlaylistPickerDuplicateFlashesErrorAndLeavesFileUntouchedNeeds
 		t.Errorf("hint bar after a rejected duplicate = %q, want it to mention the track is already in the playlist", got)
 	}
 }
+
+// TestOpenAddToPlaylistPickerTargetsPlayingTrackNotSelection: 'a' follows
+// the same target rule as rating and marking -- the playing track wins
+// over wherever the Queue cursor was left, and the popup title says so.
+func TestOpenAddToPlaylistPickerTargetsPlayingTrackNotSelection(t *testing.T) {
+	a := newTestApp()
+	setPlaylistsForTest(a.playlists, []string{"Rock Anthems"})
+	a.queue.songs = []mpdclient.Song{
+		{ID: 1, Title: "Playing", File: "artist/playing.mp3"},
+		{ID: 2, Title: "Other", File: "artist/other.mp3"},
+	}
+	a.queue.render(1)
+	a.queue.table.Select(queueHeaderRows+1, 0)
+	a.currentSong = a.queue.songs[0]
+	a.currentStatus = mpdclient.Status{State: mpdclient.StatePlay, SongID: 1}
+	a.tv.SetFocus(a.queue.table)
+
+	a.openAddToPlaylistPicker()
+
+	field, ok := a.tv.GetFocus().(*tview.InputField)
+	if !ok {
+		t.Fatalf("focus = %T, want *tview.InputField", a.tv.GetFocus())
+	}
+	if got := field.GetTitle(); got != ` Add "Playing" to playlist ` {
+		t.Errorf("field title = %q, want it to name the playing track", got)
+	}
+}
+
+// TestOpenAddToPlaylistPickerFallsBackToSelectionWhenStopped mirrors
+// rating's and marking's own stopped-playback fallback.
+func TestOpenAddToPlaylistPickerFallsBackToSelectionWhenStopped(t *testing.T) {
+	a := newTestApp()
+	setPlaylistsForTest(a.playlists, []string{"Rock Anthems"})
+	a.queue.songs = []mpdclient.Song{
+		{ID: 1, Title: "Resume point", File: "artist/resume.mp3"},
+		{ID: 2, Title: "Selected", File: "artist/selected.mp3"},
+	}
+	a.queue.render(-1)
+	a.queue.table.Select(queueHeaderRows+1, 0)
+	a.currentSong = a.queue.songs[0]
+	a.currentStatus = mpdclient.Status{State: mpdclient.StateStop, SongID: 1}
+	a.tv.SetFocus(a.queue.table)
+
+	a.openAddToPlaylistPicker()
+
+	field, ok := a.tv.GetFocus().(*tview.InputField)
+	if !ok {
+		t.Fatalf("focus = %T, want *tview.InputField", a.tv.GetFocus())
+	}
+	if got := field.GetTitle(); got != ` Add "Selected" to playlist ` {
+		t.Errorf("field title = %q, want it to name the selected track", got)
+	}
+}

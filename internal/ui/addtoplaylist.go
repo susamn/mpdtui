@@ -72,14 +72,18 @@ func (h *playlistPickerHints) current() (name string, idx int) {
 }
 
 // openAddToPlaylistPicker is 'a' on the Queue panel: fuzzy-search the
-// stored playlists and add the currently Queue-selected track to
-// whichever one is chosen -- writing straight into that playlist's own
+// stored playlists and add the track App.targetSong resolves to -- the
+// playing one, or the Queue selection when nothing is playing -- to
+// whichever one is chosen, writing straight into that playlist's own
 // .m3u file via mpdclient.Client.AddTrackToPlaylist (MPD's "playlistadd"
 // command). This is the opposite direction from Library/Playlists' own
 // 'a' key: appendPlaylist there loads a stored playlist's tracks INTO the
-// queue, never touching any file. A no-op if nothing's selected in the
-// Queue (mirrors handleRateSelectedTrack/handleOpenMarkPicker's own
-// silent no-op on an empty selection).
+// queue, never touching any file. A no-op if there's no target at all
+// (mirrors handleRateSelectedTrack/handleOpenMarkPicker's own silent
+// no-op). The target is captured once, here at open time, and named in
+// the popup's own title: transport controls stay live while an overlay
+// is up and a track can auto-advance on its own, so re-resolving it on
+// Enter could file a different track than the title promised.
 //
 // j/k/g/G and Up/Down/Ctrl-P/Ctrl-N navigate the hint list, Tab/Backtab
 // (and 'f' from the list back to the field, matching openGlobalSearch's
@@ -95,7 +99,7 @@ func (h *playlistPickerHints) current() (name string, idx int) {
 // a real text input, exactly like openGlobalSearch's own popup, which
 // gets the same (lack of) treatment.
 func (a *App) openAddToPlaylistPicker() {
-	song, ok := a.queue.selectedSong()
+	song, ok := a.targetSong()
 	if !ok {
 		return
 	}
