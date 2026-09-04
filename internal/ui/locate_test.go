@@ -222,7 +222,7 @@ func TestFlashLocatedRowLightsUpThenRestoresTheSelection(t *testing.T) {
 	a.queue.table.Select(2, 0)
 	a.tv.SetFocus(a.queue.table)
 
-	a.flashLocatedRow()
+	a.flashLocatedTrack()
 	if got := selectedRowBackground(t, a); got != locateFlashBg {
 		t.Errorf("selected row background during the flash = %v, want the flash color %v", got, locateFlashBg)
 	}
@@ -242,9 +242,9 @@ func TestFlashLocatedRowSupersedesAnEarlierFlash(t *testing.T) {
 	a.queue.table.Select(2, 0)
 	a.tv.SetFocus(a.queue.table)
 
-	a.flashLocatedRow()
+	a.flashLocatedTrack()
 	stale := a.locateFlashSeq
-	a.flashLocatedRow()
+	a.flashLocatedTrack()
 	if a.locateFlashSeq == stale {
 		t.Fatal("a second flash should start a new sequence")
 	}
@@ -268,7 +268,7 @@ func TestLocateFlashEndsOnTheNormalSelection(t *testing.T) {
 	a.queue.table.Select(2, 0)
 	a.tv.SetFocus(a.queue.table)
 
-	a.flashLocatedRow()
+	a.flashLocatedTrack()
 	for i := 1; i <= len(locateFlashPhases); i++ {
 		a.runLocateFlashPhase(a.locateFlashSeq, i)
 	}
@@ -276,4 +276,71 @@ func TestLocateFlashEndsOnTheNormalSelection(t *testing.T) {
 	if got := selectedRowBackground(t, a); got != colorSelectedBg {
 		t.Errorf("selected row background after every phase = %v, want the normal selection %v", got, colorSelectedBg)
 	}
+}
+
+// --- The flash, in the Library tree ---
+
+// TestFlashLocatedTrackFlashesTheLibraryNodeToo: 'L' points at one track
+// in two places, so the revealed tree node blinks along with the Queue
+// row -- and is left exactly as it was found afterwards.
+func TestFlashLocatedTrackFlashesTheLibraryNodeToo(t *testing.T) {
+	a := newTestApp()
+	queueWithSongs(a, 5)
+	a.queue.table.Select(2, 0)
+	nodes := libraryTreeWithNodes(a, 20)
+	node := nodes[7]
+	a.library.tree.SetCurrentNode(node)
+	before := node.GetSelectedTextStyle()
+
+	a.flashLocatedTrack()
+
+	_, bg, _ := node.GetSelectedTextStyle().Decompose()
+	if bg != locateFlashBg {
+		t.Errorf("library node background during the flash = %v, want the flash color %v", bg, locateFlashBg)
+	}
+
+	a.runLocateFlashPhase(a.locateFlashSeq, len(locateFlashPhases))
+	if got := node.GetSelectedTextStyle(); got != before {
+		t.Errorf("library node style after the flash = %v, want it restored to %v", got, before)
+	}
+}
+
+// TestFlashLocatedTrackKeepsFlashingTheNodeItStartedOn: the node is
+// captured once, so the phases can't wander onto a different one.
+func TestFlashLocatedTrackKeepsFlashingTheNodeItStartedOn(t *testing.T) {
+	a := newTestApp()
+	queueWithSongs(a, 5)
+	a.queue.table.Select(2, 0)
+	nodes := libraryTreeWithNodes(a, 20)
+	a.library.tree.SetCurrentNode(nodes[7])
+
+	a.flashLocatedTrack()
+	a.library.tree.SetCurrentNode(nodes[12]) // selection moves mid-flash
+	a.runLocateFlashPhase(a.locateFlashSeq, len(locateFlashPhases))
+
+	_, bg, _ := nodes[12].GetSelectedTextStyle().Decompose()
+	if bg == locateFlashBg {
+		t.Error("a node selected after the flash started should never have been flashed")
+	}
+}
+
+// TestFlashLocatedTrackWithoutALibraryNode: 'L' on a track that isn't in
+// the library reveals nothing, so only the Queue flashes -- and nothing
+// panics on the nil node.
+func TestFlashLocatedTrackWithoutALibraryNode(t *testing.T) {
+	a := newTestApp()
+	queueWithSongs(a, 5)
+	a.queue.table.Select(2, 0)
+	a.library.tree.SetCurrentNode(nil)
+	a.tv.SetFocus(a.queue.table)
+
+	a.flashLocatedTrack()
+
+	if a.locateFlashNode != nil {
+		t.Errorf("locateFlashNode = %v, want nil", a.locateFlashNode.GetText())
+	}
+	if got := selectedRowBackground(t, a); got != locateFlashBg {
+		t.Errorf("queue row background = %v, want the flash color %v (the Queue still flashes)", got, locateFlashBg)
+	}
+	a.runLocateFlashPhase(a.locateFlashSeq, len(locateFlashPhases)) // must not panic
 }

@@ -127,11 +127,19 @@ type App struct {
 
 	msgSeq int
 
-	// locateFlashSeq identifies the current post-'L' row flash, so a
-	// second 'L' pressed mid-flash supersedes the first rather than
-	// having two overlapping blink sequences fight over the Queue's
-	// selected-row style -- the same guard msgSeq gives the hint bar.
+	// locateFlashSeq identifies the current post-'L' flash, so a second
+	// 'L' pressed mid-flash supersedes the first rather than having two
+	// overlapping blink sequences fight over the same styles -- the same
+	// guard msgSeq gives the hint bar.
 	locateFlashSeq int
+
+	// locateFlashNode is the Library node that flash is blinking, with
+	// locateFlashNodeStyle its selected style from before the flash
+	// started, restored verbatim at the end (see App.setLocateFlash for
+	// why this one is saved rather than rebuilt). nil when 'L' revealed
+	// nothing in the tree -- a track that isn't in the library at all.
+	locateFlashNode      *tview.TreeNode
+	locateFlashNodeStyle tcell.Style
 
 	done chan struct{}
 }
