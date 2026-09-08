@@ -561,9 +561,11 @@ at a glance while scrolling. Unlike the Rating column, the gutter star
 survives a narrow terminal, since dropping columns to save space never
 drops it.
 
-Both tiers come from a single theme color, with the weaker one computed
-down from it to a guaranteed luminance separation rather than read from
-a second palette field. Pairing "yellow" with "bright_yellow" seems like
+Both tiers come from a single theme color, with the weaker one dimmed
+toward the background to a guaranteed luminance separation (at least
+2.23x across the themes tested, while keeping the dimmest 4-star star
+2.01x above its own background) rather than read from a second palette
+field. Pairing "yellow" with "bright_yellow" seems like
 the obvious approach and does not work: across the 15 Omarchy themes
 this was tested against, 8 had those two within 1.2x luminance of each
 other and 3 had them byte-identical.

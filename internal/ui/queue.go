@@ -678,15 +678,23 @@ const queueGutterStarMin = 4
 // "bright_yellow" for the two tiers, and on most real themes those are
 // the same color or near enough that the tiers were indistinguishable.
 // queueStarMinRatio is the luminance separation the weaker tier is
-// guaranteed to reach -- comfortably past the ~1.2x where two shades
-// stop being tellable apart at the size of a single glyph.
+// guaranteed to reach -- well past the ~1.2x where two shades stop being
+// tellable apart at the size of a single glyph.
 // Theme-derived (deriveColors), see theme.go.
 var (
 	queueStarTopColor  tcell.Color
 	queueStarHighColor tcell.Color
 )
 
-const queueStarMinRatio = 1.8
+// queueStarMinRatio trades off against the 4-star glyph's own visibility:
+// the weaker tier is dimmed by mixing it toward the background, so
+// separating the tiers further necessarily leaves less contrast between
+// the 4-star star and the panel behind it. Measured across the 15
+// Omarchy themes on hand, this value separates the tiers by at least
+// 2.23x while still leaving the dimmest 4-star 2.01x above its own
+// background. Raising it to 3.0 would buy 3.01x separation at the cost
+// of dropping that to 1.52x, which is too faint to pick out reliably.
+const queueStarMinRatio = 2.2
 
 func queueStarColor(rating int) tcell.Color {
 	if rating >= 5 {
