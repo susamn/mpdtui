@@ -23,7 +23,7 @@ const playlistIcon = "🎵"
 // prefix + name), as opposed to its bare Name -- selectedName/loadPlaylist
 // etc. always work with the bare name, this is display-only.
 func playlistDisplayName(name string) string {
-	return playlistIcon + " " + name
+	return playlistIcon + " " + splitConjuncts(name)
 }
 
 // playlistsSortMode controls the display order of playlistsPanel.pls.

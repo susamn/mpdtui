@@ -507,7 +507,7 @@ func (q *queuePanel) render(curID int) {
 		if title == "" {
 			title = baseName(s.File)
 		}
-		titleText := truncateWithEllipsis(title, titleMaxLen)
+		titleText := cellText(title, titleMaxLen)
 		q.table.SetCell(row, 0, queueGutterCell(s.ID == curID, q.metaCache[s.File].Rating))
 		q.table.SetCell(row, 1, tview.NewTableCell(fmt.Sprintf("%3d", i+1)))
 		q.table.SetCell(row, cols.title, tview.NewTableCell(titleText+queueColumnGap).
@@ -522,9 +522,9 @@ func (q *queuePanel) render(curID int) {
 			// should only take to contain the icon").
 			q.table.SetCell(row, cols.lyr, tview.NewTableCell(lyricsCellText(q.lyricsPresence(s.File, lrcDirs, txtDirs))))
 		}
-		q.table.SetCell(row, cols.album, tview.NewTableCell(truncateWithEllipsis(s.Album, albumMaxLen)+queueColumnGap))
+		q.table.SetCell(row, cols.album, tview.NewTableCell(cellText(s.Album, albumMaxLen)+queueColumnGap))
 
-		artistCell := tview.NewTableCell(truncateWithEllipsis(s.Artist, artistMaxLen) + queueColumnGap)
+		artistCell := tview.NewTableCell(cellText(s.Artist, artistMaxLen) + queueColumnGap)
 		if cols.composer < 0 {
 			artistCell.SetExpansion(1)
 		}
@@ -534,10 +534,10 @@ func (q *queuePanel) render(curID int) {
 			q.table.SetCell(row, cols.year, tview.NewTableCell(yearFromDate(s.Date)+queueColumnGap))
 		}
 		if cols.genre >= 0 {
-			q.table.SetCell(row, cols.genre, tview.NewTableCell(truncateWithEllipsis(s.Genre, queueGenreMaxLen)+queueColumnGap))
+			q.table.SetCell(row, cols.genre, tview.NewTableCell(cellText(s.Genre, queueGenreMaxLen)+queueColumnGap))
 		}
 		if cols.composer >= 0 {
-			q.table.SetCell(row, cols.composer, tview.NewTableCell(truncateWithEllipsis(s.Composer, queueComposerMaxLen)+queueColumnGap).
+			q.table.SetCell(row, cols.composer, tview.NewTableCell(cellText(s.Composer, queueComposerMaxLen)+queueColumnGap).
 				SetExpansion(1))
 		}
 		if cols.playcount >= 0 || cols.mark >= 0 || cols.rating >= 0 {
@@ -830,6 +830,14 @@ func lyricsCellText(hasLRC, hasTxt bool) string {
 // otherwise the first max-3 runes followed by "...". Operates on runes,
 // not bytes, so multi-byte characters in track/album/artist tags aren't
 // split mid-character.
+// cellText prepares MPD-provided text for a table cell: truncated to the
+// column's budget, then made safe to lay out (see splitConjuncts). Every
+// queue column carrying tag text goes through this, so no one column can
+// be the one that forgets and knocks the row's alignment out.
+func cellText(s string, max int) string {
+	return splitConjuncts(truncateWithEllipsis(s, max))
+}
+
 func truncateWithEllipsis(s string, max int) string {
 	runes := []rune(s)
 	if len(runes) <= max {

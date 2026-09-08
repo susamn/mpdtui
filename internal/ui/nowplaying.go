@@ -64,11 +64,11 @@ func nowPlayingTrackText(song mpdclient.Song) string {
 	switch {
 	case song.Artist != "" && song.Title != "":
 		return fmt.Sprintf("[%s::b]%s[-:-:-] - [%s::b]%s[-:-:-]",
-			nowPlayingTrackColor, song.Title, nowPlayingArtistColor, song.Artist)
+			nowPlayingTrackColor, splitConjuncts(song.Title), nowPlayingArtistColor, splitConjuncts(song.Artist))
 	case song.Title != "":
-		return fmt.Sprintf("[%s::b]%s[-:-:-]", nowPlayingTrackColor, song.Title)
+		return fmt.Sprintf("[%s::b]%s[-:-:-]", nowPlayingTrackColor, splitConjuncts(song.Title))
 	case song.File != "":
-		return song.File
+		return splitConjuncts(song.File)
 	default:
 		return "(nothing playing)"
 	}
