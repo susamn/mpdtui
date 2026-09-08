@@ -2,6 +2,7 @@ package ui
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,15 +18,15 @@ func stripColorTags(s string) string {
 }
 
 func TestCliampVisualizationImplementsVisualizationInterface(t *testing.T) {
-	var _ Visualization = newCliampVisualization()
-	viz := newCliampVisualization()
+	var _ Visualization = newCliampVisualization(nil)
+	viz := newCliampVisualization(nil)
 	if got := viz.Name(); got != "Cliamp" {
 		t.Errorf("Name() = %q, want %q", got, "Cliamp")
 	}
 }
 
 func TestCliampVisualizationReturnsCorrectLineCount(t *testing.T) {
-	viz := newCliampVisualization()
+	viz := newCliampVisualization(nil)
 	for _, h := range []int{1, 2, 3, 5} {
 		lines := viz.Render(30, h, 1*time.Second, mpdclient.Status{State: mpdclient.StatePlay, Volume: 80})
 		if len(lines) != h {
@@ -35,7 +36,7 @@ func TestCliampVisualizationReturnsCorrectLineCount(t *testing.T) {
 }
 
 func TestCliampVisualizationEmptyOnZeroDimensions(t *testing.T) {
-	viz := newCliampVisualization()
+	viz := newCliampVisualization(nil)
 	lines0W := viz.Render(0, 2, 1*time.Second, mpdclient.Status{State: mpdclient.StatePlay, Volume: 80})
 	if len(lines0W) != 2 || lines0W[0] != "" || lines0W[1] != "" {
 		t.Errorf("Render(0, 2) = %v, want 2 empty lines", lines0W)
@@ -48,7 +49,7 @@ func TestCliampVisualizationEmptyOnZeroDimensions(t *testing.T) {
 }
 
 func TestCliampVisualizationVisibleWidthMatchesPanelWidth(t *testing.T) {
-	viz := newCliampVisualization()
+	viz := newCliampVisualization(nil)
 	st := mpdclient.Status{State: mpdclient.StatePlay, Volume: 90}
 
 	for _, w := range []int{6, 11, 15, 25, 40, 80} {
@@ -63,7 +64,7 @@ func TestCliampVisualizationVisibleWidthMatchesPanelWidth(t *testing.T) {
 }
 
 func TestCliampVisualizationVolumeScaling(t *testing.T) {
-	viz := newCliampVisualization()
+	viz := newCliampVisualization(nil)
 	playingZeroVol := mpdclient.Status{State: mpdclient.StatePlay, Volume: 0}
 	linesZero := viz.Render(30, 2, 2*time.Second, playingZeroVol)
 
@@ -83,7 +84,7 @@ func TestCliampVisualizationVolumeScaling(t *testing.T) {
 	}
 
 	// At volume 100, playing state should have rendered active glyphs
-	viz2 := newCliampVisualization()
+	viz2 := newCliampVisualization(nil)
 	playingFullVol := mpdclient.Status{State: mpdclient.StatePlay, Volume: 100}
 	linesFull := viz2.Render(30, 2, 2*time.Second, playingFullVol)
 	strippedFull := stripColorTags(linesFull[1])
@@ -101,7 +102,7 @@ func TestCliampVisualizationVolumeScaling(t *testing.T) {
 }
 
 func TestCliampVisualizationIdleWhenPausedOrStopped(t *testing.T) {
-	viz := newCliampVisualization()
+	viz := newCliampVisualization(nil)
 	paused := mpdclient.Status{State: mpdclient.StatePause, Volume: 80}
 	lines := viz.Render(30, 2, 5*time.Second, paused)
 
@@ -127,7 +128,7 @@ func TestCliampVisualizationIdleWhenPausedOrStopped(t *testing.T) {
 }
 
 func TestCliampVisualizationPeakHoldAndDecay(t *testing.T) {
-	viz := newCliampVisualization()
+	viz := newCliampVisualization(nil)
 	st := mpdclient.Status{State: mpdclient.StatePlay, Volume: 100}
 
 	// Initial render
@@ -144,5 +145,85 @@ func TestCliampVisualizationPeakHoldAndDecay(t *testing.T) {
 		if p < 0 || p > 16 {
 			t.Errorf("peak[%d] out of range: %v", i, p)
 		}
+	}
+}
+
+func TestCliampDrawsRealSpectrumWhenAudioIsLive(t *testing.T) {
+	// A 60Hz tone sits near the bottom of the analyzed range, so real
+	// bands put it in the leftmost bars and leave the treble end empty.
+	// The simulation drives every bar at once, so this distinguishes the
+	// two paths.
+	viz := newCliampVisualization(startTestSpectrum(t, 60))
+
+	const width = 40
+	lines := viz.Render(width, 2, 0, mpdclient.Status{State: mpdclient.StatePlay, Volume: 100})
+
+	plain := make([]string, len(lines))
+	for i, l := range lines {
+		plain[i] = stripColorTags(l)
+	}
+	filled := filledColumns(plain, width)
+
+	anyLeft := false
+	for x := 0; x < width/4; x++ {
+		if filled[x] {
+			anyLeft = true
+		}
+	}
+	if !anyLeft {
+		t.Errorf("no bars in the bass quarter for a 60Hz tone: %q", plain)
+	}
+	for x := width * 3 / 4; x < width; x++ {
+		if filled[x] {
+			t.Errorf("column %d filled for a 60Hz tone -- treble end should be silent: %q", x, plain)
+			break
+		}
+	}
+}
+
+func TestCliampRealSpectrumKeepsPanelWidth(t *testing.T) {
+	// The centering/padding arithmetic has to hold on the real-audio
+	// path too, not just the simulated one -- a mis-sized row corrupts
+	// the panel border.
+	viz := newCliampVisualization(startTestSpectrum(t, 440))
+	st := mpdclient.Status{State: mpdclient.StatePlay, Volume: 90}
+
+	for _, w := range []int{6, 11, 15, 25, 40, 80} {
+		for _, line := range viz.Render(w, 2, time.Second, st) {
+			if got := tview.TaggedStringWidth(line); got != w {
+				t.Errorf("width=%d: tagged width = %d, want %d (content: %q)", w, got, w, line)
+			}
+		}
+	}
+}
+
+func TestCliampRealSpectrumStillScalesWithVolume(t *testing.T) {
+	// MPD's fifo carries the stream ahead of the mixer its volume
+	// setting drives, so volume scaling has to be applied on top of the
+	// real spectrum or muting would leave the bars dancing.
+	viz := newCliampVisualization(startTestSpectrum(t, 440))
+
+	lines := viz.Render(40, 2, time.Second, mpdclient.Status{State: mpdclient.StatePlay, Volume: 0})
+	for y, line := range lines {
+		if strings.TrimSpace(stripColorTags(line)) != "" {
+			t.Errorf("volume 0: row %d = %q, want blank even with live audio", y, line)
+		}
+	}
+}
+
+func TestCliampFallsBackToSimulationWithoutAudio(t *testing.T) {
+	// No fifo: the panel must still animate rather than sit blank for a
+	// user who hasn't configured MPD's fifo output.
+	viz := newCliampVisualization(nil)
+	playing := mpdclient.Status{State: mpdclient.StatePlay, Volume: 80}
+
+	at0 := stripColorTags(viz.Render(40, 2, 0, playing)[1])
+	at1s := stripColorTags(viz.Render(40, 2, time.Second, playing)[1])
+
+	if strings.TrimSpace(at0) == "" && strings.TrimSpace(at1s) == "" {
+		t.Error("no output without a spectrum -- expected the simulated fallback")
+	}
+	if at0 == at1s {
+		t.Error("fallback output identical across elapsed times -- expected animation")
 	}
 }

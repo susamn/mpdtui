@@ -85,17 +85,27 @@ func TestVisualizerPanelNextWithSingleVisualizationIsNoOp(t *testing.T) {
 }
 
 func TestAppVisualizerPanelCyclesRegisteredVisualizations(t *testing.T) {
+	// Walks whatever is registered rather than naming each one, so
+	// registering a new visualization doesn't fail this test.
 	a := newTestApp()
 	if got := a.visualizer.current().Name(); got != "Equalizer" {
 		t.Fatalf("initial visualization = %q, want %q", got, "Equalizer")
 	}
-	a.visualizer.next()
-	if got := a.visualizer.current().Name(); got != "Cliamp" {
-		t.Errorf("after next() = %q, want %q", got, "Cliamp")
+
+	seen := make(map[string]bool)
+	for i := range a.visualizer.vizs {
+		name := a.visualizer.current().Name()
+		if seen[name] {
+			t.Fatalf("visualization %q repeated at position %d before every one had been shown", name, i)
+		}
+		seen[name] = true
+		a.visualizer.next()
 	}
-	a.visualizer.next()
+	if len(seen) != len(a.visualizer.vizs) {
+		t.Errorf("cycled through %d distinct visualizations, want %d", len(seen), len(a.visualizer.vizs))
+	}
 	if got := a.visualizer.current().Name(); got != "Equalizer" {
-		t.Errorf("after wrapping next() = %q, want %q", got, "Equalizer")
+		t.Errorf("after a full cycle = %q, want it to wrap back to %q", got, "Equalizer")
 	}
 }
 
@@ -138,10 +148,14 @@ func TestVKeyCyclesVisualizerPanel(t *testing.T) {
 	if got := a.visualizer.current().Name(); got != "Cliamp" {
 		t.Errorf("after 'v' visualization = %q, want %q", got, "Cliamp")
 	}
-	if result := a.globalInputCapture(vKey); result != nil {
-		t.Errorf("'v' should be consumed by the visualizer cycle, got %v", result)
+
+	// One 'v' per remaining visualization brings it back around.
+	for i := 1; i < len(a.visualizer.vizs); i++ {
+		if result := a.globalInputCapture(vKey); result != nil {
+			t.Errorf("'v' should be consumed by the visualizer cycle, got %v", result)
+		}
 	}
 	if got := a.visualizer.current().Name(); got != "Equalizer" {
-		t.Errorf("after second 'v' visualization = %q, want %q", got, "Equalizer")
+		t.Errorf("after a full cycle of 'v' = %q, want %q", got, "Equalizer")
 	}
 }

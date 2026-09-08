@@ -206,3 +206,32 @@ func expandHome(path string) string {
 	}
 	return filepath.Join(home, path[2:])
 }
+
+// DefaultVisualizerFIFO is the path LoadVisualizerFIFO falls back to
+// when visualizer_fifo isn't configured -- the path used by essentially
+// every MPD fifo-visualizer setup, including ncmpcpp's own documented
+// example, so the common case needs no configuration at all.
+const DefaultVisualizerFIFO = "/tmp/mpd.fifo"
+
+// LoadVisualizerFIFO reads visualizer_fifo from ConfigFile -- the named
+// pipe MPD's "fifo" audio output writes decoded PCM to, which is the
+// only source of real audio data available to an MPD client (see
+// internal/audio's package comment). Returns DefaultVisualizerFIFO when
+// the key isn't set, and "" when it's set to an empty value or the word
+// "off", which is how a user turns the feature off outright.
+//
+// Unlike LoadMusicDir, the path isn't checked for existence here: the
+// fifo is created by MPD, so it can legitimately appear after mpdtui
+// starts (MPD restarted, output enabled later), and internal/audio's
+// reader retries on its own. A path that never appears just means the
+// visualizations keep using their simulated fallback.
+func LoadVisualizerFIFO() string {
+	value, ok := loadConfigValues()["visualizer_fifo"]
+	if !ok {
+		return DefaultVisualizerFIFO
+	}
+	if value == "" || value == "off" {
+		return ""
+	}
+	return expandHome(value)
+}

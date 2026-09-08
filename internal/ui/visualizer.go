@@ -6,6 +6,8 @@ import (
 
 	"github.com/rivo/tview"
 
+	"mpdtui/internal/audio"
+	"mpdtui/internal/config"
 	"mpdtui/internal/mpdclient"
 )
 
@@ -31,13 +33,24 @@ import (
 // Render must degrade gracefully at any width, including very narrow
 // terminals.
 //
-// Data available: MPD does not expose real audio data to clients (no
-// spectrum/FFT/waveform feed) -- there is no "microphone into the music"
-// here. Every visualization is driven purely by playback state
-// (mpdclient.Status: State/Volume/Elapsed/Duration/...) plus real elapsed
-// wall-clock time, the same status already polled every ~500ms for the
-// Now Playing bar. Don't design a visualization that assumes audio-
-// reactive data it can't actually get.
+// Data available: two sources, and a visualization should use both.
+//
+// The first is playback state -- mpdclient.Status (State/Volume/Elapsed/
+// Duration/...) plus real elapsed wall-clock time. This is always
+// available. Note that redraws are driven by app.go's 40ms animTicker
+// while playing (plus the ~500ms status poll and every player/mixer/
+// options event), so there's frame budget for genuinely animated work.
+//
+// The second is real audio: MPD's *client protocol* exposes none, but
+// MPD's "fifo" audio output writes decoded PCM to a named pipe that
+// internal/audio reads and reduces to frequency bands. That feed is
+// optional -- it needs an audio_output block in the user's mpd.conf, and
+// it only exists while something is playing -- so it is reached through
+// the panel's shared *audio.Spectrum, injected into each visualization
+// at construction. Every visualization must therefore handle Bands
+// returning nil (no fifo configured, MPD not running, nothing playing)
+// by falling back to something drawn from playback state alone; see
+// viz_equalizer.go for the pattern.
 type Visualization interface {
 	// Name is shown right-aligned in the visualizer panel's border title
 	// while this visualization is the active one.
@@ -65,21 +78,30 @@ type visualizerPanel struct {
 	vizs    []Visualization
 	idx     int
 	started time.Time
+	// spectrum is the shared live-audio feed, owned by the panel and
+	// handed to every visualization that wants it. Always non-nil; it
+	// simply reports itself inactive when there's no fifo to read.
+	spectrum *audio.Spectrum
 }
 
 func newVisualizerPanel(app *App) *visualizerPanel {
 	v := tview.NewTextView().SetDynamicColors(true)
 	v.SetBorder(true).SetTitleAlign(tview.AlignRight)
 
+	spectrum := audio.NewSpectrum(config.LoadVisualizerFIFO())
+	spectrum.Start()
+
 	p := &visualizerPanel{
-		app:     app,
-		view:    v,
-		started: time.Now(),
+		app:      app,
+		view:     v,
+		started:  time.Now(),
+		spectrum: spectrum,
 		// New visualizations are registered here, in the order 'v'
 		// cycles through them.
 		vizs: []Visualization{
-			equalizerVisualization{},
-			newCliampVisualization(),
+			newEqualizerVisualization(spectrum),
+			newCliampVisualization(spectrum),
+			newBalanceVisualization(spectrum),
 		},
 	}
 	p.view.SetTitle(" " + p.current().Name() + " ")
@@ -111,4 +133,14 @@ func (p *visualizerPanel) tick(st mpdclient.Status) {
 	}
 	lines := p.current().Render(w, h, time.Since(p.started), st)
 	p.view.SetText(strings.Join(lines, "\n"))
+}
+
+// close releases the panel's audio feed, stopping its reader goroutine.
+// Called from App.Run's shutdown path; safe on a panel built without one
+// (the test helpers do that).
+func (p *visualizerPanel) close() {
+	if p == nil {
+		return
+	}
+	p.spectrum.Close()
 }

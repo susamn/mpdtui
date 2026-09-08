@@ -35,6 +35,18 @@ theme_file = ./colors.toml
 # Local play-count/rating/mark/tags tracking, in a SQLite database next
 # to this file. Off by default.
 # track_metadata = true
+
+# Named pipe MPD's "fifo" audio output writes decoded PCM to, which is
+# what makes the Now Playing visualizations respond to the actual music
+# instead of animating a simulation. Defaults to /tmp/mpd.fifo; set it
+# to "off" to never read one. Requires this in your mpd.conf:
+#   audio_output {
+#       type   "fifo"
+#       name   "Visualizer feed"
+#       path   "/tmp/mpd.fifo"
+#       format "44100:16:2"
+#   }
+# visualizer_fifo = /tmp/mpd.fifo
 `
 
 // EnsureConfigFiles makes sure mpdtui's own settings file (ConfigFile)
