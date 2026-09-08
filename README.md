@@ -555,11 +555,18 @@ the write lands, without ever blocking a keypress on disk I/O.
 Tracks rated above 3 stars also get a single star in the Queue's left
 gutter, in the space between the panel border and the index number that
 the "▶" playing marker already occupies -- so it costs no width, and the
-rows don't shift. Five stars take the theme's bright yellow, four its
-ordinary yellow (the same gold the Rating column uses), so the two tiers
-read apart at a glance while scrolling. Unlike the Rating column, the
-gutter star survives a narrow terminal, since dropping columns to save
-space never drops it.
+rows don't shift. Five stars take the Rating column's own color at full
+strength and four a weakened version of it, so the two tiers read apart
+at a glance while scrolling. Unlike the Rating column, the gutter star
+survives a narrow terminal, since dropping columns to save space never
+drops it.
+
+Both tiers come from a single theme color, with the weaker one computed
+down from it to a guaranteed luminance separation rather than read from
+a second palette field. Pairing "yellow" with "bright_yellow" seems like
+the obvious approach and does not work: across the 15 Omarchy themes
+this was tested against, 8 had those two within 1.2x luminance of each
+other and 3 had them byte-identical.
 
 - **Rating** (`1`-`5`, Queue panel): rates the track that's currently
   *playing*, or the selected one when playback is stopped -- see

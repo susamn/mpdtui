@@ -238,8 +238,8 @@ const helpText = `[::b]Global[-:-:-]
                  jump to Library/Playlists from inside Queue --
                  Tab/Backtab still cycle panels regardless of focus.
                  Anything rated above 3 stars also gets a star in the
-                 left gutter, next to the play marker: bright for 5,
-                 gold for 4
+                 left gutter, next to the play marker: full color for
+                 5, dimmer for 4
   m              mark the selected track with a reason (or clear an
                  existing mark), from a small popup: j/k/g/G to
                  navigate, Enter to apply, Esc to cancel -- transport

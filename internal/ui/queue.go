@@ -668,16 +668,25 @@ func ratingCell(rating int) *tview.TableCell {
 const queueGutterStarMin = 4
 
 // queueStarTopColor and queueStarHighColor tint the gutter star by
-// rating: the theme's bright yellow for 5 stars and its ordinary yellow
-// for 4, so the two tiers are told apart by shade rather than by a
-// second glyph. Same hue family as the Rating column's own stars
-// (queueRatingColor), so the gutter reads as a condensed version of that
-// column rather than an unrelated marker. Theme-derived (deriveColors),
-// see theme.go.
+// rating: 5 stars get the Rating column's own color at full strength, 4
+// stars a weakened version of that same color, so the tiers are told
+// apart by shade rather than by a second glyph and the gutter reads as a
+// condensed version of that column.
+//
+// Both are derived from one palette field (see theme.go's recedeFrom),
+// deliberately: the first version of this used the theme's "yellow" and
+// "bright_yellow" for the two tiers, and on most real themes those are
+// the same color or near enough that the tiers were indistinguishable.
+// queueStarMinRatio is the luminance separation the weaker tier is
+// guaranteed to reach -- comfortably past the ~1.2x where two shades
+// stop being tellable apart at the size of a single glyph.
+// Theme-derived (deriveColors), see theme.go.
 var (
 	queueStarTopColor  tcell.Color
 	queueStarHighColor tcell.Color
 )
+
+const queueStarMinRatio = 1.8
 
 func queueStarColor(rating int) tcell.Color {
 	if rating >= 5 {

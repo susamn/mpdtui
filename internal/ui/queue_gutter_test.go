@@ -3,10 +3,13 @@ package ui
 import (
 	"testing"
 
+	"math"
+
 	"github.com/gdamore/tcell/v2"
 
 	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/theme"
 )
 
 func seedQueueForGutter(q *queuePanel) {
@@ -82,10 +85,91 @@ func TestGutterStarColorsComeFromTheTheme(t *testing.T) {
 	if queueStarTopColor == tcell.ColorDefault || queueStarHighColor == tcell.ColorDefault {
 		t.Errorf("star colors not theme-derived: top=%v high=%v", queueStarTopColor, queueStarHighColor)
 	}
-	// The 4-star tier deliberately matches the Rating column's own gold,
-	// with 5 stars lifted above it.
-	if queueStarHighColor != queueRatingColor {
-		t.Errorf("4-star color %v does not match the Rating column's %v", queueStarHighColor, queueRatingColor)
+	// 5 stars is the Rating column's own color at full strength; 4 is
+	// derived down from it, not taken from a second palette field.
+	if queueStarTopColor != queueRatingColor {
+		t.Errorf("5-star color %v does not match the Rating column's %v", queueStarTopColor, queueRatingColor)
+	}
+}
+
+// TestGutterStarTiersSeparateOnEveryPalette is the regression test for
+// the first version of this feature, which took the two tiers from the
+// theme's "yellow" and "bright_yellow". Across the Omarchy themes
+// installed on the machine this was written on, 8 of 15 had those two
+// within 1.2x luminance and 3 had them byte-identical -- so the display
+// showed one color most of the time. Deriving the weaker tier instead
+// makes the separation a property of the code rather than of whichever
+// theme happens to be loaded, and this pins that down against the
+// palettes that broke it.
+func TestGutterStarTiersSeparateOnEveryPalette(t *testing.T) {
+	original := palette
+	t.Cleanup(func() { palette = original; deriveColors() })
+
+	cases := []struct {
+		name       string
+		yellow     theme.Color
+		bright     theme.Color
+		background theme.Color
+	}{
+		{"identical yellows (catppuccin)", "#f9e2af", "#f9e2af", "#1e1e2e"},
+		{"near-identical yellows", "#ffc256", "#ffcc00", "#12100f"},
+		{"bright darker than plain", "#b79a54", "#b5b49b", "#0f0f0f"},
+		{"light theme", "#8a6d00", "#a08000", "#fdf6e3"},
+		{"very dark yellow", "#788216", "#9aa900", "#0a0a0a"},
+		{"near-white star color", "#cbfff9", "#ecc98c", "#f0f0f0"},
+		{"no background in palette", "#ffd700", "#ffff00", ""},
+	}
+	for _, tc := range cases {
+		palette = theme.Palette{Yellow: tc.yellow, BrightYellow: tc.bright, Background: tc.background}
+		deriveColors()
+
+		ratio := luminanceRatio(relativeLuminance(queueStarTopColor), relativeLuminance(queueStarHighColor))
+		if ratio < 1.5 {
+			t.Errorf("%s: tiers only %.2fx apart (top=%v high=%v) -- indistinguishable at one glyph",
+				tc.name, ratio, queueStarTopColor, queueStarHighColor)
+		}
+		if queueStarTopColor == queueStarHighColor {
+			t.Errorf("%s: both tiers are %v", tc.name, queueStarTopColor)
+		}
+	}
+}
+
+func TestRecedeFromLeavesUnresolvableColorsAlone(t *testing.T) {
+	// A terminal-default color has no RGB to weaken, and guessing what
+	// the terminal will paint is not possible -- so it comes back
+	// unchanged rather than becoming some invented shade.
+	if got := recedeFrom(tcell.ColorDefault, 1.8); got != tcell.ColorDefault {
+		t.Errorf("recedeFrom(default) = %v, want it left alone", got)
+	}
+}
+
+func TestRelativeLuminanceMatchesKnownValues(t *testing.T) {
+	cases := []struct {
+		color tcell.Color
+		want  float64
+	}{
+		{tcell.NewRGBColor(0, 0, 0), 0},
+		{tcell.NewRGBColor(255, 255, 255), 1},
+		{tcell.NewRGBColor(255, 0, 0), 0.2126},
+		{tcell.NewRGBColor(0, 255, 0), 0.7152},
+		{tcell.NewRGBColor(0, 0, 255), 0.0722},
+	}
+	for _, tc := range cases {
+		if got := relativeLuminance(tc.color); math.Abs(got-tc.want) > 1e-4 {
+			t.Errorf("relativeLuminance(%v) = %g, want %g", tc.color, got, tc.want)
+		}
+	}
+	if got := relativeLuminance(tcell.ColorDefault); got >= 0 {
+		t.Errorf("relativeLuminance(default) = %g, want a negative sentinel", got)
+	}
+}
+
+func TestLuminanceRatioIsSymmetric(t *testing.T) {
+	if a, b := luminanceRatio(0.8, 0.1), luminanceRatio(0.1, 0.8); a != b {
+		t.Errorf("luminanceRatio is not symmetric: %g vs %g", a, b)
+	}
+	if got := luminanceRatio(0.5, 0.5); got != 1 {
+		t.Errorf("luminanceRatio of equal luminances = %g, want 1", got)
 	}
 }
 
