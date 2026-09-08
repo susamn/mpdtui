@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"mpdtui/internal/audio"
 	"mpdtui/internal/mpdclient"
 )
 
@@ -14,25 +15,34 @@ import (
 // with discrete multi-band frequency bars, vibrant color gradients, and falling
 // peak caps.
 //
-// Like the Equalizer visualization, this is driven purely by MPD playback status
-// (State and Volume) and real wall-clock elapsed time. The spectrum dynamically
-// simulates frequency band characteristics:
-//   - Bass / Sub-bass (left): punchy kick-drum tempo pulses and heavy resonance
-//   - Mids (center): melodic harmonic oscillations and syncopated movements
-//   - Treble / Highs (right): rapid transient shimmer and high-frequency flutter
+// Like the Equalizer visualization, it has two sources for those bars:
+//
+//   - Real spectrum: when MPD's fifo output is feeding internal/audio (see
+//     Visualization's doc comment in visualizer.go), each bar is one
+//     logarithmically spaced band of the actual decoded audio -- so bass really
+//     is on the left, treble really is on the right, and the bars are the music.
+//   - Fallback: with no live audio, cliampBandLevel simulates that same layout
+//     from playback state and elapsed time alone -- kick-tempo pulses at the
+//     bass end, harmonic movement through the mids, fast flutter in the treble.
+//     Decorative, but shaped like the real thing so the panel reads the same way
+//     for a setup without the fifo configured.
 //
 // Each frequency bar tracks its highest recent position with a floating peak cap
 // (Unicode upper-eighth block '▔') that holds momentarily before descending under
-// simulated gravity.
+// simulated gravity. That runs identically on top of either source.
 type cliampVisualization struct {
+	// spectrum may be nil (tests construct it that way), which behaves
+	// exactly like a feed that is never active: the simulation is used.
+	spectrum *audio.Spectrum
+
 	mu        sync.Mutex
 	peaks     []float64
 	peakTimes []time.Duration
 	lastTime  time.Duration
 }
 
-func newCliampVisualization() *cliampVisualization {
-	return &cliampVisualization{}
+func newCliampVisualization(spectrum *audio.Spectrum) *cliampVisualization {
+	return &cliampVisualization{spectrum: spectrum}
 }
 
 func (c *cliampVisualization) Name() string {
@@ -102,12 +112,22 @@ func (c *cliampVisualization) Render(width, height int, elapsed time.Duration, s
 	isPlaying := st.State == mpdclient.StatePlay
 	t := elapsed.Seconds()
 
+	// One band per bar from the live feed; nil when there's no audio to
+	// read, which drops through to the simulation below.
+	var bands []float64
+	if isPlaying {
+		bands = c.spectrum.Bands(numBars)
+	}
+
 	for b := 0; b < numBars; b++ {
 		var targetLevel float64
-		if isPlaying && volumeScale > 0 {
-			targetLevel = cliampBandLevel(t, b, numBars, volumeScale, maxLevelF)
-		} else {
+		switch {
+		case !isPlaying || volumeScale <= 0:
 			targetLevel = 0
+		case bands != nil:
+			targetLevel = bands[b] * volumeScale * maxLevelF
+		default:
+			targetLevel = cliampBandLevel(t, b, numBars, volumeScale, maxLevelF)
 		}
 
 		// Peak hold and gravity decay
@@ -214,7 +234,8 @@ func (c *cliampVisualization) Render(width, height int, elapsed time.Duration, s
 }
 
 // cliampBandLevel computes the simulated frequency energy for band index `b` out
-// of `numBars` at time `t`, scaled by `volumeScale` (0..1) and `maxLevel`.
+// of `numBars` at time `t`, scaled by `volumeScale` (0..1) and `maxLevel`. This
+// is the fallback path only -- it runs when there is no live audio to draw from.
 func cliampBandLevel(t float64, b, numBars int, volumeScale, maxLevel float64) float64 {
 	// Normalized frequency position: 0.0 (sub-bass) to 1.0 (highest treble)
 	var f float64

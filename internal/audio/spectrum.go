@@ -48,8 +48,13 @@ const (
 	minHz = 40    // below this is mostly rumble at terminal-sized resolution
 	maxHz = 16000 // above this there's rarely enough energy to see
 
-	floorDB = -68 // maps to an empty bar
-	ceilDB  = -12 // maps to a full bar
+	// The window is fixed rather than auto-gained: a quiet track should
+	// look quieter than a loud one, which an AGC would flatten away.
+	// These values were set against real playback -- a loud, heavily
+	// compressed mix should sit in the upper-middle of the range with
+	// headroom left, not pinned to the top.
+	floorDB = -62 // maps to an empty bar
+	ceilDB  = -6  // maps to a full bar
 
 	// tiltDBPerOctave lifts the high end. Recorded music has a natural
 	// downward spectral slope, so without a tilt the treble bars barely
