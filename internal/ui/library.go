@@ -734,7 +734,7 @@ func folderLabel(path string, expanded bool) string {
 	if expanded {
 		icon = folderOpenIcon
 	}
-	return icon + " " + baseName(path)
+	return icon + " " + splitConjuncts(baseName(path))
 }
 
 // setDirExpanded expands or collapses a directory node, keeping its
@@ -752,5 +752,5 @@ func baseName(path string) string {
 }
 
 func trackLabel(s mpdclient.Song) string {
-	return fmt.Sprintf("%s  [%s]", s.DisplayName(), FormatDuration(s.Duration))
+	return fmt.Sprintf("%s  [%s]", splitConjuncts(s.DisplayName()), FormatDuration(s.Duration))
 }
