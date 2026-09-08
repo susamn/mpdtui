@@ -31,6 +31,14 @@ type trackInfoCard struct {
 	// present, unlike meta: it needs no local database, only the playlist
 	// scan the Playlists panel already runs (see App.playlistMembership).
 	playlists *tview.TextView
+
+	// expanded is the card-wide collapsed/expanded state, toggled with
+	// Tab while the card is open (see toggleExpanded). One flag for the
+	// whole card rather than one per section, deliberately: Tab means
+	// "show me everything", and a section that starts summarising later
+	// only has to read this flag to join in. The playlist list is
+	// currently the only thing it affects.
+	expanded bool
 	// meta is nil when metaDB is inactive -- decided once at construction
 	// (mirrors settingsView.databaseInteractive), never rechecked, since
 	// App.metaDB's nil-ness never changes after Run constructs App. render
@@ -39,7 +47,13 @@ type trackInfoCard struct {
 	// feature entry point the way Settings' Database tab is, so there's no
 	// "here's how to enable it" call to action needed here.
 	meta *tview.Table
-	app  *App
+
+	// playlistRows is how many card rows the playlist section currently
+	// occupies, kept so height() can report the card's real size after
+	// the section has grown or shrunk (see setPlaylistSection).
+	playlistRows int
+
+	app *App
 }
 
 func newTrackInfoCard(app *App) *trackInfoCard {
@@ -71,20 +85,59 @@ func newTrackInfoCard(app *App) *trackInfoCard {
 		flex.AddItem(meta, trackInfoMetaLines, 0, false)
 	}
 	flex.AddItem(playlists, trackInfoPlaylistSectionLines, 0, false)
+	c.playlistRows = trackInfoPlaylistSectionLines
 	return c
 }
 
 // height is the card's natural height: its border plus whichever
-// sections it actually has. Computed rather than fixed because the
-// metadata table is only present when track_metadata is active, and a
-// card sized for it regardless would sit with a hole in the middle for
-// everyone who has not turned that on.
+// sections it actually has, at their current sizes. Computed rather than
+// fixed because the metadata table is only present when track_metadata
+// is active (a card sized for it regardless would sit with a hole in the
+// middle for everyone who has not turned that on), and because the
+// playlist section grows when the card is expanded.
 func (c *trackInfoCard) height() int {
+	h := trackInfoCardBorderLines + trackInfoIdentityLines + c.playlistRows
+	if c.meta != nil {
+		h += trackInfoMetaLines
+	}
+	return h
+}
+
+// fixedHeight is the card's height with every section at its collapsed
+// size -- what the card occupies before Tab is ever pressed, and the
+// baseline expandableRows measures spare quadrant space against.
+func (c *trackInfoCard) fixedHeight() int {
 	h := trackInfoCardBorderLines + trackInfoIdentityLines + trackInfoPlaylistSectionLines
 	if c.meta != nil {
 		h += trackInfoMetaLines
 	}
 	return h
+}
+
+// toggleExpanded is Tab while the card is open: flips every collapsible
+// section between its summary and its full contents, then re-renders so
+// the card resizes to match.
+func (c *trackInfoCard) toggleExpanded() {
+	c.expanded = !c.expanded
+	c.app.renderTrackInfo()
+}
+
+// expandableRows is how many extra rows a section may grow into when
+// expanded: whatever the Queue panel has spare beyond the card's
+// collapsed size, since an expanded card may grow upwards into the rest
+// of the panel (see cardRect).
+//
+// Expanding is bounded rather than unbounded because the card is clamped
+// to the panel -- growing past it would not show more, it would silently
+// clip the bottom of the list, which is a worse answer than saying how
+// many were left out.
+func (c *trackInfoCard) expandableRows() int {
+	_, _, _, ph := c.app.queue.table.GetRect()
+	spare := ph - c.fixedHeight()
+	if spare < 0 {
+		return 0
+	}
+	return spare
 }
 
 // quadrantRect returns the bottom-right quarter of the rect (x, y, w, h):
@@ -132,24 +185,45 @@ const (
 	trackInfoPlaylistLines = 4
 )
 
-// cardRect returns where the floating card sits within its target
-// quadrant (x, y, w, h): anchored at the quadrant's own top-left corner,
-// sized to trackInfoCardWidth x want -- clamped down to the quadrant's
-// own size if that's smaller (a small enough terminal), so the card
-// never overflows past the quadrant it's meant to float inside of.
+// cardRect returns where the floating card sits over the Queue panel
+// (px, py, pw, ph) for a card wanting want rows.
 //
-// The anchor is the top-left corner specifically, which is why making
-// the card taller does not move it: the extra rows extend downwards
-// towards the Queue panel's bottom edge, and the clamp stops them there.
-func cardRect(x, y, w, h, want int) (int, int, int, int) {
-	cw, ch := trackInfoCardWidth, want
-	if cw > w {
-		cw = w
+// Up to the bottom-right quadrant's own height the card sits at that
+// quadrant's top-left corner, which is what keeps its position fixed as
+// sections are added: the extra rows extend downwards towards the
+// panel's bottom edge.
+//
+// Past that height -- only reachable by expanding a section with Tab --
+// the quadrant has no more room below, so the card keeps its bottom edge
+// where it is and grows upwards instead, bounded by the panel's own top.
+// Clamping it to the quadrant instead would make expanding almost
+// pointless: on an ordinary terminal the collapsed card already nearly
+// fills the quadrant, so Tab would buy a row or two. Growing upwards
+// keeps the card in the same corner, covering more of the Queue it
+// already floats over.
+func cardRect(px, py, pw, ph, want int) (int, int, int, int) {
+	qx, qy, qw, qh := quadrantRect(px, py, pw, ph)
+
+	cw := trackInfoCardWidth
+	if cw > qw {
+		cw = qw
 	}
-	if ch > h {
-		ch = h
+	ch := want
+	if ch > ph {
+		ch = ph
 	}
-	return x, y, cw, ch
+	if ch < 0 {
+		ch = 0
+	}
+
+	cy := qy
+	if ch > qh {
+		cy = qy + qh - ch
+		if cy < py {
+			cy = py
+		}
+	}
+	return qx, cy, cw, ch
 }
 
 // positionOverQueue sets the card's own rect to float inside the
@@ -157,8 +231,7 @@ func cardRect(x, y, w, h, want int) (int, int, int, int) {
 // Draw so the positioning math is testable without a real tcell.Screen.
 func (c *trackInfoCard) positionOverQueue() {
 	x, y, w, h := c.app.queue.table.GetRect()
-	qx, qy, qw, qh := quadrantRect(x, y, w, h)
-	c.SetRect(cardRect(qx, qy, qw, qh, c.height()))
+	c.SetRect(cardRect(x, y, w, h, c.height()))
 }
 
 // Draw positions the card over the bottom-right quadrant of the Queue
@@ -190,8 +263,12 @@ func (a *App) renderTrackInfo() {
 		a.trackInfo.render(mpdclient.Song{}, mpdclient.Status{})
 		return
 	}
+	// The live decoder's numbers belong to the loaded track and no
+	// other, so they are passed through only when the card is actually
+	// showing that track -- which, while paused, it does whenever the
+	// cursor happens to be sitting on it.
 	st := mpdclient.Status{}
-	if a.hasLivePlayback() {
+	if a.hasLoadedTrack() && song.File == a.currentSong.File {
 		st = a.currentStatus
 	}
 	a.trackInfo.render(song, st)
@@ -208,7 +285,7 @@ func (a *App) renderTrackInfo() {
 func (c *trackInfoCard) render(song mpdclient.Song, st mpdclient.Status) {
 	if song.DisplayName() == "" {
 		c.identity.SetText("[::d]Nothing playing[-:-:-]")
-		c.playlists.SetText("")
+		c.setPlaylistSection("", trackInfoPlaylistSectionLines)
 		if c.meta != nil {
 			c.meta.Clear()
 		}
@@ -234,15 +311,38 @@ func (c *trackInfoCard) render(song mpdclient.Song, st mpdclient.Status) {
 	lines = append(lines, fmt.Sprintf("🎚️ %s", FormatAudioQuality(st.Bitrate, st.AudioFormat)))
 	c.identity.SetText(strings.Join(lines, "\n"))
 
-	c.playlists.SetText(playlistsSectionText(c.app.playlistMembership, song.File))
+	c.renderPlaylists(song.File)
 
 	if c.meta != nil {
 		c.renderMeta(song.File)
 	}
 }
 
-// playlistsSectionText renders the "In playlists" section for file from
-// membership (App.playlistMembership).
+// renderPlaylists fills the playlist section for file and resizes it to
+// the number of rows it actually needs, so the card grows and shrinks
+// with the list rather than reserving its expanded size permanently.
+func (c *trackInfoCard) renderPlaylists(file string) {
+	max := trackInfoPlaylistLines
+	if c.expanded {
+		max += c.expandableRows()
+	}
+	text, rows := playlistsSection(c.app.playlistMembership, file, max)
+	c.setPlaylistSection(text, rows)
+}
+
+// setPlaylistSection applies the section's text and its row count in one
+// place, so the Flex item's size can never disagree with what was
+// actually written into it.
+func (c *trackInfoCard) setPlaylistSection(text string, rows int) {
+	c.playlistRows = rows
+	c.playlists.SetText(text)
+	c.ResizeItem(c.playlists, rows, 0)
+}
+
+// playlistsSection renders the "In playlists" section for file from
+// membership (App.playlistMembership), listing at most max names and
+// summarising any remainder. Returns the text and the number of card
+// rows it occupies (its padding row included).
 //
 // A nil membership map means the background scan has not landed yet,
 // which is deliberately not the same answer as "this track is in no
@@ -251,21 +351,25 @@ func (c *trackInfoCard) render(song mpdclient.Song, st mpdclient.Status) {
 // apart from the truth. Names are split for display the same way every
 // other MPD-provided string is (see conjuncts.go): this card floats over
 // the Queue, so a name that mis-measures corrupts the rows behind it.
-func playlistsSectionText(membership map[string][]string, file string) string {
+func playlistsSection(membership map[string][]string, file string, max int) (string, int) {
+	const padding = 1 // the section's own top padding row
 	heading := "[::b]📃 In playlists[-:-:-]"
 	if membership == nil {
-		return heading + "\n[::d]  loading…[-:-:-]"
+		return heading + "\n[::d]  loading…[-:-:-]", padding + 2
 	}
 	names := membership[file]
 	if len(names) == 0 {
-		return heading + "\n[::d]  none[-:-:-]"
+		return heading + "\n[::d]  none[-:-:-]", padding + 2
+	}
+	if max < 1 {
+		max = 1
 	}
 
 	shown := names
 	var extra int
-	if len(shown) > trackInfoPlaylistLines {
-		extra = len(shown) - trackInfoPlaylistLines
-		shown = shown[:trackInfoPlaylistLines]
+	if len(shown) > max {
+		extra = len(shown) - max
+		shown = shown[:max]
 	}
 
 	lines := make([]string, 0, len(shown)+2)
@@ -274,9 +378,9 @@ func playlistsSectionText(membership map[string][]string, file string) string {
 		lines = append(lines, "  • "+splitConjuncts(truncateWithEllipsis(n, trackInfoPlaylistNameMaxLen)))
 	}
 	if extra > 0 {
-		lines = append(lines, fmt.Sprintf("[::d]  +%d more[-:-:-]", extra))
+		lines = append(lines, fmt.Sprintf("[::d]  +%d more (Tab)[-:-:-]", extra))
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, "\n"), padding + len(lines)
 }
 
 // trackInfoPlaylistNameMaxLen caps a listed playlist name so a long one
