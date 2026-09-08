@@ -503,16 +503,12 @@ func (q *queuePanel) render(curID int) {
 
 	for i, s := range q.songs {
 		row := i + queueHeaderRows
-		marker := "  "
-		if s.ID == curID {
-			marker = "▶ "
-		}
 		title := s.Title
 		if title == "" {
 			title = baseName(s.File)
 		}
 		titleText := truncateWithEllipsis(title, titleMaxLen)
-		q.table.SetCell(row, 0, tview.NewTableCell(marker))
+		q.table.SetCell(row, 0, queueGutterCell(s.ID == curID, q.metaCache[s.File].Rating))
 		q.table.SetCell(row, 1, tview.NewTableCell(fmt.Sprintf("%3d", i+1)))
 		q.table.SetCell(row, cols.title, tview.NewTableCell(titleText+queueColumnGap).
 			SetAttributes(tcell.AttrBold).
@@ -620,14 +616,15 @@ func (q *queuePanel) refreshTrackMeta(seq int) {
 // once (same track added twice) updates every matching row.
 func (q *queuePanel) applyTrackMeta(file string, t metadata.Track) {
 	q.metaCache[file] = t
-	if q.cols.playcount < 0 && q.cols.mark < 0 && q.cols.rating < 0 {
-		return
-	}
 	for i, s := range q.songs {
 		if s.File != file {
 			continue
 		}
 		row := i + queueHeaderRows
+		// The gutter star is repainted unconditionally: unlike the
+		// metadata columns it survives every layout, so a narrow
+		// terminal that has dropped the Rating column still shows it.
+		q.table.SetCell(row, 0, queueGutterCell(s.ID == q.currentID, t.Rating))
 		if q.cols.playcount >= 0 {
 			q.table.SetCell(row, q.cols.playcount, playCountCell(t.PlayCount))
 		}
@@ -663,6 +660,58 @@ func ratingCell(rating int) *tview.TableCell {
 		SetTextColor(queueRatingColor).
 		SetAlign(tview.AlignRight)
 }
+
+// queueGutterStarMin is the lowest rating that earns a gutter star.
+// "More than 3 stars" -- so 4 and 5, the two tiers worth spotting while
+// scrolling; 3 is a middling rating and starring it would leave most of
+// a rated library flagged, which flags nothing.
+const queueGutterStarMin = 4
+
+// queueStarTopColor and queueStarHighColor tint the gutter star by
+// rating: the theme's bright yellow for 5 stars and its ordinary yellow
+// for 4, so the two tiers are told apart by shade rather than by a
+// second glyph. Same hue family as the Rating column's own stars
+// (queueRatingColor), so the gutter reads as a condensed version of that
+// column rather than an unrelated marker. Theme-derived (deriveColors),
+// see theme.go.
+var (
+	queueStarTopColor  tcell.Color
+	queueStarHighColor tcell.Color
+)
+
+func queueStarColor(rating int) tcell.Color {
+	if rating >= 5 {
+		return queueStarTopColor
+	}
+	return queueStarHighColor
+}
+
+// queueGutterCell builds a queue row's column 0: the two columns between
+// the panel border and the index number.
+//
+// That space already existed -- it held the "▶ " playing marker and its
+// trailing pad -- so the star goes in the pad rather than widening
+// anything. Position is fixed (marker first, star second) so stars line
+// up vertically down the panel whether or not a row is the playing one.
+//
+// The marker and the star necessarily share a color, since a
+// tview.TableCell carries one text color for the whole cell and
+// splitting this into two columns would cost a separator column of real
+// width. So a starred row's ▶ takes the star's tint; an unstarred row is
+// left at the default color exactly as before.
+func queueGutterCell(playing bool, rating int) *tview.TableCell {
+	marker := " "
+	if playing {
+		marker = queuePlayingMarker
+	}
+	if rating < queueGutterStarMin {
+		return tview.NewTableCell(marker + " ")
+	}
+	return tview.NewTableCell(marker + ratingStarFilled).SetTextColor(queueStarColor(rating))
+}
+
+// queuePlayingMarker flags the currently playing row in the gutter.
+const queuePlayingMarker = "▶"
 
 // queueMarkTick is the glyph shown in the Mark column for a marked
 // track -- a plain colored tick, not an icon/emoji, per explicit
@@ -825,15 +874,13 @@ func formatTagCell(file string) *tview.TableCell {
 func (q *queuePanel) setCurrent(id int) {
 	q.currentID = id
 	for i, s := range q.songs {
-		cell := q.table.GetCell(i+queueHeaderRows, 0)
-		if cell == nil {
+		if q.table.GetCell(i+queueHeaderRows, 0) == nil {
 			continue
 		}
-		if s.ID == id {
-			cell.SetText("▶ ")
-		} else {
-			cell.SetText("  ")
-		}
+		// Rebuilt rather than SetText'd: the gutter also carries the
+		// rating star, so editing just the text here would drop it off
+		// every row each time the playing track changes.
+		q.table.SetCell(i+queueHeaderRows, 0, queueGutterCell(s.ID == id, q.metaCache[s.File].Rating))
 	}
 }
 

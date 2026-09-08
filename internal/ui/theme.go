@@ -118,6 +118,8 @@ func deriveColors() {
 	queueHeaderBg = hexColor(palette.BrightForeground)
 	queueHeaderFg = hexColor(palette.DarkerBackground)
 	queueRatingColor = hexColor(palette.Yellow)
+	queueStarTopColor = hexColor(palette.BrightYellow)
+	queueStarHighColor = hexColor(palette.Yellow)
 	markTickColors = []tcell.Color{
 		hexColor(palette.Red),
 		hexColor(palette.Orange),

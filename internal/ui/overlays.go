@@ -236,7 +236,10 @@ const helpText = `[::b]Global[-:-:-]
   1-5            rate the selected track (needs track_metadata set in
                  ~/.config/mpdtui/config); as a result, 1/2 no longer
                  jump to Library/Playlists from inside Queue --
-                 Tab/Backtab still cycle panels regardless of focus
+                 Tab/Backtab still cycle panels regardless of focus.
+                 Anything rated above 3 stars also gets a star in the
+                 left gutter, next to the play marker: bright for 5,
+                 gold for 4
   m              mark the selected track with a reason (or clear an
                  existing mark), from a small popup: j/k/g/G to
                  navigate, Enter to apply, Esc to cancel -- transport

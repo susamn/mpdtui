@@ -23,8 +23,16 @@ func (a *App) metadataNotEnabled() {
 
 // ratingStars renders rating (0-5) as filled/empty star glyphs.
 func ratingStars(rating int) string {
-	return strings.Repeat("★", rating) + strings.Repeat("☆", 5-rating)
+	return strings.Repeat(ratingStarFilled, rating) + strings.Repeat(ratingStarEmpty, 5-rating)
 }
+
+// ratingStarFilled and ratingStarEmpty are the rating glyphs, shared so
+// the Queue's gutter star (see queueGutterCell) is literally the same
+// character the Rating column fills in, not a lookalike.
+const (
+	ratingStarFilled = "★"
+	ratingStarEmpty  = "☆"
+)
 
 // handleRateSelectedTrack is '1'-'5', scoped to the Queue panel (see
 // globalInputCapture): rates the currently playing track, falling back

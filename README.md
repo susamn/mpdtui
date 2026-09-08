@@ -552,6 +552,15 @@ happen in the background -- rating or marking a track flashes its
 confirmation immediately, and the relevant column repaints as soon as
 the write lands, without ever blocking a keypress on disk I/O.
 
+Tracks rated above 3 stars also get a single star in the Queue's left
+gutter, in the space between the panel border and the index number that
+the "▶" playing marker already occupies -- so it costs no width, and the
+rows don't shift. Five stars take the theme's bright yellow, four its
+ordinary yellow (the same gold the Rating column uses), so the two tiers
+read apart at a glance while scrolling. Unlike the Rating column, the
+gutter star survives a narrow terminal, since dropping columns to save
+space never drops it.
+
 - **Rating** (`1`-`5`, Queue panel): rates the track that's currently
   *playing*, or the selected one when playback is stopped -- see
   [Which track an action applies to](#which-track-an-action-applies-to).
