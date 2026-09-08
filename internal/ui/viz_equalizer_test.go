@@ -1,10 +1,16 @@
 package ui
 
 import (
+	"encoding/binary"
+	"math"
+	"os"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
+	"mpdtui/internal/audio"
 	"mpdtui/internal/mpdclient"
 )
 
@@ -118,6 +124,133 @@ func TestEqualizerColumnGlyphsFillsBottomRowFirst(t *testing.T) {
 		got := equalizerColumnGlyphs(tc.level, 2)
 		if string(got) != string(tc.want) {
 			t.Errorf("equalizerColumnGlyphs(%d, 2) = %q, want %q", tc.level, string(got), string(tc.want))
+		}
+	}
+}
+
+// startTestSpectrum creates a fifo, keeps a writer on it (the way MPD's
+// own fifo plugin does), and streams a full-scale tone at hz into it,
+// returning a Spectrum that has live audio by the time it returns.
+func startTestSpectrum(t *testing.T, hz float64) *audio.Spectrum {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "mpd.fifo")
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Fatalf("mkfifo: %v", err)
+	}
+	w, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("open fifo for writing: %v", err)
+	}
+	t.Cleanup(func() { w.Close() })
+
+	s := audio.NewSpectrum(path)
+	s.Start()
+	t.Cleanup(s.Close)
+
+	// Keep feeding until the analysis window is full and Bands starts
+	// returning data. The sample counter has to run across writes, not
+	// restart per chunk: a phase discontinuity at every chunk boundary
+	// is a click, and a click is broadband energy that would show up in
+	// every band and defeat the point of the test.
+	pcm := make([]byte, 4096)
+	frames := len(pcm) / 4
+	sample := 0
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for i := 0; i < frames; i++ {
+			v := int16(30000 * math.Sin(2*math.Pi*hz*float64(sample)/audio.SampleRate))
+			binary.LittleEndian.PutUint16(pcm[i*4:], uint16(v))
+			binary.LittleEndian.PutUint16(pcm[i*4+2:], uint16(v))
+			sample++
+		}
+		if _, err := w.Write(pcm); err != nil {
+			t.Fatalf("write pcm: %v", err)
+		}
+		if s.Bands(8) != nil {
+			return s
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("test spectrum never went active")
+	return nil
+}
+
+// filledColumns reports, per column, whether any row of the rendered
+// output has a non-space glyph there -- i.e. which bars are up.
+func filledColumns(lines []string, width int) []bool {
+	filled := make([]bool, width)
+	for _, l := range lines {
+		for x, r := range []rune(l) {
+			if x < width && r != ' ' {
+				filled[x] = true
+			}
+		}
+	}
+	return filled
+}
+
+func TestEqualizerDrawsRealSpectrumWhenAudioIsLive(t *testing.T) {
+	// A 60Hz tone is near the bottom of the analyzed range, so a real
+	// spectrum must put its energy in the leftmost columns and leave the
+	// treble end empty. The simulated fallback spreads a travelling wave
+	// across every column, so this distinguishes the two paths.
+	eq := newEqualizerVisualization(startTestSpectrum(t, 60))
+
+	const width = 40
+	lines := eq.Render(width, 2, 0, mpdclient.Status{State: mpdclient.StatePlay, Volume: 100})
+	filled := filledColumns(lines, width)
+
+	if !filled[0] {
+		t.Errorf("leftmost column empty for a 60Hz tone: %q", lines)
+	}
+	for x := width / 2; x < width; x++ {
+		if filled[x] {
+			t.Errorf("column %d filled for a 60Hz tone -- treble half should be silent: %q", x, lines)
+			break
+		}
+	}
+}
+
+func TestEqualizerFallsBackToSimulationWithoutAudio(t *testing.T) {
+	// No fifo at all (the nil Spectrum a default-constructed
+	// visualization has): the wave animation must still run, so the
+	// panel is never blank for a user without the audio_output block.
+	eq := newEqualizerVisualization(nil)
+	playing := mpdclient.Status{State: mpdclient.StatePlay, Volume: 80}
+
+	at0 := eq.Render(30, 2, 0, playing)
+	at1s := eq.Render(30, 2, time.Second, playing)
+
+	blank := true
+	for _, l := range at0 {
+		if strings.Trim(l, " ") != "" {
+			blank = false
+		}
+	}
+	if blank {
+		t.Error("no output without a spectrum -- expected the simulated fallback")
+	}
+	if at0[0] == at1s[0] && at0[1] == at1s[1] {
+		t.Error("fallback output identical across elapsed times -- expected animation")
+	}
+}
+
+func TestEqualizerRealSpectrumStillScalesWithVolume(t *testing.T) {
+	// MPD's fifo carries the stream at full scale regardless of the
+	// mixer, so the volume scaling has to be applied on top of the real
+	// spectrum or turning the volume down would do nothing visible.
+	s := startTestSpectrum(t, 60)
+	eq := newEqualizerVisualization(s)
+	playing := func(v int) mpdclient.Status {
+		return mpdclient.Status{State: mpdclient.StatePlay, Volume: v}
+	}
+
+	silent := eq.Render(40, 2, 0, playing(0))
+	for i, l := range silent {
+		if strings.Trim(l, " ") != "" {
+			t.Errorf("volume 0: line %d = %q, want all spaces even with live audio", i, l)
 		}
 	}
 }

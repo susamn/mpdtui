@@ -4,20 +4,33 @@ import (
 	"math"
 	"time"
 
+	"mpdtui/internal/audio"
 	"mpdtui/internal/mpdclient"
 )
 
-// equalizerVisualization draws a dense, bar-per-column equalizer that
-// undulates over time -- see Visualization in visualizer.go for the
-// container contract this implements.
+// equalizerVisualization draws a dense, bar-per-column equalizer -- see
+// Visualization in visualizer.go for the container contract this
+// implements.
 //
-// This is decorative, not a real spectrum analyzer: MPD gives clients no
-// audio data to actually analyze (see Visualization's doc comment on data
-// availability), so each bar's height comes from overlapping sine waves
-// phase-shifted per column, not from the music itself. The one genuinely
-// real signal driving it is volume (mpdclient.Status.Volume), which
-// scales how tall bars can get -- turning the volume down visibly calms
-// the whole display, turning it up lets bars reach the top.
+// It has two drawing modes, and which one is live depends entirely on
+// whether real audio is reaching internal/audio.Spectrum:
+//
+//   - Real spectrum (spectrum.Bands returns data): each column is one
+//     logarithmically spaced frequency band of the actual decoded audio,
+//     lowest frequency on the left. This is a genuine spectrum analyzer.
+//   - Fallback (Bands returns nil -- no fifo configured, MPD not
+//     running, or nothing playing): overlapping sine waves phase-shifted
+//     per column, which is decorative motion rather than anything to do
+//     with the music. This is what the visualization always did before
+//     the fifo feed existed, and it stays as the graceful degradation
+//     for a setup without one.
+//
+// Volume (mpdclient.Status.Volume) scales bar height in both modes. That
+// is not redundant in the real-audio mode: MPD's fifo output carries the
+// decoded stream at full scale, before the mixer that MPD's volume
+// setting actually drives, so without this the display would ignore
+// volume entirely -- turning the volume down should visibly calm the
+// display, as it always has.
 //
 // The container's actual height is 2 rows (see Visualization's doc
 // comment on dimensions), which would normally mean only 3 possible bar
@@ -26,7 +39,15 @@ import (
 // within a single cell, giving 8 additional levels per row -- 16 usable
 // levels total out of just 2 rows, filled from the bottom row up (see
 // equalizerColumnGlyphs).
-type equalizerVisualization struct{}
+type equalizerVisualization struct {
+	// spectrum may be nil (tests construct it that way), which is
+	// equivalent to it never being active: the fallback wave is used.
+	spectrum *audio.Spectrum
+}
+
+func newEqualizerVisualization(spectrum *audio.Spectrum) equalizerVisualization {
+	return equalizerVisualization{spectrum: spectrum}
+}
 
 func (equalizerVisualization) Name() string { return "Equalizer" }
 
@@ -44,7 +65,7 @@ const (
 	equalizerSpread = 0.5 // radians/column
 )
 
-func (equalizerVisualization) Render(width, height int, elapsed time.Duration, st mpdclient.Status) []string {
+func (e equalizerVisualization) Render(width, height int, elapsed time.Duration, st mpdclient.Status) []string {
 	lines := make([]string, height)
 	if width <= 0 || height <= 0 {
 		return lines
@@ -63,12 +84,24 @@ func (equalizerVisualization) Render(width, height int, elapsed time.Duration, s
 	}
 	maxLevel := height * 8
 
+	// One band per column when real audio is available; nil otherwise,
+	// which drops through to the simulated wave below.
+	var bands []float64
+	if st.State == mpdclient.StatePlay {
+		bands = e.spectrum.Bands(width)
+	}
+
 	rows := make([][]rune, height)
 	for y := range rows {
 		rows[y] = make([]rune, width)
 	}
 	for x := 0; x < width; x++ {
-		level := equalizerLevel(t, x, volumeScale, maxLevel)
+		var level int
+		if bands != nil {
+			level = int(bands[x] * volumeScale * float64(maxLevel))
+		} else {
+			level = equalizerLevel(t, x, volumeScale, maxLevel)
+		}
 		glyphs := equalizerColumnGlyphs(level, height)
 		for y := 0; y < height; y++ {
 			rows[y][x] = glyphs[y]
@@ -82,8 +115,9 @@ func (equalizerVisualization) Render(width, height int, elapsed time.Duration, s
 }
 
 // equalizerLevel returns column x's bar height in eighth-block units
-// (0..maxLevel) at time t seconds, scaled by volumeScale (0..1). Two sine
-// waves at different speeds/phases per column are summed so neighboring
+// (0..maxLevel) at time t seconds, scaled by volumeScale (0..1). This is
+// the fallback path only -- it runs when there's no live audio to draw
+// from. Two sine waves at different speeds/phases per column are summed so neighboring
 // columns don't pulse in lockstep, giving the appearance of motion
 // travelling across the bars.
 func equalizerLevel(t float64, x int, volumeScale float64, maxLevel int) int {

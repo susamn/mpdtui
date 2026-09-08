@@ -112,9 +112,10 @@ single-line inline player for a shell or tmux pane.
   rating and play count (when `track_metadata` is active) -- updated
   instantly via MPD's `idle` protocol (stays in sync even when
   playback changes from another client, e.g. `mpc`); its right half
-  shows a small playback-driven visualization (`v` to cycle, currently
-  a dancing equalizer scaled by
-  actual volume)
+  shows a small visualization (`v` to cycle) -- a real FFT spectrum
+  analyzer when MPD's `fifo` output is configured (see
+  [Visualizations](#visualizations)), falling back to a playback-driven
+  animation when it isn't
 - **Lightweight inline mode** (`-mini`) — two live status lines (queue/
   playlist counts, then track/progress), no alt-screen takeover, for
   tmux status panes or a quick glance
@@ -190,7 +191,7 @@ never touches either again once they do:
   already pointing at that default file (a relative path resolves
   against `~/.config/mpdtui` itself, whatever `$XDG_CONFIG_HOME` is set
   to; `~/...` and absolute paths both work too), plus commented
-  examples for `music_dir`/`track_metadata`.
+  examples for `music_dir`/`track_metadata`/`visualizer_fifo`.
 
 So out of the box, on any generic Linux system, mpdtui looks exactly
 like it always did -- just now backed by a file you can open and edit
@@ -586,6 +587,48 @@ overlay (`e`, Database tab) -- see [Settings](#settings) below.
 *Renaming* an existing entry still needs the `sqlite3` CLI directly
 against `~/.config/mpdtui/mpdtui.db`; only add/delete are exposed in the
 UI so far.
+
+## Visualizations
+
+The right half of the Now Playing bar draws a visualization; `v` cycles
+through them.
+
+MPD's client protocol carries no audio data at all -- no spectrum, no
+waveform, nothing but playback status -- so a client can't analyze what's
+playing through the connection it already has. MPD the *server* can be
+told to duplicate its decoded output into a named pipe, which is the
+standard way around this (it's what ncmpcpp's visualizer reads too). Add
+this to your `mpd.conf`, alongside your existing `audio_output`, and
+restart MPD:
+
+```
+audio_output {
+    type   "fifo"
+    name   "Visualizer feed"
+    path   "/tmp/mpd.fifo"
+    format "44100:16:2"
+}
+```
+
+That's all the setup there is: `/tmp/mpd.fifo` is mpdtui's default, so it
+picks the feed up on its own. The `format` line has to match what's above
+-- MPD gives no way to discover the pipe's actual format, so mpdtui
+assumes it. Point mpdtui somewhere else with `visualizer_fifo = /some/
+path` in `~/.config/mpdtui/config`, or set `visualizer_fifo = off` to
+never read one.
+
+With the feed live, the visualizations are real spectrum analyzers:
+mpdtui reads the PCM, runs an FFT over a ~46ms window, and maps the
+result onto logarithmically spaced frequency bands, redrawn at 25fps.
+Volume still scales the display -- the fifo carries the stream at full
+scale, before the mixer MPD's volume setting drives, so this is applied
+on top.
+
+Without the feed -- no `audio_output` block, MPD on another machine (a
+named pipe is local-only), or simply nothing playing -- the
+visualizations fall back to an animation driven by playback state alone.
+It looks alive, but it isn't following the music; that's the tell that
+the fifo isn't being read.
 
 ## Settings
 

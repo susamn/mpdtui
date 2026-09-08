@@ -174,6 +174,7 @@ func Run(client *mpdclient.Client, musicDir string, metaDB *metadata.DB, cfg Con
 	defer func() {
 		close(a.done)
 		w.Close()
+		a.visualizer.close()
 	}()
 
 	sigCh := make(chan os.Signal, 1)
