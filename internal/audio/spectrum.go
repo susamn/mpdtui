@@ -56,6 +56,15 @@ const (
 	floorDB = -62 // maps to an empty bar
 	ceilDB  = -6  // maps to a full bar
 
+	// bandFloorDB is where a band's decibels bottom out before the
+	// display window is applied. It sits well below floorDB on purpose:
+	// BandsDB callers compare bands against each other, and a band
+	// that's merely quiet still carries information about the balance
+	// even when it would draw as empty on the absolute scale. It also
+	// bounds the decay smoothing has to cover, which a true log-of-zero
+	// would not.
+	bandFloorDB = -96
+
 	// tiltDBPerOctave lifts the high end. Recorded music has a natural
 	// downward spectral slope, so without a tilt the treble bars barely
 	// move while the bass pins to the top.
@@ -153,7 +162,40 @@ func (s *Spectrum) Active() bool {
 // logarithmically between minHz and maxHz, smoothed against the previous
 // call. It returns nil when there's no live audio -- a caller that gets
 // nil should fall back to its simulated animation.
+//
+// This is the absolute scale: a band's value says how loud that band is,
+// so every band rises and falls together as the track does. A
+// visualization interested in the balance *between* bands wants BandsDB
+// instead, where that shared movement can be subtracted out.
 func (s *Spectrum) Bands(n int) []float64 {
+	db := s.BandsDB(n)
+	if db == nil {
+		return nil
+	}
+	out := make([]float64, n)
+	for i, v := range db {
+		out[i] = LevelFromDB(v)
+	}
+	return out
+}
+
+// LevelFromDB maps a band decibel value onto the same 0..1 display scale
+// Bands uses. Exported so a visualization working in decibels can put a
+// value back on the scale the others draw against.
+func LevelFromDB(db float64) float64 {
+	return clamp01((db - floorDB) / (ceilDB - floorDB))
+}
+
+// BandsDB returns the same n bands as Bands, but in decibels, unclamped
+// by the display window (bounded below only by bandFloorDB).
+//
+// It exists for visualizations that compare bands against each other
+// rather than against an absolute scale. Decibels are the domain those
+// differences are meaningful in, and the display window Bands applies
+// would flatten exactly the differences such a visualization exists to
+// show, by clipping everything loud to 1 and everything quiet to 0.
+// Returns nil when there's no live audio, same as Bands.
+func (s *Spectrum) BandsDB(n int) []float64 {
 	if s == nil || n <= 0 {
 		return nil
 	}
@@ -170,8 +212,10 @@ func (s *Spectrum) Bands(n int) []float64 {
 	copy(samples, s.ring[s.pos:])
 	copy(samples[fftSize-s.pos:], s.ring[:s.pos])
 
-	raw := bandLevels(magnitudes(samples), n)
+	raw := bandDecibels(magnitudes(samples), n)
 
+	// Smoothing happens here, in decibels, so both scales inherit it and
+	// neither ends up smoothing a value the other already smoothed.
 	now := time.Now()
 	if len(s.smoothed) != n {
 		s.smoothed = raw
@@ -197,12 +241,16 @@ func (s *Spectrum) Bands(n int) []float64 {
 	return append([]float64(nil), s.smoothed...)
 }
 
-// bandLevels reduces FFT bin magnitudes to n logarithmically spaced
-// bands in 0..1. Each band takes the loudest bin it covers rather than
-// the mean: a mean washes out a narrow peak against the many quiet bins
-// beside it, which at the top of the range is most of them.
-func bandLevels(mags []float64, n int) []float64 {
+// bandDecibels reduces FFT bin magnitudes to n logarithmically spaced
+// bands, in decibels and bounded below by bandFloorDB. Each band takes
+// the loudest bin it covers rather than the mean: a mean washes out a
+// narrow peak against the many quiet bins beside it, which at the top of
+// the range is most of them.
+func bandDecibels(mags []float64, n int) []float64 {
 	out := make([]float64, n)
+	for i := range out {
+		out[i] = bandFloorDB
+	}
 	if len(mags) < 2 || n <= 0 {
 		return out
 	}
@@ -232,9 +280,11 @@ func bandLevels(mags []float64, n int) []float64 {
 			}
 		}
 
-		db := 20 * math.Log10(peak+1e-12)
-		db += tiltDBPerOctave * math.Log2(lo/minHz)
-		out[b] = clamp01((db - floorDB) / (ceilDB - floorDB))
+		db := 20*math.Log10(peak+1e-12) + tiltDBPerOctave*math.Log2(lo/minHz)
+		if db < bandFloorDB {
+			db = bandFloorDB
+		}
+		out[b] = db
 	}
 	return out
 }
@@ -367,4 +417,13 @@ func (s *Spectrum) ingest(chunk []byte) {
 		s.carry = append(s.carry[:0], rest...)
 	}
 	s.lastData = time.Now()
+}
+
+// DBFromLevel is the inverse of LevelFromDB: it puts a 0..1 display
+// level back onto the decibel scale BandsDB works in. Exported for
+// visualizations whose fallback path produces display levels but whose
+// drawing works in decibels, so the two paths share one pipeline
+// instead of each having its own.
+func DBFromLevel(level float64) float64 {
+	return floorDB + clamp01(level)*(ceilDB-floorDB)
 }

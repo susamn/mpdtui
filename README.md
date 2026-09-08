@@ -112,10 +112,10 @@ single-line inline player for a shell or tmux pane.
   rating and play count (when `track_metadata` is active) -- updated
   instantly via MPD's `idle` protocol (stays in sync even when
   playback changes from another client, e.g. `mpc`); its right half
-  shows a small visualization (`v` to cycle) -- a real FFT spectrum
-  analyzer when MPD's `fifo` output is configured (see
-  [Visualizations](#visualizations)), falling back to a playback-driven
-  animation when it isn't
+  shows a small visualization (`v` cycles Equalizer / Cliamp / Balance)
+  -- real FFT spectrum analyzers when MPD's `fifo` output is configured
+  (see [Visualizations](#visualizations)), falling back to a
+  playback-driven animation when it isn't
 - **Lightweight inline mode** (`-mini`) — two live status lines (queue/
   playlist counts, then track/progress), no alt-screen takeover, for
   tmux status panes or a quick glance
@@ -617,12 +617,51 @@ assumes it. Point mpdtui somewhere else with `visualizer_fifo = /some/
 path` in `~/.config/mpdtui/config`, or set `visualizer_fifo = off` to
 never read one.
 
-With the feed live, the visualizations are real spectrum analyzers:
-mpdtui reads the PCM, runs an FFT over a ~46ms window, and maps the
-result onto logarithmically spaced frequency bands, redrawn at 25fps.
-Volume still scales the display -- the fifo carries the stream at full
-scale, before the mixer MPD's volume setting drives, so this is applied
-on top.
+With the feed live, mpdtui reads the PCM, runs an FFT over a ~46ms
+window, and maps the result onto logarithmically spaced frequency bands,
+redrawn at 25fps. Three visualizations draw from that:
+
+- **Equalizer** -- one narrow frequency band per column, absolute level.
+  The densest view of the spectrum.
+- **Cliamp** -- wider bars in Winamp colors, with peak caps that hold
+  briefly and then fall. Absolute level too.
+- **Balance** -- ten wide, roughly octave-sized bands, each drawn as its
+  level *relative to the average across all of them* rather than its
+  absolute loudness. See below.
+
+Equalizer and Cliamp scale with volume: the fifo carries the stream at
+full scale, before the mixer MPD's volume setting drives, so that is
+applied on top.
+
+### Why Balance is different
+
+On an absolute display, the biggest thing moving is overall loudness --
+as a track gets louder every bar rises together, and that shared movement
+is larger than the differences between bands. But it's those differences,
+the spectral balance, that actually distinguish one moment of a track
+from another.
+
+Balance subtracts the shared movement out. Each frame it takes the mean
+level across the bands and draws every bar as its own deviation from that
+mean, so turning the track up changes nothing on screen and only the
+balance between bands moves. At the panel's two rows the mean lands
+exactly on the row boundary: a full bottom row with an empty top row
+reads as average, anything reaching into the top row is louder than
+average, a partial bottom row is quieter. Color reinforces the direction
+-- warm above the mean, blue below -- since most bars sit near the middle
+where heights are similar.
+
+The bands are few and wide on purpose. Narrow bands over real music track
+their neighbours closely, so a wide display of them shows the same signal
+many times over with noise on top; a band spanning roughly an octave
+averages that noise down and moves distinguishably from the band beside
+it.
+
+The full/empty points are +/-15dB from the mean, measured against real
+playback rather than picked: band deviations came out with a median of
+~6dB and a 95th percentile of ~14dB, so this puts a typical bar around
+70% height while clipping under 4% of them. (Muting still blanks it --
+a muted player showing a dancing display would be plainly wrong.)
 
 Without the feed -- no `audio_output` block, MPD on another machine (a
 named pipe is local-only), or simply nothing playing -- the

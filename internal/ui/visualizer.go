@@ -101,6 +101,7 @@ func newVisualizerPanel(app *App) *visualizerPanel {
 		vizs: []Visualization{
 			newEqualizerVisualization(spectrum),
 			newCliampVisualization(spectrum),
+			newBalanceVisualization(spectrum),
 		},
 	}
 	p.view.SetTitle(" " + p.current().Name() + " ")

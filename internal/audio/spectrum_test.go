@@ -23,11 +23,21 @@ func pcmSine(hz float64, frames int) []byte {
 	return buf
 }
 
+// levelsFromDB puts a whole band slice on the 0..1 display scale, the
+// way Bands does, so the tests below can assert against that scale
+// without restating the mapping.
+func levelsFromDB(db []float64) []float64 {
+	out := make([]float64, len(db))
+	for i, v := range db {
+		out[i] = LevelFromDB(v)
+	}
+	return out
+}
+
 func TestBandLevelsSilenceIsEmpty(t *testing.T) {
-	levels := bandLevels(magnitudes(make([]float64, fftSize)), 24)
-	for i, v := range levels {
-		if v != 0 {
-			t.Errorf("band %d = %g on silence, want 0", i, v)
+	for i, db := range bandDecibels(magnitudes(make([]float64, fftSize)), 24) {
+		if got := LevelFromDB(db); got != 0 {
+			t.Errorf("band %d = %g on silence, want 0", i, got)
 		}
 	}
 }
@@ -43,7 +53,7 @@ func TestBandLevelsPutsEnergyInTheRightBand(t *testing.T) {
 	}
 
 	const n = 24
-	levels := bandLevels(magnitudes(samples), n)
+	levels := levelsFromDB(bandDecibels(magnitudes(samples), n))
 
 	// Which band should hold it, by the same log spacing bandLevels uses.
 	want := int(math.Log(tone/minHz) / math.Log(maxHz/minHz) * n)
@@ -71,7 +81,7 @@ func TestBandLevelsClampsToUnitRange(t *testing.T) {
 	for i := range samples {
 		samples[i] = 8 * math.Sin(2*math.Pi*400*float64(i)/SampleRate)
 	}
-	for i, v := range bandLevels(magnitudes(samples), 32) {
+	for i, v := range levelsFromDB(bandDecibels(magnitudes(samples), 32)) {
 		if v < 0 || v > 1 {
 			t.Errorf("band %d = %g, want within 0..1", i, v)
 		}
@@ -253,8 +263,11 @@ func TestBandsSmoothsBetweenFrames(t *testing.T) {
 		}
 	}
 
+	// Long enough for the release to carry the peak band back down
+	// through the display ceiling: a full-scale tone sits well above it,
+	// so a couple of milliseconds of decay would still read as 1.0.
 	s.ingest(make([]byte, fftSize*channels*bytesPerSample))
-	time.Sleep(5 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	quiet := s.Bands(24)
 	if quiet == nil {
 		t.Fatal("Bands() = nil after ingesting silence")
@@ -264,5 +277,80 @@ func TestBandsSmoothsBetweenFrames(t *testing.T) {
 	}
 	if quiet[peak] == 0 {
 		t.Error("peak band snapped straight to zero, want a smoothed decay")
+	}
+}
+
+func TestBandsDBSurvivesTheDisplayWindow(t *testing.T) {
+	// The point of BandsDB: two bands that both clip to the same value
+	// on the 0..1 display scale must still be distinguishable in
+	// decibels, or a relative visualization has nothing to show. A
+	// full-scale tone drives its own band well past the display ceiling
+	// while everything else sits below the floor.
+	s := NewSpectrum("")
+	s.ingest(pcmSine(1000, fftSize))
+
+	db := s.BandsDB(24)
+	if db == nil {
+		t.Fatal("BandsDB() = nil right after ingesting audio")
+	}
+	levels := s.Bands(24)
+	if levels == nil {
+		t.Fatal("Bands() = nil right after ingesting audio")
+	}
+
+	// Look for two bands the display scale renders identically but that
+	// still differ in decibels. Bands sitting exactly on bandFloorDB
+	// don't count -- those are genuinely indistinguishable, which is
+	// what that floor is for.
+	found := false
+	for i := 0; i < len(levels) && !found; i++ {
+		for j := i + 1; j < len(levels); j++ {
+			if levels[i] != levels[j] || db[i] <= bandFloorDB || db[j] <= bandFloorDB {
+				continue
+			}
+			if db[i] != db[j] {
+				found = true
+				break
+			}
+			t.Errorf("bands %d and %d are identical in decibels (%g) as well as on the display scale -- BandsDB adds nothing", i, j, db[i])
+		}
+	}
+	if !found {
+		t.Error("no pair of bands differed in decibels while clamping to the same display level -- BandsDB adds nothing over Bands")
+	}
+
+	for i, v := range db {
+		if v < bandFloorDB {
+			t.Errorf("band %d = %g, below bandFloorDB %d", i, v, bandFloorDB)
+		}
+	}
+}
+
+func TestLevelFromDBMapsTheDisplayWindow(t *testing.T) {
+	cases := []struct {
+		db   float64
+		want float64
+	}{
+		{floorDB, 0},
+		{ceilDB, 1},
+		{(floorDB + ceilDB) / 2, 0.5},
+		{floorDB - 20, 0}, // below the window clamps, doesn't go negative
+		{ceilDB + 20, 1},  // above it clamps too
+	}
+	for _, tc := range cases {
+		if got := LevelFromDB(tc.db); math.Abs(got-tc.want) > 1e-9 {
+			t.Errorf("LevelFromDB(%g) = %g, want %g", tc.db, got, tc.want)
+		}
+	}
+}
+
+func TestBandsDBGoesNilWithoutAudio(t *testing.T) {
+	var nilSpectrum *Spectrum
+	if got := nilSpectrum.BandsDB(8); got != nil {
+		t.Errorf("BandsDB(8) on a nil Spectrum = %v, want nil", got)
+	}
+	s := NewSpectrum("")
+	if got := s.BandsDB(8); got != nil {
+		t.Errorf("BandsDB(8) with no audio = %v, want nil", got)
 	}
 }
