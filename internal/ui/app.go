@@ -47,6 +47,16 @@ type App struct {
 	// is inactive (no config.LoadMusicDir setup), not an error.
 	musicDir string
 
+	// playlistMembership maps a track URI to the stored playlists
+	// containing it, shown by the Track Info card ('i'). Filled by
+	// refreshTrackCounts from the same scan that produces the Playlists
+	// panel's counts, so it costs no extra MPD traffic -- and, like those
+	// counts, it is a snapshot refreshed on countTicker's cadence rather
+	// than live. nil means "not fetched yet", which is deliberately
+	// distinct from a track being in no playlist: the card says so rather
+	// than claiming an empty answer it does not have. Main-goroutine-only.
+	playlistMembership map[string][]string
+
 	// metaDB is the local track-metadata database (play count, rating,
 	// mark, tags -- see internal/metadata), opened by cmd/mpdtui's main.go
 	// only when config.LoadTrackMetadataEnabled() is true. nil means the
@@ -431,8 +441,8 @@ func (a *App) eventLoop() {
 	}
 }
 
-// refreshTrackCounts fetches every playlist's track count
-// (mpdclient.Client.PlaylistTrackCounts) in the background and applies it
+// refreshTrackCounts fetches every playlist's contents
+// (mpdclient.Client.PlaylistIndex) in the background and applies it
 // once done -- one MPD round-trip per playlist, which stays well under a
 // second even for a few hundred playlists but is still real enough that
 // it must never block the single UI goroutine, whether triggered by
@@ -446,16 +456,20 @@ func (a *App) eventLoop() {
 // deliberate keypress should.
 func (a *App) refreshTrackCounts(silent bool) {
 	go func() {
-		counts, err := a.client.PlaylistTrackCounts()
+		idx, err := a.client.PlaylistIndex()
 		a.tv.QueueUpdateDraw(func() {
 			if err != nil {
 				a.showError(err)
 				return
 			}
-			a.playlists.trackCounts = counts
+			a.playlists.trackCounts = idx.Counts
+			// Same scan, second view: which playlists hold a given
+			// track, for the Track Info card (see trackinfo.go).
+			a.playlistMembership = idx.Membership
 			a.playlists.render()
+			a.renderTrackInfo()
 			if !silent {
-				a.showMessage(fmt.Sprintf("refreshed track counts for %d playlists", len(counts)))
+				a.showMessage(fmt.Sprintf("refreshed track counts for %d playlists", len(idx.Counts)))
 			}
 		})
 	}()

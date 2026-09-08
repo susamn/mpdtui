@@ -30,25 +30,29 @@ func TestQuadrantRectBottomRight(t *testing.T) {
 }
 
 func TestCardRectFixedSizeClampedToQuadrant(t *testing.T) {
+	const want = 18 // a card asking for 18 rows
 	cases := []struct {
 		x, y, w, h                 int
 		wantX, wantY, wantW, wantH int
 	}{
-		// Quadrant bigger than the fixed footprint in both dimensions --
-		// card stays at its fixed compact size, not the quadrant's.
-		{50, 30, 50, 30, 50, 30, trackInfoCardWidth, trackInfoCardHeight},
+		// Quadrant bigger than the requested footprint in both
+		// dimensions -- card stays compact, not the quadrant's size.
+		{50, 30, 50, 30, 50, 30, trackInfoCardWidth, want},
 		// Quadrant narrower than the fixed width -- clamps width down,
-		// height still fixed (quadrant is tall enough for it).
-		{0, 0, 41, 21, 0, 0, 41, trackInfoCardHeight},
-		// Quadrant smaller than the fixed footprint in both dimensions.
+		// height still as asked (quadrant is tall enough for it).
+		{0, 0, 41, 21, 0, 0, 41, want},
+		// Quadrant shorter than the card -- height clamps, so the card
+		// never spills past the Queue panel it floats inside.
+		{0, 0, 50, 12, 0, 0, trackInfoCardWidth, 12},
+		// Quadrant smaller than the footprint in both dimensions.
 		{0, 0, 1, 1, 0, 0, 1, 1},
 		{0, 0, 0, 0, 0, 0, 0, 0},
 	}
 	for _, tc := range cases {
-		gotX, gotY, gotW, gotH := cardRect(tc.x, tc.y, tc.w, tc.h)
+		gotX, gotY, gotW, gotH := cardRect(tc.x, tc.y, tc.w, tc.h, want)
 		if gotX != tc.wantX || gotY != tc.wantY || gotW != tc.wantW || gotH != tc.wantH {
-			t.Errorf("cardRect(%d,%d,%d,%d) = (%d,%d,%d,%d), want (%d,%d,%d,%d)",
-				tc.x, tc.y, tc.w, tc.h, gotX, gotY, gotW, gotH, tc.wantX, tc.wantY, tc.wantW, tc.wantH)
+			t.Errorf("cardRect(%d,%d,%d,%d, want=%d) = (%d,%d,%d,%d), want (%d,%d,%d,%d)",
+				tc.x, tc.y, tc.w, tc.h, want, gotX, gotY, gotW, gotH, tc.wantX, tc.wantY, tc.wantW, tc.wantH)
 		}
 	}
 }
@@ -313,9 +317,9 @@ func TestOpenTrackInfoTakesFocusAndPositionsInBottomRightQuadrant(t *testing.T) 
 	// than Draw itself, which needs a real tcell.Screen to paint into.
 	a.trackInfo.positionOverQueue()
 	x, y, w, h := a.trackInfo.GetRect()
-	if x != 50 || y != 30 || w != trackInfoCardWidth || h != trackInfoCardHeight {
-		t.Errorf("card rect after Draw = (%d,%d,%d,%d), want (50,30,%d,%d) -- fixed compact size, floating at the quadrant's top-left corner",
-			x, y, w, h, trackInfoCardWidth, trackInfoCardHeight)
+	if x != 50 || y != 30 || w != trackInfoCardWidth || h != a.trackInfo.height() {
+		t.Errorf("card rect after Draw = (%d,%d,%d,%d), want (50,30,%d,%d) -- compact size, floating at the quadrant's top-left corner",
+			x, y, w, h, trackInfoCardWidth, a.trackInfo.height())
 	}
 }
 
