@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -173,6 +174,9 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			return nil
 		case 'a':
 			a.handleAdd()
+			return nil
+		case 'A':
+			a.handleAddAll()
 			return nil
 		case 'd':
 			a.handleDelete()
@@ -435,6 +439,35 @@ func (a *App) handleAdd() {
 	default:
 		a.invalidKey("a")
 	}
+}
+
+// handleAddAll is 'A': queue every track in the Library panel's current
+// search results at once, as opposed to 'a', which adds only the row
+// under the cursor. Only meaningful on Library search results -- see
+// libraryPanel.addAllResults on why browse mode is excluded.
+func (a *App) handleAddAll() {
+	if a.tv.GetFocus() != a.library.tree {
+		a.invalidKey("A")
+		return
+	}
+	if a.library.mode != libSearch {
+		a.flash("[red]'A' adds all search results -- search first[-]")
+		return
+	}
+
+	added, err := a.library.addAllResults()
+	if added > 0 {
+		a.queue.refresh()
+	}
+	if err != nil {
+		a.showError(err)
+		return
+	}
+	if added == 0 {
+		a.showMessage("nothing to add")
+		return
+	}
+	a.showMessage(fmt.Sprintf("added %d track(s) from %q", added, a.library.query))
 }
 
 func (a *App) handleDelete() {

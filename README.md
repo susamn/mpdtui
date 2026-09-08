@@ -366,6 +366,7 @@ theme_file = ~/.cache/mpdtui/colors.toml
 |---|---|---|
 | Library | `Enter` | Expand/collapse a folder, or add+play a track |
 | Library | `a` | Add selected folder (recursively) or track to queue (no play) |
+| Library | `A` | Add *every* current search result to the queue at once. Only active on search results (`/` in this panel, or an artist/album opened from global search) -- in browse mode the top level is the whole library, so it says so instead |
 | Library | `Backspace` | Collapse folder, or go up to its parent |
 | Library | `j`/`k`/`g`/`G` | Native tree navigation (also `J`/`K` to jump in/out a level) |
 | Library | `o` | Cycle sort: name / most recently modified (browse mode only) |
@@ -550,6 +551,24 @@ unmarked -- different mark reasons get different tick colors), and
 happen in the background -- rating or marking a track flashes its
 confirmation immediately, and the relevant column repaints as soon as
 the write lands, without ever blocking a keypress on disk I/O.
+
+Tracks rated above 3 stars also get a single star in the Queue's left
+gutter, in the space between the panel border and the index number that
+the "▶" playing marker already occupies -- so it costs no width, and the
+rows don't shift. Five stars take the Rating column's own color at full
+strength and four a weakened version of it, so the two tiers read apart
+at a glance while scrolling. Unlike the Rating column, the gutter star
+survives a narrow terminal, since dropping columns to save space never
+drops it.
+
+Both tiers come from a single theme color, with the weaker one dimmed
+toward the background to a guaranteed luminance separation (at least
+2.23x across the themes tested, while keeping the dimmest 4-star star
+2.01x above its own background) rather than read from a second palette
+field. Pairing "yellow" with "bright_yellow" seems like
+the obvious approach and does not work: across the 15 Omarchy themes
+this was tested against, 8 had those two within 1.2x luminance of each
+other and 3 had them byte-identical.
 
 - **Rating** (`1`-`5`, Queue panel): rates the track that's currently
   *playing*, or the selected one when playback is stopped -- see

@@ -130,3 +130,68 @@ func TestSerializeRoundTripsThroughLoadFrom(t *testing.T) {
 		t.Errorf("LoadFrom(Serialize(Default())) = %+v, want %+v", got, want)
 	}
 }
+
+// TestLoadFromStripsInlineComments covers a real theme file in the wild
+// whose color lines carry trailing comments:
+//
+//	yellow  = "#cbfff9"   # on the white side
+//
+// Trimming quotes off both ends leaves the comment attached, because
+// there is no trailing quote to trim. The value then parses as no color
+// at all, silently degrading that one field to the terminal's default
+// everywhere the app uses it.
+func TestLoadFromStripsInlineComments(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "colors.toml")
+	content := `
+yellow  = "#cbfff9"   # on the white side
+red = "#ff0000" # another comment
+green = "#00ff00"
+blue = #0000ff # unquoted, with a comment
+accent = "#123456"
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write theme file: %v", err)
+	}
+
+	got, live := theme.LoadFrom(path)
+	if !live {
+		t.Fatal("LoadFrom() live = false, want true")
+	}
+
+	cases := []struct {
+		field string
+		got   theme.Color
+		want  theme.Color
+	}{
+		{"yellow", got.Yellow, "#cbfff9"},
+		{"red", got.Red, "#ff0000"},
+		{"green", got.Green, "#00ff00"},
+		{"blue", got.Blue, "#0000ff"},
+		{"accent", got.Accent, "#123456"},
+	}
+	for _, c := range cases {
+		if c.got != c.want {
+			t.Errorf("%s = %q, want %q", c.field, c.got, c.want)
+		}
+	}
+}
+
+// TestLoadFromKeepsHashesInsideQuotes guards the other direction: the
+// values are themselves "#rrggbb", so comment stripping must not treat
+// the color's own leading "#" as a comment marker.
+func TestLoadFromKeepsHashesInsideQuotes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "colors.toml")
+	if err := os.WriteFile(path, []byte("accent = \"#abcdef\"\nselection = \"#123456\"\n"), 0o644); err != nil {
+		t.Fatalf("write theme file: %v", err)
+	}
+
+	got, _ := theme.LoadFrom(path)
+	if got.Accent != "#abcdef" {
+		t.Errorf("Accent = %q, want %q", got.Accent, "#abcdef")
+	}
+	if got.Selection != "#123456" {
+		t.Errorf("Selection = %q, want %q", got.Selection, "#123456")
+	}
+}

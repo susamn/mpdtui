@@ -348,6 +348,10 @@ func (a *App) reapplyTheme() {
 	// via SetSelectedTextColor/SetSelectedBackgroundColor instead.
 	selectedStyle := tcell.StyleDefault.Background(colorSelectedBg).Foreground(colorSelectedFg)
 	a.queue.table.SetSelectedStyle(selectedStyle)
+	// The Library tree has the same problem one level down: the style is
+	// baked into each TreeNode, not read off the tree, so every existing
+	// node needs re-styling rather than one call on the widget.
+	a.library.restyleNodes()
 	a.playlists.table.SetSelectedStyle(selectedStyle)
 	a.settings.catalogTable.SetSelectedStyle(selectedStyle)
 	a.markPicker.SetSelectedTextColor(colorSelectedFg)
@@ -708,7 +712,7 @@ func (a *App) updateHintBar() {
 	case a.library.tree:
 		panelHints = []hint{{"Enter", "open"}, {"a", "add"}, {"Bksp", "back"}, {"o", "sort"}}
 		if a.library.mode == libSearch {
-			panelHints = append(panelHints, hint{"Esc", "clear"})
+			panelHints = append(panelHints, hint{"A", "add all"}, hint{"Esc", "clear"})
 		}
 	case a.playlists.table:
 		panelHints = []hint{{"Enter", "load"}, {"a", "append"}, {"d", "delete"}, {"S", "save"}, {"R", "counts"}, {"o", "sort"}}

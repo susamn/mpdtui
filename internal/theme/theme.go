@@ -220,6 +220,35 @@ func Serialize(p Palette) string {
 // rather than erroring, so an unrelated line (a future field this
 // package doesn't know about yet, e.g.) doesn't break parsing of every
 // other line.
+// parseValue extracts one field's value, dropping any trailing inline
+// comment.
+//
+// The comment handling is what this is really for: real theme files
+// carry lines like `yellow = "#cbfff9"   # on the white side`, and
+// simply trimming quotes off both ends leaves the comment attached
+// (there is no trailing quote to trim, since the line ends in the
+// comment). The result parses as no color at all, which silently
+// degrades that field to the terminal's own default everywhere the app
+// uses it -- a whole-theme papercut that shows up as one color
+// mysteriously not following the theme.
+//
+// A quoted value is taken as everything up to its closing quote, so a
+// "#" inside the quotes is part of the color rather than a comment
+// marker. An unquoted value is cut at the first " #", which keeps a
+// bare `#rrggbb` intact while still dropping a spaced-off comment.
+func parseValue(value string) string {
+	if rest, ok := strings.CutPrefix(value, `"`); ok {
+		if inner, _, ok := strings.Cut(rest, `"`); ok {
+			return strings.TrimSpace(inner)
+		}
+		return strings.TrimSpace(rest)
+	}
+	if before, _, ok := strings.Cut(value, " #"); ok {
+		return strings.TrimSpace(before)
+	}
+	return value
+}
+
 func parse(data []byte) map[string]string {
 	fields := make(map[string]string)
 	scanner := bufio.NewScanner(bytes.NewReader(data))
@@ -233,8 +262,7 @@ func parse(data []byte) map[string]string {
 			continue
 		}
 		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		value = strings.Trim(value, `"`)
+		value = parseValue(strings.TrimSpace(value))
 		if key == "" || value == "" {
 			continue
 		}

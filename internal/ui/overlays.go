@@ -203,6 +203,9 @@ const helpText = `[::b]Global[-:-:-]
 [::b]Library panel[-:-:-]
   Enter          expand/collapse a folder, or add+play a track
   a              add selected folder/track to queue (no play)
+  A              add every search result to the queue at once
+                 (only after a search -- '/' here, or an artist/album
+                 opened from global search)
   Backspace      collapse folder, or go up to its parent
   o              cycle sort: name / most recently modified
   Esc            clear active search
@@ -233,7 +236,10 @@ const helpText = `[::b]Global[-:-:-]
   1-5            rate the selected track (needs track_metadata set in
                  ~/.config/mpdtui/config); as a result, 1/2 no longer
                  jump to Library/Playlists from inside Queue --
-                 Tab/Backtab still cycle panels regardless of focus
+                 Tab/Backtab still cycle panels regardless of focus.
+                 Anything rated above 3 stars also gets a star in the
+                 left gutter, next to the play marker: full color for
+                 5, dimmer for 4
   m              mark the selected track with a reason (or clear an
                  existing mark), from a small popup: j/k/g/G to
                  navigate, Enter to apply, Esc to cancel -- transport

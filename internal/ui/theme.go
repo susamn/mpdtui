@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"math"
+
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
@@ -96,6 +98,116 @@ func contrastColor(bg tcell.Color) tcell.Color {
 	return hexColor(palette.BrightForeground)
 }
 
+// relativeLuminance is the WCAG relative luminance of c (0 for black, 1
+// for white), used to reason about how far apart two colors actually
+// look. Unlike contrastColor's cheaper BT.601 approximation, this one
+// is gamma-corrected: it's compared against a ratio threshold rather
+// than a single light/dark cutoff, so the error from skipping gamma
+// would actually change the outcome. Returns -1 for a color with no
+// resolvable RGB (notably tcell.ColorDefault, i.e. "the terminal's
+// own"), which callers have to handle -- there is no way to know what
+// the terminal will actually paint.
+func relativeLuminance(c tcell.Color) float64 {
+	r, g, b := c.RGB()
+	if r < 0 || g < 0 || b < 0 {
+		return -1
+	}
+	channel := func(v int32) float64 {
+		f := float64(v) / 255
+		if f <= 0.03928 {
+			return f / 12.92
+		}
+		return math.Pow((f+0.055)/1.055, 2.4)
+	}
+	return 0.2126*channel(r) + 0.7152*channel(g) + 0.0722*channel(b)
+}
+
+// luminanceRatio is the WCAG contrast ratio between two relative
+// luminances -- 1.0 for identical, higher the further apart.
+func luminanceRatio(a, b float64) float64 {
+	if a < b {
+		a, b = b, a
+	}
+	return (a + 0.05) / (b + 0.05)
+}
+
+// blendColors mixes a toward b by t (0 returns a, 1 returns b), in
+// straight sRGB space. Falls back to a when either color has no RGB to
+// mix.
+func blendColors(a, b tcell.Color, t float64) tcell.Color {
+	ar, ag, ab := a.RGB()
+	br, bg, bb := b.RGB()
+	if ar < 0 || br < 0 {
+		return a
+	}
+	mix := func(x, y int32) int32 { return x + int32(t*float64(y-x)) }
+	return tcell.NewRGBColor(mix(ar, br), mix(ag, bg), mix(ab, bb))
+}
+
+// recedeFrom returns a visibly weaker version of c: the same hue, mixed
+// toward the theme's own background until it is at least minRatio apart
+// from c in relative luminance.
+//
+// This exists because deriving two visually distinct colors from two
+// separate palette fields does not work. The obvious pairing -- the
+// theme's "yellow" and "bright_yellow" -- turns out to be a coin flip:
+// across the Omarchy themes installed on the machine this was written
+// on, 8 of 15 had the two within 1.2x luminance of each other and 3 had
+// them byte-identical, so a display relying on that difference showed
+// one color most of the time. Anything that has to read as two tiers
+// therefore derives both from a single palette field, with the second
+// computed to a guaranteed separation rather than hoped for.
+//
+// Mixing toward the background (rather than simply darkening) is what
+// makes this work on light themes too: the weaker tier always recedes
+// toward whatever the panel is actually drawn on. Where the background
+// is the terminal's own and so has no known RGB, it falls back to
+// mixing toward black or white, whichever c is further from.
+func recedeFrom(c tcell.Color, minRatio float64) tcell.Color {
+	base := relativeLuminance(c)
+	if base < 0 {
+		return c // nothing resolvable to weaken
+	}
+
+	if out, ok := mixUntilSeparated(c, base, hexColor(palette.Background), minRatio); ok {
+		return out
+	}
+
+	// The background is too close to c in luminance to separate against
+	// -- mixing toward it barely moves the color, so the two tiers would
+	// still look the same. Fall back to the far end of the scale, which
+	// always has room. This trades the "weaker tier recedes into the
+	// panel" reading for a tier that is at least distinguishable, and
+	// only happens on a theme whose star color is already nearly
+	// invisible against its own background.
+	extreme := tcell.NewRGBColor(0, 0, 0)
+	if base < 0.5 {
+		extreme = tcell.NewRGBColor(255, 255, 255)
+	}
+	out, _ := mixUntilSeparated(c, base, extreme, minRatio)
+	return out
+}
+
+// mixUntilSeparated mixes c toward target in increasing steps until it
+// is at least minRatio away from base in luminance, reporting whether it
+// got there. Stepping rather than using one fixed fraction is what makes
+// this theme-independent: how far a given fraction moves the luminance
+// depends on how far apart c and target already are, which varies per
+// palette.
+func mixUntilSeparated(c tcell.Color, base float64, target tcell.Color, minRatio float64) (tcell.Color, bool) {
+	if relativeLuminance(target) < 0 {
+		return c, false
+	}
+	last := c
+	for t := 0.3; t <= 0.9; t += 0.05 {
+		last = blendColors(c, target, t)
+		if luminanceRatio(base, relativeLuminance(last)) >= minRatio {
+			return last, true
+		}
+	}
+	return last, false
+}
+
 // deriveColors recomputes every palette-derived color in this package
 // from the current palette. Called once at package init and again by
 // reloadPalette after a theme change (see this file's own applyTheme/
@@ -109,6 +221,7 @@ func deriveColors() {
 	colorActiveBorder = hexColor(palette.Accent)
 	colorSelectedBg = hexColor(palette.Selection)
 	colorSelectedFg = contrastColor(colorSelectedBg)
+	treeSelectedStyle = tcell.StyleDefault.Foreground(colorSelectedFg).Background(colorSelectedBg)
 
 	locateFlashBg = hexColor(palette.Accent)
 	locateFlashFg = contrastColor(locateFlashBg)
@@ -117,6 +230,8 @@ func deriveColors() {
 	queueHeaderBg = hexColor(palette.BrightForeground)
 	queueHeaderFg = hexColor(palette.DarkerBackground)
 	queueRatingColor = hexColor(palette.Yellow)
+	queueStarTopColor = queueRatingColor
+	queueStarHighColor = recedeFrom(queueStarTopColor, queueStarMinRatio)
 	markTickColors = []tcell.Color{
 		hexColor(palette.Red),
 		hexColor(palette.Orange),
