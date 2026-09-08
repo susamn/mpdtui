@@ -109,6 +109,7 @@ func deriveColors() {
 	colorActiveBorder = hexColor(palette.Accent)
 	colorSelectedBg = hexColor(palette.Selection)
 	colorSelectedFg = contrastColor(colorSelectedBg)
+	treeSelectedStyle = tcell.StyleDefault.Foreground(colorSelectedFg).Background(colorSelectedBg)
 
 	locateFlashBg = hexColor(palette.Accent)
 	locateFlashFg = contrastColor(locateFlashBg)

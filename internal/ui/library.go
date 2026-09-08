@@ -16,7 +16,17 @@ import (
 // style resolves to invisible (default-on-default) once applyTheme
 // flattens PrimitiveBackgroundColor/PrimaryTextColor to the terminal's own
 // colors, so every selectable node needs this set explicitly.
-var treeSelectedStyle = tcell.StyleDefault.Foreground(colorSelectedFg).Background(colorSelectedBg)
+//
+// Assigned by deriveColors, never in this declaration: package-level
+// variable initializers all run before any init function, so a value
+// built here would capture colorSelectedFg/colorSelectedBg while they
+// are still the zero Color -- leaving every node styled
+// default-on-default, which is exactly the invisible highlight the
+// explicit style exists to avoid. It's re-derived on theme reload too,
+// which is why libraryPanel.restyleNodes has to walk the tree
+// afterwards: nodes bake the style value in at construction (see
+// App.reapplyTheme, which has the same problem with Table cells).
+var treeSelectedStyle tcell.Style
 
 const (
 	folderClosedIcon = "📁"
@@ -87,6 +97,37 @@ func newLibraryPanel(app *App) *libraryPanel {
 	return p
 }
 
+// selectFirstNode moves the cursor to the first top-level node, or
+// leaves it on the (hidden, unselectable) root when there's nothing to
+// show.
+//
+// Every method that repopulates the tree has to call this. Pointing the
+// cursor at the root instead looks like it works, because tview quietly
+// relocates an unselectable current node to the first selectable one
+// while drawing -- but only once a draw has happened, and without ever
+// telling the user where the cursor went. The result is a panel with no
+// visible cursor whose 'a' key silently acts on the first row, which is
+// not necessarily the row the user thinks they're on.
+func (p *libraryPanel) selectFirstNode() {
+	if children := p.root.GetChildren(); len(children) > 0 {
+		p.tree.SetCurrentNode(children[0])
+		return
+	}
+	p.tree.SetCurrentNode(p.root)
+}
+
+// restyleNodes re-applies the current treeSelectedStyle to every node in
+// the tree. TreeNode.SetSelectedTextStyle bakes the style value in at
+// construction, so nodes built under the old theme keep its colors until
+// this walks them -- the tree's equivalent of the Table-cell restyling
+// App.reapplyTheme does, and called from there.
+func (p *libraryPanel) restyleNodes() {
+	p.root.Walk(func(node, parent *tview.TreeNode) bool {
+		node.SetSelectedTextStyle(treeSelectedStyle)
+		return true
+	})
+}
+
 // showRoot (re)loads the library root, replacing whatever's currently
 // shown -- browsing at any depth, or search results.
 func (p *libraryPanel) showRoot() {
@@ -102,7 +143,7 @@ func (p *libraryPanel) showRoot() {
 		p.root.AddChild(n)
 	}
 	p.tree.SetTitle(fmt.Sprintf(" Library (%s) ", p.sortMode.label()))
-	p.tree.SetCurrentNode(p.root)
+	p.selectFirstNode()
 }
 
 // cycleSortMode advances to the next sort mode and reloads the root with
@@ -148,7 +189,7 @@ func (p *libraryPanel) showSearch(query string) int {
 		p.root.AddChild(tview.NewTreeNode(trackLabel(s)).SetReference(entry).SetSelectedTextStyle(treeSelectedStyle))
 	}
 	p.tree.SetTitle(fmt.Sprintf(" Library: search %q (%d) ", query, len(songs)))
-	p.tree.SetCurrentNode(p.root)
+	p.selectFirstNode()
 	if len(songs) == 0 {
 		p.app.showMessage("no results for " + query)
 	}
@@ -194,7 +235,7 @@ func (p *libraryPanel) showAlbumSearch(query string) int {
 	p.addGroupNodes(groups)
 
 	p.tree.SetTitle(fmt.Sprintf(" Library: album search %q (%d) ", query, len(groups)))
-	p.tree.SetCurrentNode(p.root)
+	p.selectFirstNode()
 	if len(groups) == 0 {
 		p.app.showMessage("no albums found for " + query)
 	}
@@ -226,7 +267,7 @@ func (p *libraryPanel) showArtistSearch(query string) int {
 	p.addGroupNodes(groups)
 
 	p.tree.SetTitle(fmt.Sprintf(" Library: artist search %q (%d) ", query, len(groups)))
-	p.tree.SetCurrentNode(p.root)
+	p.selectFirstNode()
 	if len(groups) == 0 {
 		p.app.showMessage("no artists found for " + query)
 	}
@@ -563,6 +604,50 @@ func (p *libraryPanel) addSelected() {
 	case mpdclient.EntryPlaylist:
 		p.app.appendPlaylist(entry.Path)
 	}
+}
+
+// addAllResults queues every track currently listed as a search result,
+// in the order they're shown, and reports how many were added.
+//
+// Search results only: in browse mode the top level is the whole
+// library, and "add everything" there is a destructive-feeling action
+// nobody asks for by pressing a key next to the one that adds a single
+// row. handleAddAll gates on the mode and says so rather than silently
+// doing nothing.
+//
+// Tracks are added one at a time, and a failure part-way through stops
+// and reports rather than continuing: the queue keeps whatever landed
+// before the error, which is the same behaviour addSelected already has
+// for a multi-track group.
+func (p *libraryPanel) addAllResults() (int, error) {
+	added := 0
+	for _, uri := range p.resultTracks() {
+		if err := p.app.client.QueueAdd(uri); err != nil {
+			return added, err
+		}
+		added++
+	}
+	return added, nil
+}
+
+// resultTracks lists the URIs behind the current top-level results, in
+// display order: an album/artist group contributes all of its tracks,
+// a flat per-track result contributes itself. Split out from
+// addAllResults so the traversal is testable without a live MPD server
+// to add tracks to.
+func (p *libraryPanel) resultTracks() []string {
+	var uris []string
+	for _, node := range p.root.GetChildren() {
+		switch ref := node.GetReference().(type) {
+		case *albumGroup:
+			for _, s := range ref.songs {
+				uris = append(uris, s.File)
+			}
+		case mpdclient.DirEntry:
+			uris = append(uris, ref.Path)
+		}
+	}
+	return uris
 }
 
 // buildNodes turns entries into tree nodes, directories always grouped

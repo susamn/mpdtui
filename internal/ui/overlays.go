@@ -203,6 +203,9 @@ const helpText = `[::b]Global[-:-:-]
 [::b]Library panel[-:-:-]
   Enter          expand/collapse a folder, or add+play a track
   a              add selected folder/track to queue (no play)
+  A              add every search result to the queue at once
+                 (only after a search -- '/' here, or an artist/album
+                 opened from global search)
   Backspace      collapse folder, or go up to its parent
   o              cycle sort: name / most recently modified
   Esc            clear active search
