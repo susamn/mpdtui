@@ -42,11 +42,16 @@ func (r recordingViz) Render(width, height int, elapsed time.Duration, st mpdcli
 
 func TestVisualizerPanelStartsOnFirstRegisteredVisualization(t *testing.T) {
 	a := newTestApp()
-	if got := a.visualizer.current().Name(); got != "Equalizer" {
-		t.Errorf("initial visualization = %q, want %q", got, "Equalizer")
+	// Balance is the default on purpose -- it is the one showing
+	// something about the music rather than about its loudness. Named
+	// explicitly here (rather than read off the registry) precisely
+	// because it is a deliberate choice, so reordering the registry has
+	// to fail this test rather than quietly change what users see.
+	if got := a.visualizer.current().Name(); got != "Balance" {
+		t.Errorf("initial visualization = %q, want %q", got, "Balance")
 	}
-	if title := a.visualizer.view.GetTitle(); !strings.Contains(title, "Equalizer") {
-		t.Errorf("border title = %q, want it to contain %q", title, "Equalizer")
+	if title := a.visualizer.view.GetTitle(); !strings.Contains(title, "Balance") {
+		t.Errorf("border title = %q, want it to contain %q", title, "Balance")
 	}
 }
 
@@ -88,8 +93,9 @@ func TestAppVisualizerPanelCyclesRegisteredVisualizations(t *testing.T) {
 	// Walks whatever is registered rather than naming each one, so
 	// registering a new visualization doesn't fail this test.
 	a := newTestApp()
-	if got := a.visualizer.current().Name(); got != "Equalizer" {
-		t.Fatalf("initial visualization = %q, want %q", got, "Equalizer")
+	first := a.visualizer.vizs[0].Name()
+	if got := a.visualizer.current().Name(); got != first {
+		t.Fatalf("initial visualization = %q, want the first registered %q", got, first)
 	}
 
 	seen := make(map[string]bool)
@@ -104,8 +110,8 @@ func TestAppVisualizerPanelCyclesRegisteredVisualizations(t *testing.T) {
 	if len(seen) != len(a.visualizer.vizs) {
 		t.Errorf("cycled through %d distinct visualizations, want %d", len(seen), len(a.visualizer.vizs))
 	}
-	if got := a.visualizer.current().Name(); got != "Equalizer" {
-		t.Errorf("after a full cycle = %q, want it to wrap back to %q", got, "Equalizer")
+	if got := a.visualizer.current().Name(); got != first {
+		t.Errorf("after a full cycle = %q, want it to wrap back to %q", got, first)
 	}
 }
 
@@ -138,15 +144,16 @@ func TestVisualizerPanelTickPassesRealElapsedTime(t *testing.T) {
 
 func TestVKeyCyclesVisualizerPanel(t *testing.T) {
 	a := newTestApp()
-	if got := a.visualizer.current().Name(); got != "Equalizer" {
-		t.Fatalf("initial visualization = %q, want %q", got, "Equalizer")
+	first, second := a.visualizer.vizs[0].Name(), a.visualizer.vizs[1].Name()
+	if got := a.visualizer.current().Name(); got != first {
+		t.Fatalf("initial visualization = %q, want the first registered %q", got, first)
 	}
 	vKey := tcell.NewEventKey(tcell.KeyRune, 'v', tcell.ModNone)
 	if result := a.globalInputCapture(vKey); result != nil {
 		t.Errorf("'v' should be consumed by the visualizer cycle, got %v", result)
 	}
-	if got := a.visualizer.current().Name(); got != "Cliamp" {
-		t.Errorf("after 'v' visualization = %q, want %q", got, "Cliamp")
+	if got := a.visualizer.current().Name(); got != second {
+		t.Errorf("after 'v' visualization = %q, want the next registered %q", got, second)
 	}
 
 	// One 'v' per remaining visualization brings it back around.
@@ -155,7 +162,7 @@ func TestVKeyCyclesVisualizerPanel(t *testing.T) {
 			t.Errorf("'v' should be consumed by the visualizer cycle, got %v", result)
 		}
 	}
-	if got := a.visualizer.current().Name(); got != "Equalizer" {
-		t.Errorf("after a full cycle of 'v' = %q, want %q", got, "Equalizer")
+	if got := a.visualizer.current().Name(); got != first {
+		t.Errorf("after a full cycle of 'v' = %q, want %q", got, first)
 	}
 }

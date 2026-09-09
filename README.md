@@ -112,7 +112,7 @@ single-line inline player for a shell or tmux pane.
   rating and play count (when `track_metadata` is active) -- updated
   instantly via MPD's `idle` protocol (stays in sync even when
   playback changes from another client, e.g. `mpc`); its right half
-  shows a small visualization (`v` cycles Equalizer / Cliamp / Balance)
+  shows a small visualization (`v` cycles Balance / Equalizer / Cliamp)
   -- real FFT spectrum analyzers when MPD's `fifo` output is configured
   (see [Visualizations](#visualizations)), falling back to a
   playback-driven animation when it isn't
@@ -643,21 +643,23 @@ never read one.
 
 With the feed live, mpdtui reads the PCM, runs an FFT over a ~46ms
 window, and maps the result onto logarithmically spaced frequency bands,
-redrawn at 25fps. Three visualizations draw from that:
+redrawn at 25fps. Three visualizations draw from that, in `v`'s cycle
+order:
 
+- **Balance** (the default) -- ten wide, roughly octave-sized bands, each
+  drawn as its level *relative to the average across all of them* rather
+  than its absolute loudness. See below for why this is the one shown
+  first.
 - **Equalizer** -- one narrow frequency band per column, absolute level.
   The densest view of the spectrum.
 - **Cliamp** -- wider bars in Winamp colors, with peak caps that hold
   briefly and then fall. Absolute level too.
-- **Balance** -- ten wide, roughly octave-sized bands, each drawn as its
-  level *relative to the average across all of them* rather than its
-  absolute loudness. See below.
 
 Equalizer and Cliamp scale with volume: the fifo carries the stream at
 full scale, before the mixer MPD's volume setting drives, so that is
 applied on top.
 
-### Why Balance is different
+### Why Balance is different, and why it is the default
 
 On an absolute display, the biggest thing moving is overall loudness --
 as a track gets louder every bar rises together, and that shared movement
