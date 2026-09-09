@@ -8,6 +8,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
 )
 
@@ -278,7 +279,7 @@ func TestTrackInfoCardRenderMetaShowsRealValues(t *testing.T) {
 		t.Fatalf("IncrementPlayCount: %v", err)
 	}
 	markID := int64(1) // seeded "mark for deletion"
-	if err := a.metaDB.SetMark(file, &markID); err != nil {
+	if err := a.metaDB.SetMarks(file, []int64{markID}); err != nil {
 		t.Fatalf("SetMark: %v", err)
 	}
 	if err := a.metaDB.SetTags(file, []int64{1, 2}); err != nil { // seeded bengali, hindi
@@ -293,8 +294,13 @@ func TestTrackInfoCardRenderMetaShowsRealValues(t *testing.T) {
 	if got := metaCellText(a, 1, 1); got != "2" {
 		t.Errorf("Plays cell = %q, want %q", got, "2")
 	}
-	if got := metaCellText(a, 2, 1); got != "mark for deletion" {
+	// The cell carries per-mark color tags now, since a track can hold
+	// several marks and a TableCell has only one text color.
+	if got := stripColorTags(metaCellText(a, 2, 1)); got != "mark for deletion" {
 		t.Errorf("Mark cell = %q, want %q", got, "mark for deletion")
+	}
+	if got := metaCellText(a, 2, 1); !strings.Contains(got, markColor(metadata.MarkReason{ID: 1}).String()) {
+		t.Errorf("Mark cell = %q, want it colored by the mark's own color", got)
 	}
 	if got := metaCellText(a, 3, 1); got != "bengali, hindi" {
 		t.Errorf("Tags cell = %q, want %q", got, "bengali, hindi")

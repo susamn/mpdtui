@@ -424,9 +424,15 @@ func (c *trackInfoCard) renderMeta(file string) {
 	c.meta.Clear()
 	track, _ := c.app.metaDB.Get(file)
 
+	// Each reason in its own color, which a cell's single SetTextColor
+	// cannot do -- so the same dynamic-tag approach markCell uses.
 	mark := tview.NewTableCell("-")
-	if track.Mark != nil {
-		mark = tview.NewTableCell(track.Mark.Reason).SetTextColor(markColor(track.Mark))
+	if len(track.Marks) > 0 {
+		parts := make([]string, len(track.Marks))
+		for i, m := range track.Marks {
+			parts[i] = fmt.Sprintf("[%s]%s[-]", markColor(m).String(), m.Reason)
+		}
+		mark = tview.NewTableCell(strings.Join(parts, ", "))
 	}
 
 	tags := "-"

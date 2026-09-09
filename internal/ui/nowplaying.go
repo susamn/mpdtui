@@ -5,6 +5,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
 )
 
@@ -43,7 +44,7 @@ func (a *App) renderNowPlaying(st mpdclient.Status, song mpdclient.Song) {
 		line2 += fmt.Sprintf("   rating [%s]%s[-]   played %dx", nowPlayingRatingColor, ratingStars(meta.Rating), meta.PlayCount)
 		if a.queue != nil {
 			cached, ok := a.queue.metaCache[song.File]
-			if !ok || cached.Rating != meta.Rating || cached.PlayCount != meta.PlayCount || (cached.Mark == nil) != (meta.Mark == nil) || (cached.Mark != nil && meta.Mark != nil && *cached.Mark != *meta.Mark) {
+			if !ok || cached.Rating != meta.Rating || cached.PlayCount != meta.PlayCount || !sameMarks(cached.Marks, meta.Marks) {
 				a.queue.applyTrackMeta(song.File, meta)
 			}
 		}
@@ -60,6 +61,21 @@ func (a *App) renderNowPlaying(st mpdclient.Status, song mpdclient.Song) {
 // nothing-playing fallbacks stay uncolored, same as before. (An earlier
 // version of this also rendered the text fullwidth for visual size;
 // reverted -- explicitly disliked.)
+// sameMarks reports whether two mark sets are equal. Both come from
+// marksForTrack, which orders by catalog id, so comparing in order is
+// enough -- no set logic needed.
+func sameMarks(a, b []metadata.MarkReason) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func nowPlayingTrackText(song mpdclient.Song) string {
 	switch {
 	case song.Artist != "" && song.Title != "":

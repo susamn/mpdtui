@@ -131,7 +131,7 @@ func TestMetaSegmentsUnratedUnmarked(t *testing.T) {
 }
 
 func TestMetaSegmentsRatedAndMarkedColorsOnlyTheStarsGold(t *testing.T) {
-	segs := metaSegments(metadata.Track{Rating: 4, PlayCount: 12, Mark: &metadata.MarkReason{Reason: "mark for deletion"}})
+	segs := metaSegments(metadata.Track{Rating: 4, PlayCount: 12, Marks: []metadata.MarkReason{{Reason: "mark for deletion"}}})
 	want := "★★★★☆  played 12x  marked: mark for deletion"
 	if got := plainText(segs); got != want {
 		t.Errorf("metaSegments text = %q, want %q", got, want)

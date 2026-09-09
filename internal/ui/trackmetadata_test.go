@@ -322,7 +322,7 @@ func TestMarkPickerListsClearMarkPlusCatalogAndApplies(t *testing.T) {
 	if a.tv.GetFocus() != a.markPicker {
 		t.Fatalf("setup: focus = %T, want the mark picker", a.tv.GetFocus())
 	}
-	// "(clear mark)" plus the one seeded mark_reason row.
+	// "(clear all marks)" plus the one seeded mark_reason row.
 	if got := a.markPicker.GetItemCount(); got != 2 {
 		t.Fatalf("mark picker item count = %d, want 2", got)
 	}
@@ -330,15 +330,27 @@ func TestMarkPickerListsClearMarkPlusCatalogAndApplies(t *testing.T) {
 	a.markPicker.SetCurrentItem(1) // the real "mark for deletion" reason, not the synthetic clear entry
 	a.markPicker.apply(1)
 
-	if a.mode != modeNormal {
-		t.Error("mode after applying a mark should be modeNormal (popup closed)")
+	// Marks are a set, so toggling one deliberately leaves the popup
+	// open for the next.
+	if a.mode != modeOverlay {
+		t.Error("mode after toggling a mark should stay modeOverlay (popup open)")
 	}
 	track, err := a.metaDB.Get("artist/track.mp3")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if track.Mark == nil || track.Mark.Reason != "mark for deletion" {
-		t.Fatalf("Mark after applying = %+v, want {mark for deletion}", track.Mark)
+	if len(track.Marks) != 1 || track.Marks[0].Reason != "mark for deletion" {
+		t.Fatalf("Marks after toggling = %+v, want [{mark for deletion}]", track.Marks)
+	}
+
+	// Toggling the same row again removes it.
+	a.markPicker.apply(1)
+	track, err = a.metaDB.Get("artist/track.mp3")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(track.Marks) != 0 {
+		t.Errorf("Marks after toggling the same reason again = %+v, want none", track.Marks)
 	}
 }
 
@@ -347,9 +359,8 @@ func TestMarkPickerClearMarkEntry(t *testing.T) {
 	if err := a.metaDB.Rate("artist/track.mp3", 0); err != nil { // ensure a row exists
 		t.Fatalf("Rate: %v", err)
 	}
-	reasonID := int64(1)
-	if err := a.metaDB.SetMark("artist/track.mp3", &reasonID); err != nil {
-		t.Fatalf("SetMark: %v", err)
+	if err := a.metaDB.SetMarks("artist/track.mp3", []int64{1}); err != nil {
+		t.Fatalf("SetMarks: %v", err)
 	}
 
 	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track", File: "artist/track.mp3"}}
@@ -358,14 +369,14 @@ func TestMarkPickerClearMarkEntry(t *testing.T) {
 	a.tv.SetFocus(a.queue.table)
 
 	a.handleOpenMarkPicker()
-	a.markPicker.apply(0) // the synthetic "(clear mark)" entry
+	a.markPicker.apply(0) // the synthetic "(clear all marks)" entry
 
 	track, err := a.metaDB.Get("artist/track.mp3")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if track.Mark != nil {
-		t.Errorf("Mark after applying the clear entry = %+v, want nil", track.Mark)
+	if len(track.Marks) != 0 {
+		t.Errorf("Marks after applying the clear entry = %+v, want none", track.Marks)
 	}
 }
 
@@ -383,12 +394,18 @@ func TestMarkPickerApplyUpdatesQueueMarkCell(t *testing.T) {
 	a.handleOpenMarkPicker()
 	a.markPicker.apply(1) // "mark for deletion"
 
-	if got, want := a.queue.table.GetCell(queueHeaderRows, a.queue.cols.mark).Text, queueMarkTick+queueColumnGap; got != want {
+	cell := a.queue.table.GetCell(queueHeaderRows, a.queue.cols.mark).Text
+	if got, want := stripColorTags(cell), queueMarkTick+queueColumnGap; got != want {
 		t.Errorf("Mark cell after marking = %q, want %q", got, want)
+	}
+	// One tick per mark, each in that mark's own color -- which needs
+	// tags, since a TableCell carries a single text color.
+	if !strings.Contains(cell, markColor(metadata.MarkReason{ID: 1}).String()) {
+		t.Errorf("Mark cell = %q, want the tick colored by the mark's own color", cell)
 	}
 
 	a.handleOpenMarkPicker()
-	a.markPicker.apply(0) // "(clear mark)"
+	a.markPicker.apply(0) // "(clear all marks)"
 
 	if got, want := a.queue.table.GetCell(queueHeaderRows, a.queue.cols.mark).Text, queueColumnGap; got != want {
 		t.Errorf("Mark cell after clearing = %q, want %q (blank)", got, want)
@@ -638,15 +655,15 @@ func TestMarkPickerMarksPlayingTrackNotSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get(playing): %v", err)
 	}
-	if playing.Mark == nil {
+	if len(playing.Marks) == 0 {
 		t.Error("playing track should have been marked")
 	}
 	other, err := a.metaDB.Get("artist/other.mp3")
 	if err != nil {
 		t.Fatalf("Get(other): %v", err)
 	}
-	if other.Mark != nil {
-		t.Errorf("selected-but-not-playing track mark = %+v, want nil (untouched)", other.Mark)
+	if len(other.Marks) != 0 {
+		t.Errorf("selected-but-not-playing track marks = %+v, want none (untouched)", other.Marks)
 	}
 }
 
@@ -674,15 +691,15 @@ func TestMarkPickerAppliesToTheTrackItWasOpenedFor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get(first): %v", err)
 	}
-	if first.Mark == nil {
+	if len(first.Marks) == 0 {
 		t.Error("the track the popup was opened for should have been marked")
 	}
 	second, err := a.metaDB.Get("artist/second.mp3")
 	if err != nil {
 		t.Fatalf("Get(second): %v", err)
 	}
-	if second.Mark != nil {
-		t.Errorf("the newly-advanced-to track mark = %+v, want nil (untouched)", second.Mark)
+	if len(second.Marks) != 0 {
+		t.Errorf("the newly-advanced-to track marks = %+v, want none (untouched)", second.Marks)
 	}
 }
 
@@ -754,5 +771,130 @@ func TestTargetSongNoneWhenStoppedAndQueueEmpty(t *testing.T) {
 
 	if _, ok := a.targetSong(); ok {
 		t.Error("targetSong should report no target with playback stopped and an empty queue")
+	}
+}
+
+// --- multi-mark UI ---
+
+func TestMarkCellShowsOneTickPerMark(t *testing.T) {
+	marks := []metadata.MarkReason{{ID: 1, Reason: "one"}, {ID: 2, Reason: "two"}}
+	cell := markCell(marks)
+	if got := strings.Count(stripColorTags(cell.Text), queueMarkTick); got != 2 {
+		t.Errorf("cell %q has %d ticks, want one per mark (2)", cell.Text, got)
+	}
+	// Each in its own color, which is the whole reason the cell carries
+	// tags instead of a single SetTextColor.
+	for _, m := range marks {
+		if !strings.Contains(cell.Text, markColor(m).String()) {
+			t.Errorf("cell %q missing the color for mark %d", cell.Text, m.ID)
+		}
+	}
+}
+
+func TestMarkCellBlankWhenUnmarked(t *testing.T) {
+	if got := markCell(nil).Text; strings.TrimSpace(got) != "" {
+		t.Errorf("unmarked cell = %q, want blank", got)
+	}
+}
+
+// TestMarkCellSummarisesBeyondTheCap: the column is sized by its widest
+// cell, so one heavily-marked track must not widen it for every row.
+func TestMarkCellSummarisesBeyondTheCap(t *testing.T) {
+	var many []metadata.MarkReason
+	for i := 1; i <= queueMarkTicksMax+4; i++ {
+		many = append(many, metadata.MarkReason{ID: int64(i), Reason: "r"})
+	}
+	got := stripColorTags(markCell(many).Text)
+	if strings.Count(got, queueMarkTick) != 1 {
+		t.Errorf("cell %q, want a single tick plus a count past the cap", got)
+	}
+	if !strings.Contains(got, "7") {
+		t.Errorf("cell %q, want it to show how many marks there are", got)
+	}
+	capped := len([]rune(strings.TrimSpace(got)))
+	full := len([]rune(strings.TrimSpace(stripColorTags(markCell(many[:queueMarkTicksMax]).Text))))
+	if capped > full+1 {
+		t.Errorf("summarised cell (%d cols) is wider than a full one (%d)", capped, full)
+	}
+}
+
+func TestMarkPickerShowsWhichMarksAreSet(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	if _, err := a.metaDB.AddMarkReason("bad rip"); err != nil {
+		t.Fatalf("AddMarkReason: %v", err)
+	}
+	if err := a.metaDB.SetMarks("artist/track.mp3", []int64{1}); err != nil {
+		t.Fatalf("SetMarks: %v", err)
+	}
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track", File: "artist/track.mp3"}}
+	a.queue.render(-1)
+	a.queue.table.Select(queueHeaderRows, 0)
+	a.tv.SetFocus(a.queue.table)
+	// The picker reads the cache, which render fills from the database.
+	meta, _ := a.metaDB.Get("artist/track.mp3")
+	a.queue.applyTrackMeta("artist/track.mp3", meta)
+
+	a.handleOpenMarkPicker()
+
+	set, _ := a.markPicker.GetItemText(1)   // "mark for deletion", which is set
+	unset, _ := a.markPicker.GetItemText(2) // "bad rip", which is not
+	if !strings.HasPrefix(set, "[x]") {
+		t.Errorf("set mark rendered as %q, want it shown as set", set)
+	}
+	if !strings.HasPrefix(unset, "[ ]") {
+		t.Errorf("unset mark rendered as %q, want it shown as unset", unset)
+	}
+}
+
+// TestMarkPickerStaysOpenAcrossToggles: marks are a set, so adding two
+// must not be a two-popup job.
+func TestMarkPickerStaysOpenAcrossToggles(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	id2, err := a.metaDB.AddMarkReason("bad rip")
+	if err != nil {
+		t.Fatalf("AddMarkReason: %v", err)
+	}
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track", File: "artist/track.mp3"}}
+	a.queue.render(-1)
+	a.queue.table.Select(queueHeaderRows, 0)
+	a.tv.SetFocus(a.queue.table)
+
+	a.handleOpenMarkPicker()
+	a.markPicker.apply(1) // first reason
+	if a.mode != modeOverlay {
+		t.Fatal("popup closed after the first toggle")
+	}
+	a.markPicker.apply(2) // second reason, same popup
+
+	track, err := a.metaDB.Get("artist/track.mp3")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(track.Marks) != 2 {
+		t.Fatalf("marks = %+v, want both", track.Marks)
+	}
+	if track.Marks[0].ID != 1 || track.Marks[1].ID != id2 {
+		t.Errorf("marks = %+v, want them ordered by catalog id", track.Marks)
+	}
+}
+
+func TestToggleMarkInKeepsCatalogOrder(t *testing.T) {
+	a := metadata.MarkReason{ID: 1}
+	b := metadata.MarkReason{ID: 2}
+	c := metadata.MarkReason{ID: 3}
+
+	got := toggleMarkIn([]metadata.MarkReason{a, c}, b, true)
+	if len(got) != 3 || got[0].ID != 1 || got[1].ID != 2 || got[2].ID != 3 {
+		t.Errorf("adding into the middle = %+v, want id order 1,2,3", got)
+	}
+
+	got = toggleMarkIn([]metadata.MarkReason{a, b, c}, b, false)
+	if len(got) != 2 || got[0].ID != 1 || got[1].ID != 3 {
+		t.Errorf("removing from the middle = %+v, want 1,3", got)
+	}
+
+	got = toggleMarkIn(nil, a, true)
+	if len(got) != 1 || got[0].ID != 1 {
+		t.Errorf("adding to an empty set = %+v, want just it", got)
 	}
 }

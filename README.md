@@ -384,7 +384,7 @@ theme_file = ~/.cache/mpdtui/colors.toml
 | Queue | `J` / `K` | Move selected track down / up |
 | Queue | `/` | Search: focuses the always-visible "Search track:" box above the queue, Enter jumps to first match (Esc cancels) |
 | Queue | `1`-`5` | Rate 1-5 stars (needs `track_metadata` set, see [Track metadata](#track-metadata) below): the *currently playing* track, or the selected one when nothing is playing -- so scrolling the Queue away from what's playing doesn't redirect the rating. Note: this means `1`/`2` no longer jump to Library/Playlists from inside Queue -- `Tab`/`Backtab` still cycle panels regardless of focus |
-| Queue | `m` | Mark the currently playing track (or the selected one when nothing is playing -- see [Which track an action applies to](#which-track-an-action-applies-to)) with a reason, or clear an existing mark, from a small popup -- `j`/`k`/`g`/`G` to navigate, `Enter` to apply, `Esc` to cancel. Transport controls keep working while it's open |
+| Queue | `m` | Mark the currently playing track (or the selected one when nothing is playing -- see [Which track an action applies to](#which-track-an-action-applies-to)), from a small popup -- `j`/`k`/`g`/`G` to navigate, `Enter` toggles the highlighted reason on or off, `Esc` closes. A track can carry **several marks at once**, so the popup is a checklist (`[x]`/`[ ]`) that stays open as you toggle, with a "(clear all marks)" entry at the top. Transport controls keep working while it's open |
 
 **Mini mode** (`-mini`): `Space` play/pause, `n`/`p` next/prev, `s` stop,
 `-`/`=` volume, `1`-`5` rate whatever's currently playing (needs
@@ -550,8 +550,10 @@ The database itself lives at `~/.config/mpdtui/mpdtui.db` (next to
 needed.
 
 When active, the Queue table gains three right-aligned columns right
-before Type, in this order: **Plays**, **Mark** (a colored tick, blank if
-unmarked -- different mark reasons get different tick colors), and
+before Type, in this order: **Plays**, **Mark** (one colored tick per
+mark, blank if unmarked -- different mark reasons get different tick
+colors, and past three marks it shows a single tick plus the count so one
+heavily-marked track can't widen the column for the whole queue), and
 **Rating** (gold stars, filled/unfilled). All database reads/writes
 happen in the background -- rating or marking a track flashes its
 confirmation immediately, and the relevant column repaints as soon as
@@ -592,12 +594,28 @@ other and 3 had them byte-identical.
   (e.g. "mark for deletion") for the currently playing track -- or the
   selected one when nothing is playing, exactly like Rating above (see
   [Which track an action applies to](#which-track-an-action-applies-to))
-  -- plus a "(clear mark)" entry to unmark it. The popup names the track
+  -- plus a "(clear all marks)" entry.
+
+  A track can carry **several marks at once**, and a mark applies to as
+  many tracks as you like -- the same shape tags already had. So the
+  popup is a checklist rather than a one-of-N choice: `Enter` toggles the
+  highlighted reason and the popup stays open, since the natural thing
+  after adding one mark is to add another. Each row shows whether that
+  reason is currently set, which makes the popup double as the answer to
+  "what is this track marked with?".
+
+  Databases from before this existed are migrated automatically on first
+  launch: each track's single mark moves into the new join table, and the
+  old column is only dropped once every mark is provably accounted for --
+  a mismatch rolls the migration back and leaves the old data untouched
+  rather than continuing.
+
+  The popup names the track
   in its title, and stays pinned to it: if the track auto-advances while
   the popup is open, the mark still lands on the one it was opened for. This is bookkeeping only -- mpdtui never
   deletes or moves a file itself, marking one just records your own
   intent for you to act on later. `-mini` mode shows the currently
-  playing track's mark (if any) but has no way to set one -- that needs
+  playing track's marks (if any) but has no way to set them -- that needs
   the full UI's popup.
 
 Tracks are matched by their file path, normalized the same way lyrics

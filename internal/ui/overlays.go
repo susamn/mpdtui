@@ -243,10 +243,12 @@ const helpText = `[::b]Global[-:-:-]
                  Anything rated above 3 stars also gets a star in the
                  left gutter, next to the play marker: full color for
                  5, dimmer for 4
-  m              mark the selected track with a reason (or clear an
-                 existing mark), from a small popup: j/k/g/G to
-                 navigate, Enter to apply, Esc to cancel -- transport
-                 controls still work while it's open
+  m              mark the selected track, from a small popup: j/k/g/G
+                 to navigate, Enter toggles the highlighted reason on or
+                 off, Esc closes -- transport controls still work while
+                 it's open. A track can carry several marks at once, so
+                 the popup is a checklist ([x] / [ ]) that stays open as
+                 you toggle, with a "(clear all marks)" entry at the top
   The narrow "Lyr" column shows a colored tick per lyrics format the
   track has a matching sidecar for (see 'y'): green for synced (.lrc),
   orange for plain (.txt), both adjacent (no gap) if both exist --
