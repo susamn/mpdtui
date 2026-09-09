@@ -258,10 +258,11 @@ func TestTrackInfoCardRenderMetaShowsZeroOpinionPlaceholders(t *testing.T) {
 		t.Errorf("Plays cell = %q, want %q", got, "0")
 	}
 	if got := metaCellText(a, 2, 1); got != "-" {
-		t.Errorf("Mark cell = %q, want %q (unmarked placeholder)", got, "-")
-	}
-	if got := metaCellText(a, 3, 1); got != "-" {
 		t.Errorf("Tags cell = %q, want %q (no tags placeholder)", got, "-")
+	}
+	// Marks are their own section now, not a row here.
+	if got := a.trackInfo.marks.GetText(true); !strings.Contains(got, "none") {
+		t.Errorf("Marks section = %q, want it to say none", got)
 	}
 }
 
@@ -294,16 +295,17 @@ func TestTrackInfoCardRenderMetaShowsRealValues(t *testing.T) {
 	if got := metaCellText(a, 1, 1); got != "2" {
 		t.Errorf("Plays cell = %q, want %q", got, "2")
 	}
-	// The cell carries per-mark color tags now, since a track can hold
-	// several marks and a TableCell has only one text color.
-	if got := stripColorTags(metaCellText(a, 2, 1)); got != "mark for deletion" {
-		t.Errorf("Mark cell = %q, want %q", got, "mark for deletion")
-	}
-	if got := metaCellText(a, 2, 1); !strings.Contains(got, markColor(metadata.MarkReason{ID: 1}).String()) {
-		t.Errorf("Mark cell = %q, want it colored by the mark's own color", got)
-	}
-	if got := metaCellText(a, 3, 1); got != "bengali, hindi" {
+	if got := metaCellText(a, 2, 1); got != "bengali, hindi" {
 		t.Errorf("Tags cell = %q, want %q", got, "bengali, hindi")
+	}
+	// Marks moved out of the table into their own list section, one per
+	// line, each in its own color.
+	marks := a.trackInfo.marks.GetText(false)
+	if !strings.Contains(stripColorTags(marks), "mark for deletion") {
+		t.Errorf("Marks section = %q, want it to list the mark", marks)
+	}
+	if !strings.Contains(marks, markColor(metadata.MarkReason{ID: 1}).String()) {
+		t.Errorf("Marks section = %q, want the mark in its own color", marks)
 	}
 }
 
