@@ -93,7 +93,8 @@ type App struct {
 	albumArt     *albumArtPanel
 	trackInfo    *trackInfoCard
 	lyricsViewer *lyricsViewer
-	markPicker   *markPicker
+	markPicker   *catalogPicker
+	tagPicker    *catalogPicker
 	settings     *settingsView
 	visualizer   *visualizerPanel
 
@@ -266,7 +267,8 @@ func (a *App) build() {
 	a.albumArt = newAlbumArtPanel(a)
 	a.trackInfo = newTrackInfoCard(a)
 	a.lyricsViewer = newLyricsViewer(a)
-	a.markPicker = newMarkPicker(a)
+	a.markPicker = newCatalogPicker(a, markCatalog{})
+	a.tagPicker = newCatalogPicker(a, tagCatalog{})
 	a.settings = newSettingsView(a)
 	a.visualizer = newVisualizerPanel(a)
 
@@ -366,6 +368,8 @@ func (a *App) reapplyTheme() {
 	a.settings.catalogTable.SetSelectedStyle(selectedStyle)
 	a.markPicker.SetSelectedTextColor(colorSelectedFg)
 	a.markPicker.SetSelectedBackgroundColor(colorSelectedBg)
+	a.tagPicker.SetSelectedTextColor(colorSelectedFg)
+	a.tagPicker.SetSelectedBackgroundColor(colorSelectedBg)
 
 	// Everything above is a widget whose border/title color tview reads
 	// live off a Box field on every Draw. Table cells are different:

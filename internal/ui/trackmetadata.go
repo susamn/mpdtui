@@ -5,10 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
-
-	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
 )
 
@@ -116,209 +112,6 @@ func (a *App) maybeTrackPlayCount(st mpdclient.Status, song mpdclient.Song) {
 	})
 }
 
-// markPicker toggles mark reasons on the track App.targetSong resolves
-// to, from internal/metadata's mark_reason catalog. Built once (like
-// trackInfoCard/lyricsViewer) and repopulated fresh from the catalog
-// every time it's opened, in case reasons were added since (the catalog
-// is meant to be edited by hand for now, see internal/metadata's own doc
-// comment).
-//
-// A track can carry several marks at once, so this is a checklist rather
-// than a one-of-N choice: Enter toggles the highlighted reason and the
-// popup stays open, because the natural thing after adding one mark is
-// to add another. Each row shows whether that reason is currently set,
-// so the popup doubles as the answer to "what is this track marked
-// with?".
-type markPicker struct {
-	*tview.List
-	app     *App
-	reasons []metadata.MarkReason
-
-	// song is the track this popup was opened for, captured once by
-	// render rather than re-resolved in apply. Transport controls stay
-	// live while an overlay is up (see globalInputCapture's modeOverlay
-	// branch) and a track can auto-advance on its own, so re-resolving
-	// the target on Enter could mark a track other than the one the
-	// popup's own title said it was for.
-	song mpdclient.Song
-}
-
-func newMarkPicker(app *App) *markPicker {
-	m := &markPicker{app: app}
-	l := tview.NewList()
-	l.ShowSecondaryText(false)
-	l.SetHighlightFullLine(true)
-	l.SetSelectedTextColor(colorSelectedFg)
-	l.SetSelectedBackgroundColor(colorSelectedBg)
-	l.SetBorder(true).SetTitle(" Mark (Enter to apply, Esc to cancel) ")
-	// j/k/g/G: List has no native vim bindings (unlike Table/TreeView --
-	// see the same note on internal/ui/globalsearch.go's list). Reuses
-	// moveHintHighlight, the exact same wrap-around arithmetic the
-	// global-search hint list already uses, rather than a second copy of
-	// it.
-	l.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Key() == tcell.KeyRune {
-			switch event.Rune() {
-			case 'j':
-				l.SetCurrentItem(moveHintHighlight(l.GetCurrentItem(), l.GetItemCount(), 1))
-				return nil
-			case 'k':
-				l.SetCurrentItem(moveHintHighlight(l.GetCurrentItem(), l.GetItemCount(), -1))
-				return nil
-			case 'g':
-				if l.GetItemCount() > 0 {
-					l.SetCurrentItem(0)
-				}
-				return nil
-			case 'G':
-				if n := l.GetItemCount(); n > 0 {
-					l.SetCurrentItem(n - 1)
-				}
-				return nil
-			}
-		}
-		return event
-	})
-	// Enter: List's own native SetSelectedFunc, no custom handling needed
-	// (unlike global search's hint list, which is driven from an
-	// InputField rather than the list itself holding focus).
-	l.SetSelectedFunc(func(index int, _, _ string, _ rune) {
-		m.apply(index)
-	})
-	m.List = l
-	return m
-}
-
-// render repopulates the list from reasons, plus a synthetic leading
-// "(clear all marks)" entry -- still worth having when marks are a set,
-// since clearing several one by one is tedious. song is the track the
-// popup acts on for as long as it stays open (see the field's own
-// comment), and names it in the title so there's no doubt which track is
-// about to be marked.
-func (m *markPicker) render(song mpdclient.Song, reasons []metadata.MarkReason) {
-	m.song = song
-	m.SetTitle(" Mark \"" + song.DisplayName() + "\" (Enter to toggle, Esc to close) ")
-	m.reasons = reasons
-	m.refresh()
-}
-
-// refresh redraws the list against the track's current marks, keeping
-// the cursor where it was. Called after every toggle so the row the user
-// just changed visibly reflects it without closing the popup.
-func (m *markPicker) refresh() {
-	current := m.GetCurrentItem()
-	set := map[int64]bool{}
-	for _, mk := range m.app.queue.metaCache[m.song.File].Marks {
-		set[mk.ID] = true
-	}
-
-	m.Clear()
-	m.AddItem("(clear all marks)", "", 0, nil)
-	for _, r := range m.reasons {
-		m.AddItem(markPickerLabel(r.Reason, set[r.ID]), "", 0, nil)
-	}
-	if current < m.GetItemCount() {
-		m.SetCurrentItem(current)
-	}
-}
-
-// markPickerLabel prefixes a reason with whether it is currently set, so
-// the checklist reads at a glance.
-//
-// Deliberately a tick and a blank, not "[x]"/"[ ]". tview parses "[...]"
-// in list text as a style tag, and the first version of this shipped
-// exactly that bug: "[x]" looks like a valid tag so it was swallowed
-// whole, while "[ ]" contains a space and so survived -- leaving set
-// marks with no marker and unset ones with a visible box, precisely
-// backwards. Same trap queue.go's formatColors comment describes for
-// "[MP3]" in table cells.
-//
-// The blank is two spaces so both states occupy the same width and the
-// reasons stay aligned down the list, and the tick is queueMarkTick, so
-// "marked" looks the same here as it does in the Queue's Mark column.
-func markPickerLabel(reason string, on bool) string {
-	if on {
-		return queueMarkTick + " " + reason
-	}
-	return "  " + reason
-}
-
-// apply is the list's own SetSelectedFunc (Enter): index 0 is the
-// synthetic "clear all marks" entry, index i>0 is m.reasons[i-1].
-//
-// Unlike the other metadata popups this does not close on Enter -- marks
-// are a set, and closing after each one would make marking a track twice
-// a two-popup job. Like handleRateSelectedTrack, the confirmation flash
-// is immediate while the database write and the Queue panel's Mark cell
-// repaint both happen in the background (see App.runAsync).
-func (m *markPicker) apply(index int) {
-	song := m.song
-	if song.File == "" {
-		m.app.closeOverlay()
-		return
-	}
-	db := m.app.metaDB
-
-	if index == 0 {
-		m.app.showMessage("cleared marks: " + song.DisplayName())
-		m.app.runAsync(func() error {
-			return db.SetMarks(song.File, nil)
-		}, func() {
-			t := m.app.queue.metaCache[song.File]
-			t.Marks = nil
-			m.app.queue.applyTrackMeta(song.File, t)
-			m.refresh()
-		})
-		return
-	}
-	if index-1 >= len(m.reasons) {
-		return
-	}
-	reason := m.reasons[index-1]
-
-	// The database decides whether this is an add or a remove, and
-	// reports which -- rather than the UI predicting it from the cache
-	// and risking a message that contradicts what was written.
-	var added bool
-	m.app.runAsync(func() error {
-		var err error
-		added, err = db.ToggleMark(song.File, reason.ID)
-		return err
-	}, func() {
-		t := m.app.queue.metaCache[song.File]
-		t.Marks = toggleMarkIn(t.Marks, reason, added)
-		m.app.queue.applyTrackMeta(song.File, t)
-		m.refresh()
-		if added {
-			m.app.showMessage(fmt.Sprintf("marked (%s): %s", reason.Reason, song.DisplayName()))
-		} else {
-			m.app.showMessage(fmt.Sprintf("unmarked (%s): %s", reason.Reason, song.DisplayName()))
-		}
-	})
-}
-
-// toggleMarkIn mirrors the database write in the cached Track: adds
-// reason if added, removes it otherwise, keeping the catalog-id ordering
-// marksForTrack returns so the cache and a fresh read agree.
-func toggleMarkIn(marks []metadata.MarkReason, reason metadata.MarkReason, added bool) []metadata.MarkReason {
-	out := make([]metadata.MarkReason, 0, len(marks)+1)
-	inserted := false
-	for _, m := range marks {
-		if m.ID == reason.ID {
-			continue // dropped; re-added below in order if still set
-		}
-		if added && !inserted && m.ID > reason.ID {
-			out = append(out, reason)
-			inserted = true
-		}
-		out = append(out, m)
-	}
-	if added && !inserted {
-		out = append(out, reason)
-	}
-	return out
-}
-
 // handleOpenMarkPicker is 'm', scoped to the Queue panel like rating:
 // opens the mark-reason popup for the currently playing track, falling
 // back to the Queue selection when nothing is playing (see
@@ -328,8 +121,24 @@ func toggleMarkIn(marks []metadata.MarkReason, reason metadata.MarkReason, added
 // globalInputCapture's modeOverlay branch), same reasoning as the lyrics
 // viewer -- explicitly requested regardless of which overlay is up.
 func (a *App) handleOpenMarkPicker() {
+	a.openCatalogPicker("m", "mark", a.markPicker)
+}
+
+// handleOpenTagPicker is 't', the tags counterpart of 'm'. Tags have
+// been a many-to-many relation in the database since before marks were,
+// but nothing ever called SetTags -- Settings could edit the tag catalog
+// and the Track Info card could display a track's tags, with no way in
+// between to actually put one on a track. This is that way.
+func (a *App) handleOpenTagPicker() {
+	a.openCatalogPicker("t", "tag", a.tagPicker)
+}
+
+// openCatalogPicker is the shared body of 'm' and 't': same gating
+// (Queue focus, metadata enabled, a resolvable target), same sizing,
+// same overlay handling.
+func (a *App) openCatalogPicker(key, name string, picker *catalogPicker) {
 	if a.tv.GetFocus() != a.queue.table {
-		a.invalidKey("m")
+		a.invalidKey(key)
 		return
 	}
 	if a.metaDB == nil {
@@ -340,18 +149,26 @@ func (a *App) handleOpenMarkPicker() {
 	if !ok {
 		return
 	}
-	reasons, err := a.metaDB.ListMarkReasons()
+	items, err := picker.kind.entries(a.metaDB)
 	if err != nil {
 		a.showError(err)
 		return
 	}
-	a.markPicker.render(song, reasons)
+	// The popup reads the Queue's cache to know what is already set, so
+	// make sure it holds this track before rendering -- otherwise the
+	// first open after startup shows everything as unset.
+	if _, ok := a.queue.metaCache[song.File]; !ok {
+		if track, err := a.metaDB.Get(song.File); err == nil {
+			a.queue.metaCache[song.File] = track
+		}
+	}
+	picker.render(song, items)
 	// Height follows the item count (plus the list's own top/bottom
 	// border), with a floor so the popup doesn't look cramped for just
-	// the seeded "(clear all marks)"+"mark for deletion" pair.
-	height := a.markPicker.GetItemCount() + 2
+	// the seeded "(clear all ...)"+one-entry pair.
+	height := picker.GetItemCount() + 2
 	if height < 8 {
 		height = 8
 	}
-	a.showOverlay("mark", centered(a.markPicker, 50, height), a.markPicker)
+	a.showOverlay(name, centered(picker, 50, height), picker)
 }

@@ -408,11 +408,43 @@ func (db *DB) SetTags(file string, tagIDs []int64) error {
 		return err
 	}
 	for _, tagID := range tagIDs {
-		if _, err := tx.Exec(`INSERT INTO track_tags (track_id, tag_id) VALUES (?, ?)`, id, tagID); err != nil {
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO track_tags (track_id, tag_id) VALUES (?, ?)`, id, tagID); err != nil {
 			return err
 		}
 	}
+	if _, err := tx.Exec(`UPDATE tracks SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`, id); err != nil {
+		return err
+	}
 	return tx.Commit()
+}
+
+// ToggleTag adds tagID to file's tags if absent, removes it if present,
+// and reports whether the tag is set afterwards. The mirror of
+// ToggleMark, for the same reason: toggling one is what the UI does, and
+// a single statement cannot drop a tag added elsewhere in between.
+func (db *DB) ToggleTag(file string, tagID int64) (bool, error) {
+	id, err := db.upsertTrack(file)
+	if err != nil {
+		return false, err
+	}
+
+	res, err := db.sql.Exec(`DELETE FROM track_tags WHERE track_id = ? AND tag_id = ?`, id, tagID)
+	if err != nil {
+		return false, err
+	}
+	removed, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if removed == 0 {
+		if _, err := db.sql.Exec(`INSERT INTO track_tags (track_id, tag_id) VALUES (?, ?)`, id, tagID); err != nil {
+			return false, err
+		}
+	}
+	if _, err := db.sql.Exec(`UPDATE tracks SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`, id); err != nil {
+		return false, err
+	}
+	return removed == 0, nil
 }
 
 // AddMarkReason inserts a new mark_reason catalog row, auto-assigning

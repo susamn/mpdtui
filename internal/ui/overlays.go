@@ -167,9 +167,10 @@ const helpText = `[::b]Global[-:-:-]
                  music_dir set), live audio quality (bitrate, sample
                  rate/bit depth/channels), which stored playlists the
                  track belongs to, and, when track_metadata is active, a
-                 Rating/Plays/Tags table plus the track's marks listed
-                 one per line. Tab expands every summarised section
-                 (marks and playlists) and collapses them again
+                 Rating/Plays table plus the track's marks and tags
+                 listed one per line. Tab expands every summarised
+                 section (marks, tags, playlists) and collapses them
+                 again
   y              lyrics viewer for the currently playing track (needs
                  music_dir set in ~/.config/mpdtui/config); j/k/g/G/
                  Ctrl-F/Ctrl-B to scroll, 'y' or Esc to close --
@@ -250,6 +251,9 @@ const helpText = `[::b]Global[-:-:-]
                  the popup is a checklist -- a tick against each mark
                  that is set -- and stays open as you toggle, with a
                  "(clear all marks)" entry at the top
+  t              tag the selected track, from the same kind of popup as
+                 'm' -- a track can carry several tags, edit the tag
+                 catalog in Settings ('e', Database tab)
   The narrow "Lyr" column shows a colored tick per lyrics format the
   track has a matching sidecar for (see 'y'): green for synced (.lrc),
   orange for plain (.txt), both adjacent (no gap) if both exist --

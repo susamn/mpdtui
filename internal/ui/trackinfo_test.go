@@ -257,12 +257,12 @@ func TestTrackInfoCardRenderMetaShowsZeroOpinionPlaceholders(t *testing.T) {
 	if got := metaCellText(a, 1, 1); got != "0" {
 		t.Errorf("Plays cell = %q, want %q", got, "0")
 	}
-	if got := metaCellText(a, 2, 1); got != "-" {
-		t.Errorf("Tags cell = %q, want %q (no tags placeholder)", got, "-")
-	}
-	// Marks are their own section now, not a row here.
+	// Marks and tags are their own sections now, not rows here.
 	if got := a.trackInfo.marks.GetText(true); !strings.Contains(got, "none") {
 		t.Errorf("Marks section = %q, want it to say none", got)
+	}
+	if got := a.trackInfo.tags.GetText(true); !strings.Contains(got, "none") {
+		t.Errorf("Tags section = %q, want it to say none", got)
 	}
 }
 
@@ -295,8 +295,13 @@ func TestTrackInfoCardRenderMetaShowsRealValues(t *testing.T) {
 	if got := metaCellText(a, 1, 1); got != "2" {
 		t.Errorf("Plays cell = %q, want %q", got, "2")
 	}
-	if got := metaCellText(a, 2, 1); got != "bengali, hindi" {
-		t.Errorf("Tags cell = %q, want %q", got, "bengali, hindi")
+	// Tags moved out of the table into their own list section, one per
+	// line.
+	tags := stripColorTags(a.trackInfo.tags.GetText(false))
+	for _, want := range []string{"bengali", "hindi"} {
+		if !strings.Contains(tags, want) {
+			t.Errorf("Tags section = %q, want it to list %q", tags, want)
+		}
 	}
 	// Marks moved out of the table into their own list section, one per
 	// line, each in its own color.

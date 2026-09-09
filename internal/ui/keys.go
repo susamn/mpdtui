@@ -71,6 +71,7 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 				{'i', a.trackInfo},
 				{'y', a.lyricsViewer},
 				{0, a.markPicker},
+				{0, a.tagPicker},
 			}
 			for _, ov := range noTextInputOverlays {
 				if a.tv.GetFocus() != ov.primitive {
@@ -109,7 +110,7 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 				a.lyricsViewer.cycleFormat()
 				return nil
 			}
-			if (focus == a.lyricsViewer || focus == a.markPicker) && a.handleTransportKey(event.Rune()) {
+			if (focus == a.lyricsViewer || focus == a.markPicker || focus == a.tagPicker) && a.handleTransportKey(event.Rune()) {
 				return nil
 			}
 		}
@@ -147,6 +148,9 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			return nil
 		case 'L':
 			a.jumpToCurrentTrack()
+			return nil
+		case 't':
+			a.handleOpenTagPicker()
 			return nil
 		case 'm':
 			a.handleOpenMarkPicker()

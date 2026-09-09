@@ -825,7 +825,7 @@ func TestMarkCellSummarisesBeyondTheCap(t *testing.T) {
 // parses "[...]" in list text as a style tag, so a "[x]" marker was
 // stored perfectly and then swallowed before it was ever drawn. Only the
 // rendered output can tell the difference.
-func renderPickerLines(t *testing.T, m *markPicker, w, h int) []string {
+func renderPickerLines(t *testing.T, m *catalogPicker, w, h int) []string {
 	t.Helper()
 	m.SetRect(0, 0, w, h)
 	screen := tcell.NewSimulationScreen("UTF-8")
@@ -912,7 +912,7 @@ func TestMarkPickerShowsWhichMarksAreSet(t *testing.T) {
 // partly eaten) before it reaches the screen.
 func TestMarkPickerLabelsSurviveTviewsTagParser(t *testing.T) {
 	for _, on := range []bool{true, false} {
-		label := markPickerLabel("Syncing needed", on)
+		label := catalogPickerLabel("Syncing needed", on)
 		if strings.ContainsAny(label, "[]") {
 			t.Errorf("label %q contains a bracket -- tview will parse it as a style tag", label)
 		}
@@ -920,10 +920,10 @@ func TestMarkPickerLabelsSurviveTviewsTagParser(t *testing.T) {
 			t.Errorf("label %q lost the reason itself", label)
 		}
 	}
-	if markPickerLabel("x", true) == markPickerLabel("x", false) {
+	if catalogPickerLabel("x", true) == catalogPickerLabel("x", false) {
 		t.Error("set and unset labels are identical -- nothing distinguishes a marked reason")
 	}
-	if a, b := markPickerLabel("x", true), markPickerLabel("x", false); len([]rune(a)) != len([]rune(b)) {
+	if a, b := catalogPickerLabel("x", true), catalogPickerLabel("x", false); len([]rune(a)) != len([]rune(b)) {
 		t.Errorf("set (%q) and unset (%q) labels differ in width, so reasons will not align", a, b)
 	}
 }
@@ -960,23 +960,136 @@ func TestMarkPickerStaysOpenAcrossToggles(t *testing.T) {
 	}
 }
 
-func TestToggleMarkInKeepsCatalogOrder(t *testing.T) {
-	a := metadata.MarkReason{ID: 1}
-	b := metadata.MarkReason{ID: 2}
-	c := metadata.MarkReason{ID: 3}
+// --- tag picker: the same picker, the other catalog ---
 
-	got := toggleMarkIn([]metadata.MarkReason{a, c}, b, true)
-	if len(got) != 3 || got[0].ID != 1 || got[1].ID != 2 || got[2].ID != 3 {
-		t.Errorf("adding into the middle = %+v, want id order 1,2,3", got)
+func TestTagPickerTogglesTags(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track", File: "artist/track.mp3"}}
+	a.queue.render(-1)
+	a.queue.table.Select(queueHeaderRows, 0)
+	a.tv.SetFocus(a.queue.table)
+
+	a.handleOpenTagPicker()
+	if a.mode != modeOverlay {
+		t.Fatal("tag picker did not open")
+	}
+	// "(clear all tags)" plus the three seeded tags.
+	if got := a.tagPicker.GetItemCount(); got != 4 {
+		t.Fatalf("tag picker item count = %d, want 4", got)
 	}
 
-	got = toggleMarkIn([]metadata.MarkReason{a, b, c}, b, false)
-	if len(got) != 2 || got[0].ID != 1 || got[1].ID != 3 {
-		t.Errorf("removing from the middle = %+v, want 1,3", got)
+	a.tagPicker.apply(1)
+	a.tagPicker.apply(2)
+	track, err := a.metaDB.Get("artist/track.mp3")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(track.Tags) != 2 {
+		t.Fatalf("tags after two toggles = %+v, want both", track.Tags)
 	}
 
-	got = toggleMarkIn(nil, a, true)
-	if len(got) != 1 || got[0].ID != 1 {
-		t.Errorf("adding to an empty set = %+v, want just it", got)
+	a.tagPicker.apply(1) // toggle the first back off
+	track, _ = a.metaDB.Get("artist/track.mp3")
+	if len(track.Tags) != 1 || track.Tags[0].ID != 2 {
+		t.Errorf("tags after toggling one off = %+v, want just the second", track.Tags)
+	}
+
+	a.tagPicker.apply(0) // "(clear all tags)"
+	track, _ = a.metaDB.Get("artist/track.mp3")
+	if len(track.Tags) != 0 {
+		t.Errorf("tags after clearing = %+v, want none", track.Tags)
+	}
+}
+
+func TestTagPickerRequiresQueueFocusAndMetadata(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.tv.SetFocus(a.library.tree)
+	a.handleOpenTagPicker()
+	if a.mode == modeOverlay {
+		t.Error("tag picker opened from the Library panel")
+	}
+	if got := a.hintBar.GetText(true); !strings.Contains(got, "'t' has no action here") {
+		t.Errorf("hint bar = %q, want the invalid-key feedback", got)
+	}
+
+	b := newTestApp() // no metadata database
+	b.tv.SetFocus(b.queue.table)
+	b.handleOpenTagPicker()
+	if b.mode == modeOverlay {
+		t.Error("tag picker opened without track_metadata active")
+	}
+}
+
+// TestTagAndMarkPickersAreIndependent guards the shared implementation:
+// one catalogPicker type, two instances, and toggling in one must not
+// touch the other's relation.
+func TestTagAndMarkPickersAreIndependent(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track", File: "artist/track.mp3"}}
+	a.queue.render(-1)
+	a.queue.table.Select(queueHeaderRows, 0)
+	a.tv.SetFocus(a.queue.table)
+
+	a.handleOpenMarkPicker()
+	a.markPicker.apply(1)
+	a.closeOverlay()
+	a.handleOpenTagPicker()
+	a.tagPicker.apply(1)
+
+	track, err := a.metaDB.Get("artist/track.mp3")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(track.Marks) != 1 {
+		t.Errorf("marks = %+v, want the one set through the mark picker", track.Marks)
+	}
+	if len(track.Tags) != 1 {
+		t.Errorf("tags = %+v, want the one set through the tag picker", track.Tags)
+	}
+}
+
+func TestTagPickerShowsWhichTagsAreSet(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	if err := a.metaDB.SetTags("artist/track.mp3", []int64{1}); err != nil {
+		t.Fatalf("SetTags: %v", err)
+	}
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track", File: "artist/track.mp3"}}
+	a.queue.render(-1)
+	a.queue.table.Select(queueHeaderRows, 0)
+	a.tv.SetFocus(a.queue.table)
+
+	a.handleOpenTagPicker()
+
+	var setLine, unsetLine string
+	for _, l := range renderPickerLines(t, a.tagPicker, 44, 8) {
+		if strings.Contains(l, "bengali") {
+			setLine = l
+		}
+		if strings.Contains(l, "hindi") {
+			unsetLine = l
+		}
+	}
+	if !strings.Contains(setLine, queueMarkTick) {
+		t.Errorf("set tag rendered as %q, want a tick against it", setLine)
+	}
+	if strings.Contains(unsetLine, queueMarkTick) {
+		t.Errorf("unset tag rendered as %q, want no tick", unsetLine)
+	}
+}
+
+// TestTKeyOpensTagPicker: 't' has to reach the handler, not fall through
+// to the unbound-key default.
+func TestTKeyOpensTagPicker(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track", File: "artist/track.mp3"}}
+	a.queue.render(-1)
+	a.queue.table.Select(queueHeaderRows, 0)
+	a.tv.SetFocus(a.queue.table)
+
+	if got := a.globalInputCapture(tcell.NewEventKey(tcell.KeyRune, 't', tcell.ModNone)); got != nil {
+		t.Errorf("'t' should be consumed by the tag picker, got %v", got)
+	}
+	if a.mode != modeOverlay || a.tv.GetFocus() != a.tagPicker {
+		t.Errorf("'t' did not open the tag picker (mode=%v focus=%T)", a.mode, a.tv.GetFocus())
 	}
 }

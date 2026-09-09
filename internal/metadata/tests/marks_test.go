@@ -340,3 +340,77 @@ func TestDeleteMarkReasonRemovesItFromEveryTrack(t *testing.T) {
 		}
 	}
 }
+
+// --- tags: the same relation, exercised the same way ---
+
+func TestToggleTagAddsThenRemoves(t *testing.T) {
+	db := openTestDB(t)
+
+	on, err := db.ToggleTag("artist/one", 1)
+	if err != nil {
+		t.Fatalf("ToggleTag: %v", err)
+	}
+	if !on {
+		t.Error("first toggle reported the tag as unset, want set")
+	}
+	track, _ := db.Get("artist/one")
+	if len(track.Tags) != 1 {
+		t.Fatalf("tags after first toggle = %+v, want one", track.Tags)
+	}
+
+	on, err = db.ToggleTag("artist/one", 1)
+	if err != nil {
+		t.Fatalf("ToggleTag: %v", err)
+	}
+	if on {
+		t.Error("second toggle reported the tag as set, want cleared")
+	}
+	track, _ = db.Get("artist/one")
+	if len(track.Tags) != 0 {
+		t.Errorf("tags after second toggle = %+v, want none", track.Tags)
+	}
+}
+
+func TestToggleTagLeavesOtherTagsAlone(t *testing.T) {
+	db := openTestDB(t)
+	if err := db.SetTags("artist/one", []int64{1, 2}); err != nil {
+		t.Fatalf("SetTags: %v", err)
+	}
+	if _, err := db.ToggleTag("artist/one", 1); err != nil {
+		t.Fatalf("ToggleTag: %v", err)
+	}
+	track, _ := db.Get("artist/one")
+	if len(track.Tags) != 1 || track.Tags[0].ID != 2 {
+		t.Errorf("tags = %+v, want only the untouched one", track.Tags)
+	}
+}
+
+func TestSetTagsIgnoresDuplicates(t *testing.T) {
+	db := openTestDB(t)
+	if err := db.SetTags("artist/one", []int64{2, 2, 2}); err != nil {
+		t.Fatalf("SetTags: %v", err)
+	}
+	track, _ := db.Get("artist/one")
+	if len(track.Tags) != 1 {
+		t.Errorf("tags = %+v, want the duplicate collapsed", track.Tags)
+	}
+}
+
+func TestTagAppliesToSeveralTracksAndTrackHoldsSeveralTags(t *testing.T) {
+	db := openTestDB(t)
+	if err := db.SetTags("artist/one", []int64{1, 2, 3}); err != nil {
+		t.Fatalf("SetTags: %v", err)
+	}
+	if err := db.SetTags("artist/two", []int64{1}); err != nil {
+		t.Fatalf("SetTags: %v", err)
+	}
+
+	one, _ := db.Get("artist/one")
+	if len(one.Tags) != 3 {
+		t.Errorf("first track tags = %+v, want three", one.Tags)
+	}
+	two, _ := db.Get("artist/two")
+	if len(two.Tags) != 1 || two.Tags[0].ID != 1 {
+		t.Errorf("second track tags = %+v, want the shared one", two.Tags)
+	}
+}

@@ -136,10 +136,10 @@ func TestTrackInfoCardHeightMatchesItsSections(t *testing.T) {
 	if withMeta.meta == nil {
 		t.Fatal("setup: metadata-enabled test app has no metadata table")
 	}
-	// The metadata table brings the marks section with it -- both live
-	// on the same local database.
-	if wantMeta := want + trackInfoMetaLines + trackInfoMarkSectionLines; withMeta.height() != wantMeta {
-		t.Errorf("height with the metadata table = %d, want %d", withMeta.height(), wantMeta)
+	// The metadata table brings the marks and tags sections with it --
+	// all three live on the same local database.
+	if wantMeta := want + trackInfoMetaLines + trackInfoMarkSectionLines + trackInfoTagSectionLines; withMeta.height() != wantMeta {
+		t.Errorf("height with the metadata table = %d, want %d", withMeta.height(), want+trackInfoMetaLines+trackInfoMarkSectionLines+trackInfoTagSectionLines)
 	}
 }
 
@@ -569,6 +569,89 @@ func TestMarksSectionSharesTheCardWidth(t *testing.T) {
 	for _, line := range strings.Split(stripColorTags(text), "\n") {
 		if len([]rune(line)) > trackInfoCardWidth {
 			t.Errorf("line %q is wider than the card (%d)", line, trackInfoCardWidth)
+		}
+	}
+}
+
+func TestTagsSectionMirrorsMarks(t *testing.T) {
+	tags := []metadata.Tag{{ID: 1, Tagname: "bengali"}, {ID: 2, Tagname: "hindi"}}
+	text, rows := tagsSection(tags, trackInfoTagLines)
+	lines := strings.Split(text, "\n")
+	if len(lines) != 3 { // heading + one line per tag
+		t.Fatalf("section rendered %d lines, want a heading and one line per tag: %q", len(lines), text)
+	}
+	for i, tg := range tags {
+		if !strings.Contains(stripColorTags(lines[i+1]), tg.Tagname) {
+			t.Errorf("line %d = %q, want it to carry %q", i+1, lines[i+1], tg.Tagname)
+		}
+	}
+	if rows != len(lines)+1 {
+		t.Errorf("rows = %d, want %d", rows, len(lines)+1)
+	}
+
+	empty, _ := tagsSection(nil, trackInfoTagLines)
+	if !strings.Contains(empty, "none") {
+		t.Errorf("section for an untagged track = %q, want it to say none", empty)
+	}
+
+	var many []metadata.Tag
+	for i := 1; i <= trackInfoTagLines+2; i++ {
+		many = append(many, metadata.Tag{ID: int64(i), Tagname: fmt.Sprintf("tag %d", i)})
+	}
+	capped, _ := tagsSection(many, trackInfoTagLines)
+	if n := strings.Count(capped, "•"); n != trackInfoTagLines {
+		t.Errorf("listed %d tags, want the cap of %d", n, trackInfoTagLines)
+	}
+	if !strings.Contains(capped, "+2 more") {
+		t.Errorf("section %q, want it to summarise the remaining 2", capped)
+	}
+}
+
+// TestTabExpandsAllThreeSections: Tab means "show me everything", and
+// there are three summarised sections now.
+func TestTabExpandsAllThreeSections(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.queue.table.SetRect(0, 0, 120, 70)
+	file := "artist/track.mp3"
+	for _, r := range []string{"two", "three", "four", "five"} {
+		if _, err := a.metaDB.AddMarkReason(r); err != nil {
+			t.Fatalf("AddMarkReason: %v", err)
+		}
+	}
+	for _, tg := range []string{"four", "five"} {
+		if _, err := a.metaDB.AddTag(tg); err != nil {
+			t.Fatalf("AddTag: %v", err)
+		}
+	}
+	if err := a.metaDB.SetMarks(file, []int64{1, 2, 3, 4, 5}); err != nil {
+		t.Fatalf("SetMarks: %v", err)
+	}
+	if err := a.metaDB.SetTags(file, []int64{1, 2, 3, 4, 5}); err != nil {
+		t.Fatalf("SetTags: %v", err)
+	}
+	a.playlistMembership = map[string][]string{file: {"One", "Two", "Three", "Four", "Five", "Six"}}
+	song := mpdclient.Song{Title: "Track", File: file}
+
+	a.trackInfo.render(song, mpdclient.Status{})
+	for name, got := range map[string]string{
+		"marks":     a.trackInfo.marks.GetText(true),
+		"tags":      a.trackInfo.tags.GetText(true),
+		"playlists": a.trackInfo.playlists.GetText(true),
+	} {
+		if !strings.Contains(got, "more") {
+			t.Fatalf("setup: %s section should be summarised when collapsed, got %q", name, got)
+		}
+	}
+
+	a.trackInfo.expanded = true
+	a.trackInfo.render(song, mpdclient.Status{})
+	for name, got := range map[string]string{
+		"marks":     a.trackInfo.marks.GetText(true),
+		"tags":      a.trackInfo.tags.GetText(true),
+		"playlists": a.trackInfo.playlists.GetText(true),
+	} {
+		if strings.Contains(got, "more") {
+			t.Errorf("%s section still summarised after expanding: %q", name, got)
 		}
 	}
 }
