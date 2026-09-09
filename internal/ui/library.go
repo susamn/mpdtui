@@ -578,32 +578,38 @@ func findChildByPath(node *tview.TreeNode, path string) *tview.TreeNode {
 // group, a single track for a file, or an append for a playlist entry
 // (there's no meaningful "add without loading" distinction for a stored
 // playlist, so it behaves like Enter).
-func (p *libraryPanel) addSelected() {
+// addSelected queues whatever the cursor is on, reporting whether
+// anything was actually added. False covers both a failed MPD call and a
+// node there is nothing to add for -- an unloaded-directory placeholder,
+// say -- so a caller does not treat pressing 'a' on one of those as a
+// successful add.
+func (p *libraryPanel) addSelected() bool {
 	node := p.tree.GetCurrentNode()
 	if node == nil {
-		return
+		return false
 	}
 	if g, ok := node.GetReference().(*albumGroup); ok {
 		for _, s := range g.songs {
 			if err := p.app.client.QueueAdd(s.File); err != nil {
 				p.app.showError(err)
-				return
+				return false
 			}
 		}
 		p.app.queue.refresh()
 		p.app.showMessage(fmt.Sprintf("added %d track(s) from %s", len(g.songs), g.label))
-		return
+		return true
 	}
 	entry, ok := node.GetReference().(mpdclient.DirEntry)
 	if !ok {
-		return
+		return false
 	}
 	switch entry.Type {
 	case mpdclient.EntryDirectory, mpdclient.EntryFile:
-		p.app.queueAddPath(entry.Path)
+		return p.app.queueAddPath(entry.Path)
 	case mpdclient.EntryPlaylist:
-		p.app.appendPlaylist(entry.Path)
+		return p.app.appendPlaylist(entry.Path)
 	}
+	return false
 }
 
 // addAllResults queues every track currently listed as a search result,

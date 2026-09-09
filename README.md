@@ -365,8 +365,8 @@ theme_file = ~/.cache/mpdtui/colors.toml
 | Panel | Key | Action |
 |---|---|---|
 | Library | `Enter` | Expand/collapse a folder, or add+play a track |
-| Library | `a` | Add selected folder (recursively) or track to queue (no play) |
-| Library | `A` | Add *every* current search result to the queue at once. Only active on search results (`/` in this panel, or an artist/album opened from global search) -- in browse mode the top level is the whole library, so it says so instead |
+| Library | `a` | Add selected folder (recursively) or track to queue (no play), then move focus to the Queue -- what you just added is there, and the next thing you do is almost always to it. Focus only moves on a real add, so pressing `a` on a node with nothing behind it stays put |
+| Library | `A` | Add *every* current search result to the queue at once. Only active on search results (`/` in this panel, or an artist/album opened from global search) -- in browse mode the top level is the whole library, so it says so instead. Moves focus to the Queue afterwards, like `a` |
 | Library | `Backspace` | Collapse folder, or go up to its parent |
 | Library | `j`/`k`/`g`/`G` | Native tree navigation (also `J`/`K` to jump in/out a level) |
 | Library | `o` | Cycle sort: name / most recently modified (browse mode only) |

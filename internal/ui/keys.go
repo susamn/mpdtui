@@ -440,7 +440,13 @@ func (a *App) jumpToCurrentTrack() {
 func (a *App) handleAdd() {
 	switch a.tv.GetFocus() {
 	case a.library.tree:
-		a.library.addSelected()
+		// Adding from the Library is a move towards the Queue: what you
+		// just added is there, and the next thing you do is almost
+		// always to it. Only on a real add, so pressing 'a' on a node
+		// with nothing to add does not throw focus across the screen.
+		if a.library.addSelected() {
+			a.focusQueueAfterAdd()
+		}
 	case a.playlists.table:
 		name := a.playlists.selectedName()
 		if name == "" {
@@ -480,6 +486,7 @@ func (a *App) handleAddAll() {
 		a.showMessage("nothing to add")
 		return
 	}
+	a.focusQueueAfterAdd()
 	a.showMessage(fmt.Sprintf("added %d track(s) from %q", added, a.library.query))
 }
 

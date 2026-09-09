@@ -280,3 +280,79 @@ func TestAddAllKeyIsRouted(t *testing.T) {
 		t.Errorf("hint bar after 'A' = %q, want the add-all handler's message", got)
 	}
 }
+
+// --- focus follows an add to the Queue ---
+
+func TestFocusQueueAfterAddMovesFocusAndPanelIndex(t *testing.T) {
+	a := newTestApp()
+	a.focusPanel(libraryPanelIdx)
+
+	a.focusQueueAfterAdd()
+
+	if a.tv.GetFocus() != a.queue.table {
+		t.Errorf("focus = %T, want the Queue table", a.tv.GetFocus())
+	}
+	// panelIdx has to follow too, or the next Tab cycles from the panel
+	// focus used to be on.
+	if a.panelIdx != queuePanelIdx {
+		t.Errorf("panelIdx = %d, want the Queue's %d", a.panelIdx, queuePanelIdx)
+	}
+}
+
+// TestFocusQueueAfterAddKeepsTheConfirmation is the reason this does not
+// just call focusPanelPrimitive: that repaints the hint bar, which would
+// wipe the "added ..." message the add flashed a moment earlier, before
+// it could be read.
+func TestFocusQueueAfterAddKeepsTheConfirmation(t *testing.T) {
+	a := newTestApp()
+	a.focusPanel(libraryPanelIdx)
+	a.showMessage("added 12 track(s) from Miles Davis")
+	before := a.hintBar.GetText(true)
+
+	a.focusQueueAfterAdd()
+
+	if got := a.hintBar.GetText(true); got != before {
+		t.Errorf("hint bar after focusing = %q, want the confirmation %q kept", got, before)
+	}
+
+	// For contrast: the general-purpose focus helper does repaint, which
+	// is correct for Tab and wrong here.
+	a.showMessage("added 12 track(s) from Miles Davis")
+	a.focusPanelPrimitive(a.queue.table)
+	if got := a.hintBar.GetText(true); strings.Contains(got, "added 12") {
+		t.Error("focusPanelPrimitive unexpectedly preserved the message -- this test no longer proves anything")
+	}
+}
+
+func TestAddDoesNotMoveFocusWhenThereIsNothingToAdd(t *testing.T) {
+	// The Library cursor sits on the tree's root, which has nothing
+	// behind it to queue. Pressing 'a' must not throw focus across the
+	// screen for an add that never happened.
+	a := newTestApp()
+	a.focusPanel(libraryPanelIdx)
+
+	a.handleAdd()
+
+	if a.tv.GetFocus() != a.library.tree {
+		t.Errorf("focus = %T after adding nothing, want it left on the Library", a.tv.GetFocus())
+	}
+}
+
+func TestAddAllDoesNotMoveFocusWhenItAddsNothing(t *testing.T) {
+	a := newTestApp()
+	a.focusPanel(libraryPanelIdx)
+
+	// Browse mode: 'A' is refused outright.
+	a.library.mode = libBrowse
+	a.handleAddAll()
+	if a.tv.GetFocus() != a.library.tree {
+		t.Errorf("focus = %T after 'A' in browse mode, want it left on the Library", a.tv.GetFocus())
+	}
+
+	// Search mode with no results: nothing to add, so nothing to follow.
+	seedSearchResults(a.library, "nothingmatches", nil)
+	a.handleAddAll()
+	if a.tv.GetFocus() != a.library.tree {
+		t.Errorf("focus = %T after 'A' with no results, want it left on the Library", a.tv.GetFocus())
+	}
+}
