@@ -818,6 +818,51 @@ func TestMarkCellSummarisesBeyondTheCap(t *testing.T) {
 	}
 }
 
+// renderPickerLines draws the mark picker and returns what actually
+// lands on screen, one string per row.
+//
+// Asserting on GetItemText instead is what let a real bug ship: tview
+// parses "[...]" in list text as a style tag, so a "[x]" marker was
+// stored perfectly and then swallowed before it was ever drawn. Only the
+// rendered output can tell the difference.
+func renderPickerLines(t *testing.T, m *markPicker, w, h int) []string {
+	t.Helper()
+	m.SetRect(0, 0, w, h)
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatalf("init simulation screen: %v", err)
+	}
+	defer screen.Fini()
+	screen.SetSize(w, h)
+	m.Draw(screen)
+	screen.Show()
+
+	cells, sw, _ := screen.GetContents()
+	lines := make([]string, 0, h)
+	for row := 0; row < h; row++ {
+		var b strings.Builder
+		for col := 0; col < w; col++ {
+			c := cells[row*sw+col]
+			if len(c.Runes) == 0 || c.Runes[0] == 0 {
+				b.WriteString(" ")
+				continue
+			}
+			b.WriteString(string(c.Runes))
+		}
+		lines = append(lines, b.String())
+	}
+	return lines
+}
+
+// runeIndex is strings.Index in screen columns rather than bytes.
+func runeIndex(haystack, needle string) int {
+	i := strings.Index(haystack, needle)
+	if i < 0 {
+		return -1
+	}
+	return len([]rune(haystack[:i]))
+}
+
 func TestMarkPickerShowsWhichMarksAreSet(t *testing.T) {
 	a := newTestAppWithMetaDB(t)
 	if _, err := a.metaDB.AddMarkReason("bad rip"); err != nil {
@@ -836,13 +881,50 @@ func TestMarkPickerShowsWhichMarksAreSet(t *testing.T) {
 
 	a.handleOpenMarkPicker()
 
-	set, _ := a.markPicker.GetItemText(1)   // "mark for deletion", which is set
-	unset, _ := a.markPicker.GetItemText(2) // "bad rip", which is not
-	if !strings.HasPrefix(set, "[x]") {
-		t.Errorf("set mark rendered as %q, want it shown as set", set)
+	var setLine, unsetLine string
+	for _, l := range renderPickerLines(t, a.markPicker, 44, 8) {
+		if strings.Contains(l, "mark for deletion") {
+			setLine = l
+		}
+		if strings.Contains(l, "bad rip") {
+			unsetLine = l
+		}
 	}
-	if !strings.HasPrefix(unset, "[ ]") {
-		t.Errorf("unset mark rendered as %q, want it shown as unset", unset)
+	if setLine == "" || unsetLine == "" {
+		t.Fatalf("picker did not render both reasons (set=%q unset=%q)", setLine, unsetLine)
+	}
+	if !strings.Contains(setLine, queueMarkTick) {
+		t.Errorf("set mark rendered as %q, want a %q against it", setLine, queueMarkTick)
+	}
+	if strings.Contains(unsetLine, queueMarkTick) {
+		t.Errorf("unset mark rendered as %q, want no tick", unsetLine)
+	}
+	// Both states occupy the same width, so the reasons stay aligned.
+	// Compared in runes, not bytes: the tick is three bytes wide but one
+	// column, so byte offsets would disagree on lines that line up fine.
+	if runeIndex(setLine, "mark for deletion") != runeIndex(unsetLine, "bad rip") {
+		t.Errorf("reasons not aligned:\n%q\n%q", setLine, unsetLine)
+	}
+}
+
+// TestMarkPickerLabelsSurviveTviewsTagParser guards the class of bug
+// directly: anything bracket-shaped in list text is eaten (or, worse,
+// partly eaten) before it reaches the screen.
+func TestMarkPickerLabelsSurviveTviewsTagParser(t *testing.T) {
+	for _, on := range []bool{true, false} {
+		label := markPickerLabel("Syncing needed", on)
+		if strings.ContainsAny(label, "[]") {
+			t.Errorf("label %q contains a bracket -- tview will parse it as a style tag", label)
+		}
+		if !strings.Contains(label, "Syncing needed") {
+			t.Errorf("label %q lost the reason itself", label)
+		}
+	}
+	if markPickerLabel("x", true) == markPickerLabel("x", false) {
+		t.Error("set and unset labels are identical -- nothing distinguishes a marked reason")
+	}
+	if a, b := markPickerLabel("x", true), markPickerLabel("x", false); len([]rune(a)) != len([]rune(b)) {
+		t.Errorf("set (%q) and unset (%q) labels differ in width, so reasons will not align", a, b)
 	}
 }
 

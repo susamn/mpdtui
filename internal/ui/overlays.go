@@ -247,8 +247,9 @@ const helpText = `[::b]Global[-:-:-]
                  to navigate, Enter toggles the highlighted reason on or
                  off, Esc closes -- transport controls still work while
                  it's open. A track can carry several marks at once, so
-                 the popup is a checklist ([x] / [ ]) that stays open as
-                 you toggle, with a "(clear all marks)" entry at the top
+                 the popup is a checklist -- a tick against each mark
+                 that is set -- and stays open as you toggle, with a
+                 "(clear all marks)" entry at the top
   The narrow "Lyr" column shows a colored tick per lyrics format the
   track has a matching sidecar for (see 'y'): green for synced (.lrc),
   orange for plain (.txt), both adjacent (no gap) if both exist --

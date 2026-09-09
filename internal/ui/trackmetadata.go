@@ -223,14 +223,24 @@ func (m *markPicker) refresh() {
 }
 
 // markPickerLabel prefixes a reason with whether it is currently set, so
-// the checklist reads at a glance. A box rather than a bare tick: an
-// empty row still shows the slot, which is what makes the set ones
-// obvious.
+// the checklist reads at a glance.
+//
+// Deliberately a tick and a blank, not "[x]"/"[ ]". tview parses "[...]"
+// in list text as a style tag, and the first version of this shipped
+// exactly that bug: "[x]" looks like a valid tag so it was swallowed
+// whole, while "[ ]" contains a space and so survived -- leaving set
+// marks with no marker and unset ones with a visible box, precisely
+// backwards. Same trap queue.go's formatColors comment describes for
+// "[MP3]" in table cells.
+//
+// The blank is two spaces so both states occupy the same width and the
+// reasons stay aligned down the list, and the tick is queueMarkTick, so
+// "marked" looks the same here as it does in the Queue's Mark column.
 func markPickerLabel(reason string, on bool) string {
 	if on {
-		return "[x] " + reason
+		return queueMarkTick + " " + reason
 	}
-	return "[ ] " + reason
+	return "  " + reason
 }
 
 // apply is the list's own SetSelectedFunc (Enter): index 0 is the
