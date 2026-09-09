@@ -30,25 +30,47 @@ func TestQuadrantRectBottomRight(t *testing.T) {
 }
 
 func TestCardRectFixedSizeClampedToQuadrant(t *testing.T) {
+	// cardRect now takes the Queue panel's own rect and derives the
+	// quadrant itself, so these cases are written in panel terms.
 	cases := []struct {
-		x, y, w, h                 int
+		name                       string
+		px, py, pw, ph, want       int
 		wantX, wantY, wantW, wantH int
 	}{
-		// Quadrant bigger than the fixed footprint in both dimensions --
-		// card stays at its fixed compact size, not the quadrant's.
-		{50, 30, 50, 30, 50, 30, trackInfoCardWidth, trackInfoCardHeight},
-		// Quadrant narrower than the fixed width -- clamps width down,
-		// height still fixed (quadrant is tall enough for it).
-		{0, 0, 41, 21, 0, 0, 41, trackInfoCardHeight},
-		// Quadrant smaller than the fixed footprint in both dimensions.
-		{0, 0, 1, 1, 0, 0, 1, 1},
-		{0, 0, 0, 0, 0, 0, 0, 0},
+		{
+			// Quadrant (50x30) roomier than the card: top-left anchor.
+			name: "fits in the quadrant",
+			px:   0, py: 0, pw: 100, ph: 60, want: 18,
+			wantX: 50, wantY: 30, wantW: trackInfoCardWidth, wantH: 18,
+		},
+		{
+			// Quadrant narrower than the card's fixed width.
+			name: "narrow panel clamps the width",
+			px:   0, py: 0, pw: 82, ph: 42, want: 18,
+			wantX: 41, wantY: 21, wantW: 41, wantH: 18,
+		},
+		{
+			// Taller than the quadrant (20) but not the panel (40):
+			// bottom edge stays put, the card grows upwards.
+			name: "expanded card grows upwards, not past the panel",
+			px:   0, py: 0, pw: 100, ph: 40, want: 30,
+			wantX: 50, wantY: 10, wantW: trackInfoCardWidth, wantH: 30,
+		},
+		{
+			// Asking for more than the whole panel: clamped to it, and
+			// pinned to the panel's top rather than above it.
+			name: "never taller than the panel itself",
+			px:   0, py: 5, pw: 100, ph: 20, want: 100,
+			wantX: 50, wantY: 5, wantW: trackInfoCardWidth, wantH: 20,
+		},
+		{name: "degenerate", px: 0, py: 0, pw: 2, ph: 2, want: 18, wantX: 1, wantY: 0, wantW: 1, wantH: 2},
+		{name: "empty", px: 0, py: 0, pw: 0, ph: 0, want: 18, wantX: 0, wantY: 0, wantW: 0, wantH: 0},
 	}
 	for _, tc := range cases {
-		gotX, gotY, gotW, gotH := cardRect(tc.x, tc.y, tc.w, tc.h)
+		gotX, gotY, gotW, gotH := cardRect(tc.px, tc.py, tc.pw, tc.ph, tc.want)
 		if gotX != tc.wantX || gotY != tc.wantY || gotW != tc.wantW || gotH != tc.wantH {
-			t.Errorf("cardRect(%d,%d,%d,%d) = (%d,%d,%d,%d), want (%d,%d,%d,%d)",
-				tc.x, tc.y, tc.w, tc.h, gotX, gotY, gotW, gotH, tc.wantX, tc.wantY, tc.wantW, tc.wantH)
+			t.Errorf("%s: cardRect(%d,%d,%d,%d, want=%d) = (%d,%d,%d,%d), want (%d,%d,%d,%d)",
+				tc.name, tc.px, tc.py, tc.pw, tc.ph, tc.want, gotX, gotY, gotW, gotH, tc.wantX, tc.wantY, tc.wantW, tc.wantH)
 		}
 	}
 }
@@ -313,9 +335,9 @@ func TestOpenTrackInfoTakesFocusAndPositionsInBottomRightQuadrant(t *testing.T) 
 	// than Draw itself, which needs a real tcell.Screen to paint into.
 	a.trackInfo.positionOverQueue()
 	x, y, w, h := a.trackInfo.GetRect()
-	if x != 50 || y != 30 || w != trackInfoCardWidth || h != trackInfoCardHeight {
-		t.Errorf("card rect after Draw = (%d,%d,%d,%d), want (50,30,%d,%d) -- fixed compact size, floating at the quadrant's top-left corner",
-			x, y, w, h, trackInfoCardWidth, trackInfoCardHeight)
+	if x != 50 || y != 30 || w != trackInfoCardWidth || h != a.trackInfo.height() {
+		t.Errorf("card rect after Draw = (%d,%d,%d,%d), want (50,30,%d,%d) -- compact size, floating at the quadrant's top-left corner",
+			x, y, w, h, trackInfoCardWidth, a.trackInfo.height())
 	}
 }
 

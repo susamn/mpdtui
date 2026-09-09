@@ -522,10 +522,11 @@ func TestHandleRateSelectedTrackRatesPlayingTrackNotSelection(t *testing.T) {
 	}
 }
 
-// TestHandleRateSelectedTrackRatesPlayingTrackWhilePaused: paused is
-// still "the track you're listening to", so it targets the same way play
-// does -- only a stop hands the target back to the selection.
-func TestHandleRateSelectedTrackRatesPlayingTrackWhilePaused(t *testing.T) {
+// TestHandleRateSelectedTrackRatesSelectionWhilePaused: paused is not
+// playing, so the target is whatever the cursor is on -- the same rule
+// as stopped. Rating must land on the selected track, not on the one
+// MPD happens to have loaded.
+func TestHandleRateSelectedTrackRatesSelectionWhilePaused(t *testing.T) {
 	a := newTestAppWithMetaDB(t)
 	a.queue.songs = []mpdclient.Song{
 		{ID: 1, Title: "Paused", File: "artist/paused.mp3"},
@@ -538,12 +539,19 @@ func TestHandleRateSelectedTrackRatesPlayingTrackWhilePaused(t *testing.T) {
 
 	a.handleRateSelectedTrack(2)
 
+	selected, err := a.metaDB.Get("artist/other.mp3")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if selected.Rating != 2 {
+		t.Errorf("selected track rating = %d, want 2", selected.Rating)
+	}
 	paused, err := a.metaDB.Get("artist/paused.mp3")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if paused.Rating != 2 {
-		t.Errorf("paused track rating = %d, want 2", paused.Rating)
+	if paused.Rating != 0 {
+		t.Errorf("paused track rating = %d, want it untouched", paused.Rating)
 	}
 }
 
@@ -711,7 +719,12 @@ func TestTargetSong(t *testing.T) {
 		want  string
 	}{
 		{"playing wins over the selection", mpdclient.StatePlay, playing.File},
-		{"paused still counts as playing", mpdclient.StatePause, playing.File},
+		// Paused deliberately does not count: while nothing is actually
+		// playing, every track-level action follows the cursor, which is
+		// the only track the user is pointing at. An earlier version
+		// treated paused as playing; reversed on the explicit report
+		// that 'i' kept showing the paused track after scrolling away.
+		{"paused falls back to the selection", mpdclient.StatePause, selected.File},
 		{"stopped falls back to the selection", mpdclient.StateStop, selected.File},
 	}
 	for _, tc := range cases {

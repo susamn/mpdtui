@@ -47,6 +47,16 @@ type App struct {
 	// is inactive (no config.LoadMusicDir setup), not an error.
 	musicDir string
 
+	// playlistMembership maps a track URI to the stored playlists
+	// containing it, shown by the Track Info card ('i'). Filled by
+	// refreshTrackCounts from the same scan that produces the Playlists
+	// panel's counts, so it costs no extra MPD traffic -- and, like those
+	// counts, it is a snapshot refreshed on countTicker's cadence rather
+	// than live. nil means "not fetched yet", which is deliberately
+	// distinct from a track being in no playlist: the card says so rather
+	// than claiming an empty answer it does not have. Main-goroutine-only.
+	playlistMembership map[string][]string
+
 	// metaDB is the local track-metadata database (play count, rating,
 	// mark, tags -- see internal/metadata), opened by cmd/mpdtui's main.go
 	// only when config.LoadTrackMetadataEnabled() is true. nil means the
@@ -431,8 +441,8 @@ func (a *App) eventLoop() {
 	}
 }
 
-// refreshTrackCounts fetches every playlist's track count
-// (mpdclient.Client.PlaylistTrackCounts) in the background and applies it
+// refreshTrackCounts fetches every playlist's contents
+// (mpdclient.Client.PlaylistIndex) in the background and applies it
 // once done -- one MPD round-trip per playlist, which stays well under a
 // second even for a few hundred playlists but is still real enough that
 // it must never block the single UI goroutine, whether triggered by
@@ -446,16 +456,20 @@ func (a *App) eventLoop() {
 // deliberate keypress should.
 func (a *App) refreshTrackCounts(silent bool) {
 	go func() {
-		counts, err := a.client.PlaylistTrackCounts()
+		idx, err := a.client.PlaylistIndex()
 		a.tv.QueueUpdateDraw(func() {
 			if err != nil {
 				a.showError(err)
 				return
 			}
-			a.playlists.trackCounts = counts
+			a.playlists.trackCounts = idx.Counts
+			// Same scan, second view: which playlists hold a given
+			// track, for the Track Info card (see trackinfo.go).
+			a.playlistMembership = idx.Membership
 			a.playlists.render()
+			a.renderTrackInfo()
 			if !silent {
-				a.showMessage(fmt.Sprintf("refreshed track counts for %d playlists", len(counts)))
+				a.showMessage(fmt.Sprintf("refreshed track counts for %d playlists", len(idx.Counts)))
 			}
 		})
 	}()
@@ -571,13 +585,26 @@ func (a *App) maybeJumpToCurrentTrack(trackChanged bool) {
 	}
 }
 
-// hasLivePlayback reports whether there is a track actually being
-// listened to right now. State (rather than a non-empty currentSong.File)
-// is what decides: MPD keeps reporting a current song while stopped --
-// the position it would resume from -- which is not a track anyone is
-// listening to. Paused counts: it is still the track you are on, just
-// not moving.
-func (a *App) hasLivePlayback() bool {
+// isPlaying reports whether a track is actually playing right now.
+//
+// Only StatePlay counts. MPD keeps reporting a current song while
+// stopped (the position it would resume from) and while paused, but
+// neither is a track being played, and treating them as one is what made
+// 'i' show the paused track instead of the row under the cursor. An
+// earlier version did count paused, on the reasoning that it is still
+// "the track you are on"; reverted deliberately -- while nothing is
+// playing, every track-level action should follow the cursor, which is
+// the only thing the user is actually pointing at.
+func (a *App) isPlaying() bool {
+	return a.currentStatus.State == mpdclient.StatePlay && a.currentSong.File != ""
+}
+
+// hasLoadedTrack reports whether currentSong describes a track MPD has
+// loaded -- playing or paused, but not stopped. Narrower than isPlaying
+// and used only to decide whether the live decoder's numbers (bitrate,
+// sample format) may be shown for a track: they stay true while paused,
+// so a paused track the cursor is sitting on should still show them.
+func (a *App) hasLoadedTrack() bool {
 	switch a.currentStatus.State {
 	case mpdclient.StatePlay, mpdclient.StatePause:
 		return a.currentSong.File != ""
@@ -588,7 +615,8 @@ func (a *App) hasLivePlayback() bool {
 // targetSong is the track every track-level Queue action acts on --
 // rating ('1'-'5'), marking ('m'), add-to-playlist ('a') and the track
 // info card ('i'): the one actually playing if there is one, otherwise
-// whatever is selected in the Queue.
+// whatever is selected in the Queue. Pausing hands the target back to
+// the selection, same as stopping -- see isPlaying.
 //
 // These are all judgements or bookkeeping about the music you are
 // *listening to*, and scrolling the Queue to look at something else
@@ -602,7 +630,7 @@ func (a *App) hasLivePlayback() bool {
 // row of the list, where the selection *is* the subject and redirecting
 // them onto the playing track would be actively wrong.
 func (a *App) targetSong() (mpdclient.Song, bool) {
-	if a.hasLivePlayback() {
+	if a.isPlaying() {
 		return a.currentSong, true
 	}
 	return a.queue.selectedSong()

@@ -4,6 +4,8 @@ package tests
 
 import (
 	"errors"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -439,6 +441,97 @@ func TestSearchAlbums(t *testing.T) {
 	for _, s := range songs {
 		if !strings.Contains(strings.ToLower(s.Album), needle) {
 			t.Errorf("track %q has Album = %q, doesn't contain %q", s.File, s.Album, album)
+		}
+	}
+}
+
+// TestPlaylistIndexMembershipAgreesWithContents checks the second view
+// PlaylistIndex builds from the same scan that produces the counts: for
+// a real playlist, every track it lists must name that playlist back.
+func TestPlaylistIndexMembershipAgreesWithContents(t *testing.T) {
+	c := dialOrSkip(t)
+
+	idx, err := c.PlaylistIndex()
+	if err != nil {
+		t.Fatalf("PlaylistIndex: %v", err)
+	}
+	if len(idx.Counts) == 0 {
+		t.Skip("no playlists to index")
+	}
+
+	// Pick a playlist that actually has tracks.
+	var name string
+	for n, count := range idx.Counts {
+		if count > 0 {
+			name = n
+			break
+		}
+	}
+	if name == "" {
+		t.Skip("no non-empty playlist to check")
+	}
+
+	tracks, err := c.PlaylistTracks(name)
+	if err != nil {
+		t.Fatalf("PlaylistTracks(%q): %v", name, err)
+	}
+	for _, tr := range tracks {
+		if !slices.Contains(idx.Membership[tr.File], name) {
+			t.Errorf("track %q is in playlist %q but the index does not say so (index has %v)",
+				tr.File, name, idx.Membership[tr.File])
+		}
+	}
+
+	// And the reverse direction: nothing is credited to a playlist that
+	// does not exist.
+	for file, names := range idx.Membership {
+		for _, n := range names {
+			if _, ok := idx.Counts[n]; !ok {
+				t.Errorf("track %q credited to unknown playlist %q", file, n)
+			}
+		}
+	}
+}
+
+// TestPlaylistIndexCountsMatchPlaylistTrackCounts pins the two entry
+// points to the same scan, so they can never drift apart.
+func TestPlaylistIndexCountsMatchPlaylistTrackCounts(t *testing.T) {
+	c := dialOrSkip(t)
+
+	idx, err := c.PlaylistIndex()
+	if err != nil {
+		t.Fatalf("PlaylistIndex: %v", err)
+	}
+	counts, err := c.PlaylistTrackCounts()
+	if err != nil {
+		t.Fatalf("PlaylistTrackCounts: %v", err)
+	}
+	if !maps.Equal(idx.Counts, counts) {
+		t.Errorf("PlaylistIndex().Counts and PlaylistTrackCounts() disagree:\n%v\n%v", idx.Counts, counts)
+	}
+}
+
+// TestPlaylistIndexMembershipIsSortedAndDeduped covers the two shape
+// guarantees the UI relies on: it lists names in a stable order rather
+// than whatever order the scan happened to hit them, and a playlist that
+// lists the same track twice is named once.
+func TestPlaylistIndexMembershipIsSortedAndDeduped(t *testing.T) {
+	c := dialOrSkip(t)
+
+	idx, err := c.PlaylistIndex()
+	if err != nil {
+		t.Fatalf("PlaylistIndex: %v", err)
+	}
+	for file, names := range idx.Membership {
+		if !slices.IsSorted(names) {
+			t.Errorf("track %q membership %v is not sorted", file, names)
+		}
+		seen := map[string]bool{}
+		for _, n := range names {
+			if seen[n] {
+				t.Errorf("track %q lists playlist %q more than once", file, n)
+			}
+			seen[n] = true
 		}
 	}
 }

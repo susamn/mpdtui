@@ -352,7 +352,7 @@ theme_file = ~/.cache/mpdtui/colors.toml
 | `f` | Global search from any panel -- type `a`/`al`/`l`/`p`/`t` + a term (artist/album/lyrics/playlist/track); matches appear live in a results table laid out per kind: track = 🎵 Track + 🎤 Artist, lyrics = those two plus 📝 a matched-lyrics excerpt, album = 💿 Album + 🎤 Album Artist ("Not available" when untagged), artist and playlist = a single column. Up/Down (or Ctrl-P/Ctrl-N) move the highlight while typing; `Tab` (or `f` to return) switches focus to the table for `j`/`k`/`g`/`G` navigation, within the popup only. `Enter` acts on the highlight and closes the popup (track adds+plays, playlist loads+plays, artist/album jump into that group in the Library); from the table, `a` instead adds without playing (track) or appends (playlist) and leaves the popup open, so several tracks can be queued back-to-back. Stays open with "no X found" if nothing matches. `l` (lyrics) matches the term as a plain case/accent-insensitive substring against the words of each track's `.txt`/`.lrc` sidecar, read from the prebuilt lyrics index (`I` builds/refreshes it -- this search never touches the filesystem; an unbuilt index just returns nothing), with the matched term colored in the excerpt; hits otherwise behave exactly like track hits (add+play on `Enter`, add on `a`) |
 | `I` | Rebuild the lyrics search index (needs `music_dir` set, see [Lyrics](#lyrics)) -- a background scan of every track's `.txt`/`.lrc` sidecar with a live progress overlay; incremental, so a rebuild after adding a few lyrics files only re-reads those. `Esc` cancels a run in flight (the existing index is left intact). The index lives at `~/.config/mpdtui/lyrics_index.db` |
 | `F` | Clear any active search/filter, in every panel at once (Library search, Playlists filter) -- unlike a panel's own `Esc`, works regardless of which panel is currently focused |
-| `i` | Track info card for the currently playing track (or, with playback stopped, the track selected in the Queue -- see [Which track an action applies to](#which-track-an-action-applies-to)) -- Track/Album/Artist/Genre/Year, colored "LRC"/"TXT" text for whichever lyrics format(s) are found (needs `music_dir` set), live audio quality (bitrate, sample rate/bit depth/channels), and, when `track_metadata` is active, a Rating/Plays/Mark/Tags table. A small fixed-size card anchored to the bottom-right quadrant of the Queue panel |
+| `i` | Track info card for the currently playing track (or, when nothing is playing, the track selected in the Queue -- see [Which track an action applies to](#which-track-an-action-applies-to)) -- Track/Album/Artist/Genre/Year, colored "LRC"/"TXT" text for whichever lyrics format(s) are found (needs `music_dir` set), live audio quality (bitrate, sample rate/bit depth/channels), the stored playlists the track belongs to (up to 4 listed, the rest summarised as a count -- `Tab` toggles the card between that summary and the full list, growing it upwards within the Queue panel; from the same background playlist scan that fills the Playlists panel's Count column, so it costs no extra MPD traffic, and reads "loading…" rather than "none" until that scan lands), and, when `track_metadata` is active, a Rating/Plays/Mark/Tags table. A small fixed-size card anchored to the bottom-right quadrant of the Queue panel |
 | `y` | Lyrics viewer for the currently playing track (needs `music_dir` set, see [Lyrics](#lyrics) below) -- `j`/`k`/`g`/`G`/Ctrl-F/Ctrl-B to scroll, `y` or `Esc` to close. Transport controls (`Space`/`s`/`n`/`p`/`,`/`.`/`-`/`=`/`z`/`x`/`c`/`Z`) keep working while it's open. Shows synced (`.lrc`) lyrics with the current line auto-highlighted and scrolled into view when available, otherwise plain `.txt`; a colored LRC/TXT badge sits top-right in the title. `t` switches between whichever formats exist for the track (choice sticks across track changes); before an `.lrc`'s first timestamp, a big blinking block-letter "STARTING" banner shows instead of the lyrics list |
 | `v` | Cycle Now Playing visualizations (right half of the Now Playing bar) |
 | `L` | Locate the currently playing track: selects it in the Queue and moves focus there, from any panel, and also reveals it in the Library tree (expanding every folder along its path and selecting it there, without moving focus away from Queue). Both panels scroll the track to their **vertical middle** rather than leaving it on the top or bottom line, so it lands with its neighbours visible around it, and both the Queue row and the Library node **flash briefly** to draw the eye to it. The Queue-selecting part also happens automatically, whenever the playing track actually changes (explicit play action or natural auto-advance alike) -- except while an overlay is open, or on startup; the centering, the flash and the Library reveal are only on the explicit keypress, so a natural auto-advance never re-scrolls the Queue under you |
@@ -379,12 +379,12 @@ theme_file = ~/.cache/mpdtui/colors.toml
 | Playlists | `o` | Cycle sort: most recently updated / name |
 | Playlists | `Esc` | Clear active filter |
 | Queue | `Enter` | Play selected track |
-| Queue | `a` | Add the currently playing track (or the selected one when playback is stopped -- see [Which track an action applies to](#which-track-an-action-applies-to)) to an existing playlist: fuzzy-search its name in a popup (type to filter, `j`/`k`/`g`/`G`/`Up`/`Down` to navigate, `Enter` to add). Writes directly into that playlist's own file; rejected with an error, no duplicate written, if the track is already in it |
+| Queue | `a` | Add the currently playing track (or the selected one when nothing is playing -- see [Which track an action applies to](#which-track-an-action-applies-to)) to an existing playlist: fuzzy-search its name in a popup (type to filter, `j`/`k`/`g`/`G`/`Up`/`Down` to navigate, `Enter` to add). Writes directly into that playlist's own file; rejected with an error, no duplicate written, if the track is already in it |
 | Queue | `d` | Remove selected track |
 | Queue | `J` / `K` | Move selected track down / up |
 | Queue | `/` | Search: focuses the always-visible "Search track:" box above the queue, Enter jumps to first match (Esc cancels) |
-| Queue | `1`-`5` | Rate 1-5 stars (needs `track_metadata` set, see [Track metadata](#track-metadata) below): the *currently playing* track, or the selected one when playback is stopped -- so scrolling the Queue away from what's playing doesn't redirect the rating. Note: this means `1`/`2` no longer jump to Library/Playlists from inside Queue -- `Tab`/`Backtab` still cycle panels regardless of focus |
-| Queue | `m` | Mark the currently playing track (or the selected one when playback is stopped -- see [Which track an action applies to](#which-track-an-action-applies-to)) with a reason, or clear an existing mark, from a small popup -- `j`/`k`/`g`/`G` to navigate, `Enter` to apply, `Esc` to cancel. Transport controls keep working while it's open |
+| Queue | `1`-`5` | Rate 1-5 stars (needs `track_metadata` set, see [Track metadata](#track-metadata) below): the *currently playing* track, or the selected one when nothing is playing -- so scrolling the Queue away from what's playing doesn't redirect the rating. Note: this means `1`/`2` no longer jump to Library/Playlists from inside Queue -- `Tab`/`Backtab` still cycle panels regardless of focus |
+| Queue | `m` | Mark the currently playing track (or the selected one when nothing is playing -- see [Which track an action applies to](#which-track-an-action-applies-to)) with a reason, or clear an existing mark, from a small popup -- `j`/`k`/`g`/`G` to navigate, `Enter` to apply, `Esc` to cancel. Transport controls keep working while it's open |
 
 **Mini mode** (`-mini`): `Space` play/pause, `n`/`p` next/prev, `s` stop,
 `-`/`=` volume, `1`-`5` rate whatever's currently playing (needs
@@ -397,19 +397,24 @@ Four of the Queue panel's keys act on a *track* rather than on a row of
 the list: `1`-`5` (rate), `m` (mark), `a` (add to a playlist) and `i`
 (the track info card). All four target the same thing:
 
-- **the track currently playing** (or paused) if there is one, wherever
-  the Queue's own cursor happens to be
-- **the selected track**, when playback is fully stopped
+- **the track currently playing** if there is one, wherever the Queue's
+  own cursor happens to be
+- **the selected track**, when nothing is playing -- paused or stopped
 
 Rating, marking and filing a track away are judgements about the music
 you're *listening to*, and scrolling down the queue mid-track to see
-what's coming up is a completely normal thing to do -- so the cursor's
-position shouldn't quietly redirect them onto whatever row it was left
-on. With playback stopped there's nothing being listened to, so the
-selection is the only sensible target and takes over. (MPD keeps
-reporting a "current song" while stopped -- the position it would resume
-from -- but that isn't a track anyone is listening to, so it doesn't
-count as playing here.)
+what's coming up is a completely normal thing to do -- so while a track
+plays, the cursor's position shouldn't quietly redirect them onto
+whatever row it was left on.
+
+Once playback stops or pauses there is nothing being listened to, and
+the cursor is the only track you are actually pointing at, so it takes
+over. Paused used to count as playing here, on the reasoning that it's
+still "the track you're on"; that was reversed, because it meant pausing
+and scrolling elsewhere left `i` stubbornly showing the paused track.
+(MPD also keeps reporting a "current song" while stopped -- the position
+it would resume from -- which likewise isn't a track anyone is
+listening to.)
 
 The `m` and `a` popups both name their target in their own title, and
 both stay pinned to it: transport controls keep working while a popup is
@@ -571,7 +576,7 @@ this was tested against, 8 had those two within 1.2x luminance of each
 other and 3 had them byte-identical.
 
 - **Rating** (`1`-`5`, Queue panel): rates the track that's currently
-  *playing*, or the selected one when playback is stopped -- see
+  *playing*, or the selected one when nothing is playing -- see
   [Which track an action applies to](#which-track-an-action-applies-to).
   In `-mini` mode, which has no separate selection, `1`-`5` always rate
   whatever's currently playing.
@@ -585,7 +590,7 @@ other and 3 had them byte-identical.
   at once, a single play-through can be double-counted.
 - **Mark** (`m`, Queue panel): opens a small popup listing mark reasons
   (e.g. "mark for deletion") for the currently playing track -- or the
-  selected one when playback is stopped, exactly like Rating above (see
+  selected one when nothing is playing, exactly like Rating above (see
   [Which track an action applies to](#which-track-an-action-applies-to))
   -- plus a "(clear mark)" entry to unmark it. The popup names the track
   in its title, and stays pinned to it: if the track auto-advances while

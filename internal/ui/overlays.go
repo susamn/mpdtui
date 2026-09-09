@@ -165,8 +165,11 @@ const helpText = `[::b]Global[-:-:-]
                  Track/Album/Artist/Genre/Year, colored "LRC"/"TXT" text
                  for whichever lyrics format(s) are found for it (needs
                  music_dir set), live audio quality (bitrate, sample
-                 rate/bit depth/channels), and, when track_metadata is
-                 active, a Rating/Plays/Mark/Tags table
+                 rate/bit depth/channels), which stored playlists the
+                 track belongs to, and, when track_metadata is active, a
+                 Rating/Plays/Mark/Tags table. Tab expands the
+                 summarised sections (the playlist list) and collapses
+                 them again
   y              lyrics viewer for the currently playing track (needs
                  music_dir set in ~/.config/mpdtui/config); j/k/g/G/
                  Ctrl-F/Ctrl-B to scroll, 'y' or Esc to close --

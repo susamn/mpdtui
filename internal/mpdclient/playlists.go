@@ -2,6 +2,7 @@ package mpdclient
 
 import (
 	"errors"
+	"sort"
 	"time"
 
 	"github.com/fhs/gompd/v2/mpd"
@@ -114,35 +115,85 @@ func (c *Client) SaveQueueAsPlaylist(name string) error {
 	return callErr(c, func(conn *mpd.Client) error { return conn.PlaylistSave(name) })
 }
 
-// PlaylistTrackCounts returns every stored playlist's track count, keyed
-// by name. Deliberately uses MPD's "listplaylist" (track paths only) via
-// the low-level Command/AttrsList escape hatch, rather than
+// PlaylistIndex is one snapshot of every stored playlist's contents,
+// reduced to the two views the UI needs: how many tracks each playlist
+// holds, and which playlists a given track appears in.
+//
+// Both come from the same scan on purpose. Building the membership map
+// costs nothing extra -- listing a playlist already returns its track
+// paths, and the count is just their length -- so the alternative,
+// answering "which playlists is this track in?" with its own pass over
+// every playlist, would double the work to learn something already in
+// hand.
+type PlaylistIndex struct {
+	// Counts maps a playlist name to its track count.
+	Counts map[string]int
+	// Membership maps a track URI to the names of every playlist
+	// containing it, sorted, with duplicates collapsed -- a playlist
+	// that lists the same track twice appears once.
+	Membership map[string][]string
+}
+
+// PlaylistIndex reads every stored playlist once and returns both views
+// of it (see PlaylistIndex).
+//
+// Deliberately uses MPD's "listplaylist" (track paths only) via the
+// low-level Command/AttrsList escape hatch, rather than
 // PlaylistContents' "listplaylistinfo" (every tag for every track) --
-// only a count is needed here, and fetching full tag data for every track
-// of every playlist is measurably heavier for no benefit (timed against a
-// real ~200-playlist library: ~2ms/playlist with listplaylist vs.
-// ~6ms/playlist with listplaylistinfo). gompd has no bulk/batched way to
-// list many playlists' contents in one round-trip (its CommandList type
-// only covers a fixed set of write/control commands, not this), so this
-// is still one MPD round-trip per playlist -- still well under a second
-// for a few hundred playlists, but real enough that callers should treat
-// this as a background operation, not something to run inline on every
-// UI refresh (see App.refreshTrackCounts).
-func (c *Client) PlaylistTrackCounts() (map[string]int, error) {
-	return call(c, func(conn *mpd.Client) (map[string]int, error) {
+// paths are all either view needs, and fetching full tag data for every
+// track of every playlist is measurably heavier for no benefit (timed
+// against a real ~200-playlist library: ~2ms/playlist with listplaylist
+// vs. ~6ms/playlist with listplaylistinfo). gompd has no bulk/batched
+// way to list many playlists' contents in one round-trip (its
+// CommandList type only covers a fixed set of write/control commands,
+// not this), so this is still one MPD round-trip per playlist -- still
+// well under a second for a few hundred playlists, but real enough that
+// callers should treat this as a background operation, not something to
+// run inline on every UI refresh (see App.refreshTrackCounts).
+func (c *Client) PlaylistIndex() (PlaylistIndex, error) {
+	return call(c, func(conn *mpd.Client) (PlaylistIndex, error) {
 		lists, err := conn.ListPlaylists()
 		if err != nil {
-			return nil, err
+			return PlaylistIndex{}, err
 		}
-		counts := make(map[string]int, len(lists))
+		idx := PlaylistIndex{
+			Counts:     make(map[string]int, len(lists)),
+			Membership: make(map[string][]string),
+		}
 		for _, a := range lists {
 			name := a["playlist"]
 			tracks, err := conn.Command("listplaylist %s", name).AttrsList("file")
 			if err != nil {
-				return nil, err
+				return PlaylistIndex{}, err
 			}
-			counts[name] = len(tracks)
+			idx.Counts[name] = len(tracks)
+			for _, t := range tracks {
+				uri := t["file"]
+				if uri == "" {
+					continue
+				}
+				// A playlist listing the same track twice must still
+				// name that playlist only once.
+				if m := idx.Membership[uri]; len(m) > 0 && m[len(m)-1] == name {
+					continue
+				}
+				idx.Membership[uri] = append(idx.Membership[uri], name)
+			}
 		}
-		return counts, nil
+		for _, names := range idx.Membership {
+			sort.Strings(names)
+		}
+		return idx, nil
 	})
+}
+
+// PlaylistTrackCounts returns every stored playlist's track count, keyed
+// by name -- the Counts half of PlaylistIndex, which see for the cost of
+// the underlying scan.
+func (c *Client) PlaylistTrackCounts() (map[string]int, error) {
+	idx, err := c.PlaylistIndex()
+	if err != nil {
+		return nil, err
+	}
+	return idx.Counts, nil
 }
