@@ -97,11 +97,15 @@ func newVisualizerPanel(app *App) *visualizerPanel {
 		started:  time.Now(),
 		spectrum: spectrum,
 		// New visualizations are registered here, in the order 'v'
-		// cycles through them.
+		// cycles through them. The first is what the panel shows on
+		// startup: Balance, because it is the one that shows something
+		// about the music rather than about its loudness -- on the other
+		// two the largest thing moving is the overall level, which every
+		// band shares (see viz_balance.go).
 		vizs: []Visualization{
+			newBalanceVisualization(spectrum),
 			newEqualizerVisualization(spectrum),
 			newCliampVisualization(spectrum),
-			newBalanceVisualization(spectrum),
 		},
 	}
 	p.view.SetTitle(" " + p.current().Name() + " ")
