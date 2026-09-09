@@ -60,10 +60,14 @@ func FormatInfo(song mpdclient.Song, st mpdclient.Status, musicDir string, meta 
 	if meta != nil {
 		writeField("Rating", strconv.Itoa(meta.Rating))
 		writeField("Play Count", strconv.Itoa(meta.PlayCount))
-		if meta.Mark != nil {
-			writeField("Mark", meta.Mark.Reason)
+		if len(meta.Marks) > 0 {
+			names := make([]string, len(meta.Marks))
+			for i, m := range meta.Marks {
+				names[i] = m.Reason
+			}
+			writeField("Marks", strings.Join(names, ", "))
 		} else {
-			writeField("Mark", "-")
+			writeField("Marks", "-")
 		}
 		if len(meta.Tags) > 0 {
 			tagNames := make([]string, len(meta.Tags))

@@ -549,7 +549,7 @@ func (q *queuePanel) render(curID int) {
 				q.table.SetCell(row, cols.playcount, playCountCell(meta.PlayCount))
 			}
 			if cols.mark >= 0 {
-				q.table.SetCell(row, cols.mark, markCell(meta.Mark))
+				q.table.SetCell(row, cols.mark, markCell(meta.Marks))
 			}
 			if cols.rating >= 0 {
 				q.table.SetCell(row, cols.rating, ratingCell(meta.Rating))
@@ -629,7 +629,7 @@ func (q *queuePanel) applyTrackMeta(file string, t metadata.Track) {
 			q.table.SetCell(row, q.cols.playcount, playCountCell(t.PlayCount))
 		}
 		if q.cols.mark >= 0 {
-			q.table.SetCell(row, q.cols.mark, markCell(t.Mark))
+			q.table.SetCell(row, q.cols.mark, markCell(t.Marks))
 		}
 		if q.cols.rating >= 0 {
 			q.table.SetCell(row, q.cols.rating, ratingCell(t.Rating))
@@ -749,26 +749,48 @@ var markTickColors []tcell.Color
 // split out from markCell so trackInfoCard's metadata table (which shows
 // a mark reason's full text, not just a tick) can color it the same way,
 // and a given reason reads as the same color everywhere it appears.
-// Callers are expected to have already checked mark != nil; a nil mark
-// here just falls back to markTickColors[0] rather than panicking.
-func markColor(mark *metadata.MarkReason) tcell.Color {
-	if mark == nil || mark.ID < 1 {
+// An out-of-range id falls back to markTickColors[0] rather than
+// panicking.
+func markColor(mark metadata.MarkReason) tcell.Color {
+	if mark.ID < 1 {
 		return markTickColors[0]
 	}
 	return markTickColors[(mark.ID-1)%int64(len(markTickColors))]
 }
 
-// markCell renders a queue row's Mark column: blank if mark is nil
-// (unmarked -- the sensible default for a track with no opinion
-// recorded yet, same as Rating's all-empty stars), otherwise
-// queueMarkTick colored by the mark reason's id.
-func markCell(mark *metadata.MarkReason) *tview.TableCell {
-	if mark == nil {
+// queueMarkTicksMax caps how many ticks a row shows. A track can carry
+// every mark in the catalog, and the column is sized by its widest cell,
+// so without a cap one heavily-marked track would widen the column for
+// the whole queue. Past the cap the count is shown instead, which is
+// both narrower and more informative than a row of identical ticks.
+const queueMarkTicksMax = 3
+
+// markCell renders a queue row's Mark column: one tick per mark, each in
+// that mark's own color, or blank when unmarked (the sensible default
+// for a track with no opinion recorded yet, same as Rating's all-empty
+// stars).
+//
+// Per-tick color needs dynamic color tags rather than the cell's own
+// SetTextColor, which is a single color for the whole cell. tview.Table
+// always parses tags in cell text (see formatColors' note on why "[MP3]"
+// cannot be written literally), so this works -- and is in fact the only
+// way to get more than one color into a cell.
+func markCell(marks []metadata.MarkReason) *tview.TableCell {
+	if len(marks) == 0 {
 		return tview.NewTableCell(queueColumnGap).SetAlign(tview.AlignRight)
 	}
-	return tview.NewTableCell(queueMarkTick + queueColumnGap).
-		SetTextColor(markColor(mark)).
-		SetAlign(tview.AlignRight)
+	if len(marks) > queueMarkTicksMax {
+		// Colored by the first mark, since a count cannot be striped.
+		return tview.NewTableCell(fmt.Sprintf("[%s]%s%d[-]%s",
+			markColor(marks[0]).String(), queueMarkTick, len(marks), queueColumnGap)).
+			SetAlign(tview.AlignRight)
+	}
+	var b strings.Builder
+	for _, m := range marks {
+		fmt.Fprintf(&b, "[%s]%s[-]", markColor(m).String(), queueMarkTick)
+	}
+	b.WriteString(queueColumnGap)
+	return tview.NewTableCell(b.String()).SetAlign(tview.AlignRight)
 }
 
 // lyricsPresence reports which lyrics format(s) file has a matching

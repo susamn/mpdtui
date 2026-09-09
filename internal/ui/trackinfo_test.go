@@ -8,6 +8,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
 )
 
@@ -256,11 +257,12 @@ func TestTrackInfoCardRenderMetaShowsZeroOpinionPlaceholders(t *testing.T) {
 	if got := metaCellText(a, 1, 1); got != "0" {
 		t.Errorf("Plays cell = %q, want %q", got, "0")
 	}
-	if got := metaCellText(a, 2, 1); got != "-" {
-		t.Errorf("Mark cell = %q, want %q (unmarked placeholder)", got, "-")
+	// Marks and tags are their own sections now, not rows here.
+	if got := a.trackInfo.marks.GetText(true); !strings.Contains(got, "none") {
+		t.Errorf("Marks section = %q, want it to say none", got)
 	}
-	if got := metaCellText(a, 3, 1); got != "-" {
-		t.Errorf("Tags cell = %q, want %q (no tags placeholder)", got, "-")
+	if got := a.trackInfo.tags.GetText(true); !strings.Contains(got, "none") {
+		t.Errorf("Tags section = %q, want it to say none", got)
 	}
 }
 
@@ -278,7 +280,7 @@ func TestTrackInfoCardRenderMetaShowsRealValues(t *testing.T) {
 		t.Fatalf("IncrementPlayCount: %v", err)
 	}
 	markID := int64(1) // seeded "mark for deletion"
-	if err := a.metaDB.SetMark(file, &markID); err != nil {
+	if err := a.metaDB.SetMarks(file, []int64{markID}); err != nil {
 		t.Fatalf("SetMark: %v", err)
 	}
 	if err := a.metaDB.SetTags(file, []int64{1, 2}); err != nil { // seeded bengali, hindi
@@ -293,11 +295,22 @@ func TestTrackInfoCardRenderMetaShowsRealValues(t *testing.T) {
 	if got := metaCellText(a, 1, 1); got != "2" {
 		t.Errorf("Plays cell = %q, want %q", got, "2")
 	}
-	if got := metaCellText(a, 2, 1); got != "mark for deletion" {
-		t.Errorf("Mark cell = %q, want %q", got, "mark for deletion")
+	// Tags moved out of the table into their own list section, one per
+	// line.
+	tags := stripColorTags(a.trackInfo.tags.GetText(false))
+	for _, want := range []string{"bengali", "hindi"} {
+		if !strings.Contains(tags, want) {
+			t.Errorf("Tags section = %q, want it to list %q", tags, want)
+		}
 	}
-	if got := metaCellText(a, 3, 1); got != "bengali, hindi" {
-		t.Errorf("Tags cell = %q, want %q", got, "bengali, hindi")
+	// Marks moved out of the table into their own list section, one per
+	// line, each in its own color.
+	marks := a.trackInfo.marks.GetText(false)
+	if !strings.Contains(stripColorTags(marks), "mark for deletion") {
+		t.Errorf("Marks section = %q, want it to list the mark", marks)
+	}
+	if !strings.Contains(marks, markColor(metadata.MarkReason{ID: 1}).String()) {
+		t.Errorf("Marks section = %q, want the mark in its own color", marks)
 	}
 }
 

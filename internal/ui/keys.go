@@ -71,6 +71,7 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 				{'i', a.trackInfo},
 				{'y', a.lyricsViewer},
 				{0, a.markPicker},
+				{0, a.tagPicker},
 			}
 			for _, ov := range noTextInputOverlays {
 				if a.tv.GetFocus() != ov.primitive {
@@ -109,7 +110,7 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 				a.lyricsViewer.cycleFormat()
 				return nil
 			}
-			if (focus == a.lyricsViewer || focus == a.markPicker) && a.handleTransportKey(event.Rune()) {
+			if (focus == a.lyricsViewer || focus == a.markPicker || focus == a.tagPicker) && a.handleTransportKey(event.Rune()) {
 				return nil
 			}
 		}
@@ -147,6 +148,9 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			return nil
 		case 'L':
 			a.jumpToCurrentTrack()
+			return nil
+		case 't':
+			a.handleOpenTagPicker()
 			return nil
 		case 'm':
 			a.handleOpenMarkPicker()
@@ -436,7 +440,13 @@ func (a *App) jumpToCurrentTrack() {
 func (a *App) handleAdd() {
 	switch a.tv.GetFocus() {
 	case a.library.tree:
-		a.library.addSelected()
+		// Adding from the Library is a move towards the Queue: what you
+		// just added is there, and the next thing you do is almost
+		// always to it. Only on a real add, so pressing 'a' on a node
+		// with nothing to add does not throw focus across the screen.
+		if a.library.addSelected() {
+			a.focusQueueAfterAdd()
+		}
 	case a.playlists.table:
 		name := a.playlists.selectedName()
 		if name == "" {
@@ -476,6 +486,7 @@ func (a *App) handleAddAll() {
 		a.showMessage("nothing to add")
 		return
 	}
+	a.focusQueueAfterAdd()
 	a.showMessage(fmt.Sprintf("added %d track(s) from %q", added, a.library.query))
 }
 

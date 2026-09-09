@@ -322,7 +322,7 @@ func TestMarkPickerListsClearMarkPlusCatalogAndApplies(t *testing.T) {
 	if a.tv.GetFocus() != a.markPicker {
 		t.Fatalf("setup: focus = %T, want the mark picker", a.tv.GetFocus())
 	}
-	// "(clear mark)" plus the one seeded mark_reason row.
+	// "(clear all marks)" plus the one seeded mark_reason row.
 	if got := a.markPicker.GetItemCount(); got != 2 {
 		t.Fatalf("mark picker item count = %d, want 2", got)
 	}
@@ -330,15 +330,27 @@ func TestMarkPickerListsClearMarkPlusCatalogAndApplies(t *testing.T) {
 	a.markPicker.SetCurrentItem(1) // the real "mark for deletion" reason, not the synthetic clear entry
 	a.markPicker.apply(1)
 
-	if a.mode != modeNormal {
-		t.Error("mode after applying a mark should be modeNormal (popup closed)")
+	// Marks are a set, so toggling one deliberately leaves the popup
+	// open for the next.
+	if a.mode != modeOverlay {
+		t.Error("mode after toggling a mark should stay modeOverlay (popup open)")
 	}
 	track, err := a.metaDB.Get("artist/track.mp3")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if track.Mark == nil || track.Mark.Reason != "mark for deletion" {
-		t.Fatalf("Mark after applying = %+v, want {mark for deletion}", track.Mark)
+	if len(track.Marks) != 1 || track.Marks[0].Reason != "mark for deletion" {
+		t.Fatalf("Marks after toggling = %+v, want [{mark for deletion}]", track.Marks)
+	}
+
+	// Toggling the same row again removes it.
+	a.markPicker.apply(1)
+	track, err = a.metaDB.Get("artist/track.mp3")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(track.Marks) != 0 {
+		t.Errorf("Marks after toggling the same reason again = %+v, want none", track.Marks)
 	}
 }
 
@@ -347,9 +359,8 @@ func TestMarkPickerClearMarkEntry(t *testing.T) {
 	if err := a.metaDB.Rate("artist/track.mp3", 0); err != nil { // ensure a row exists
 		t.Fatalf("Rate: %v", err)
 	}
-	reasonID := int64(1)
-	if err := a.metaDB.SetMark("artist/track.mp3", &reasonID); err != nil {
-		t.Fatalf("SetMark: %v", err)
+	if err := a.metaDB.SetMarks("artist/track.mp3", []int64{1}); err != nil {
+		t.Fatalf("SetMarks: %v", err)
 	}
 
 	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track", File: "artist/track.mp3"}}
@@ -358,14 +369,14 @@ func TestMarkPickerClearMarkEntry(t *testing.T) {
 	a.tv.SetFocus(a.queue.table)
 
 	a.handleOpenMarkPicker()
-	a.markPicker.apply(0) // the synthetic "(clear mark)" entry
+	a.markPicker.apply(0) // the synthetic "(clear all marks)" entry
 
 	track, err := a.metaDB.Get("artist/track.mp3")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if track.Mark != nil {
-		t.Errorf("Mark after applying the clear entry = %+v, want nil", track.Mark)
+	if len(track.Marks) != 0 {
+		t.Errorf("Marks after applying the clear entry = %+v, want none", track.Marks)
 	}
 }
 
@@ -383,12 +394,18 @@ func TestMarkPickerApplyUpdatesQueueMarkCell(t *testing.T) {
 	a.handleOpenMarkPicker()
 	a.markPicker.apply(1) // "mark for deletion"
 
-	if got, want := a.queue.table.GetCell(queueHeaderRows, a.queue.cols.mark).Text, queueMarkTick+queueColumnGap; got != want {
+	cell := a.queue.table.GetCell(queueHeaderRows, a.queue.cols.mark).Text
+	if got, want := stripColorTags(cell), queueMarkTick+queueColumnGap; got != want {
 		t.Errorf("Mark cell after marking = %q, want %q", got, want)
+	}
+	// One tick per mark, each in that mark's own color -- which needs
+	// tags, since a TableCell carries a single text color.
+	if !strings.Contains(cell, markColor(metadata.MarkReason{ID: 1}).String()) {
+		t.Errorf("Mark cell = %q, want the tick colored by the mark's own color", cell)
 	}
 
 	a.handleOpenMarkPicker()
-	a.markPicker.apply(0) // "(clear mark)"
+	a.markPicker.apply(0) // "(clear all marks)"
 
 	if got, want := a.queue.table.GetCell(queueHeaderRows, a.queue.cols.mark).Text, queueColumnGap; got != want {
 		t.Errorf("Mark cell after clearing = %q, want %q (blank)", got, want)
@@ -638,15 +655,15 @@ func TestMarkPickerMarksPlayingTrackNotSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get(playing): %v", err)
 	}
-	if playing.Mark == nil {
+	if len(playing.Marks) == 0 {
 		t.Error("playing track should have been marked")
 	}
 	other, err := a.metaDB.Get("artist/other.mp3")
 	if err != nil {
 		t.Fatalf("Get(other): %v", err)
 	}
-	if other.Mark != nil {
-		t.Errorf("selected-but-not-playing track mark = %+v, want nil (untouched)", other.Mark)
+	if len(other.Marks) != 0 {
+		t.Errorf("selected-but-not-playing track marks = %+v, want none (untouched)", other.Marks)
 	}
 }
 
@@ -674,15 +691,15 @@ func TestMarkPickerAppliesToTheTrackItWasOpenedFor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get(first): %v", err)
 	}
-	if first.Mark == nil {
+	if len(first.Marks) == 0 {
 		t.Error("the track the popup was opened for should have been marked")
 	}
 	second, err := a.metaDB.Get("artist/second.mp3")
 	if err != nil {
 		t.Fatalf("Get(second): %v", err)
 	}
-	if second.Mark != nil {
-		t.Errorf("the newly-advanced-to track mark = %+v, want nil (untouched)", second.Mark)
+	if len(second.Marks) != 0 {
+		t.Errorf("the newly-advanced-to track marks = %+v, want none (untouched)", second.Marks)
 	}
 }
 
@@ -754,5 +771,325 @@ func TestTargetSongNoneWhenStoppedAndQueueEmpty(t *testing.T) {
 
 	if _, ok := a.targetSong(); ok {
 		t.Error("targetSong should report no target with playback stopped and an empty queue")
+	}
+}
+
+// --- multi-mark UI ---
+
+func TestMarkCellShowsOneTickPerMark(t *testing.T) {
+	marks := []metadata.MarkReason{{ID: 1, Reason: "one"}, {ID: 2, Reason: "two"}}
+	cell := markCell(marks)
+	if got := strings.Count(stripColorTags(cell.Text), queueMarkTick); got != 2 {
+		t.Errorf("cell %q has %d ticks, want one per mark (2)", cell.Text, got)
+	}
+	// Each in its own color, which is the whole reason the cell carries
+	// tags instead of a single SetTextColor.
+	for _, m := range marks {
+		if !strings.Contains(cell.Text, markColor(m).String()) {
+			t.Errorf("cell %q missing the color for mark %d", cell.Text, m.ID)
+		}
+	}
+}
+
+func TestMarkCellBlankWhenUnmarked(t *testing.T) {
+	if got := markCell(nil).Text; strings.TrimSpace(got) != "" {
+		t.Errorf("unmarked cell = %q, want blank", got)
+	}
+}
+
+// TestMarkCellSummarisesBeyondTheCap: the column is sized by its widest
+// cell, so one heavily-marked track must not widen it for every row.
+func TestMarkCellSummarisesBeyondTheCap(t *testing.T) {
+	var many []metadata.MarkReason
+	for i := 1; i <= queueMarkTicksMax+4; i++ {
+		many = append(many, metadata.MarkReason{ID: int64(i), Reason: "r"})
+	}
+	got := stripColorTags(markCell(many).Text)
+	if strings.Count(got, queueMarkTick) != 1 {
+		t.Errorf("cell %q, want a single tick plus a count past the cap", got)
+	}
+	if !strings.Contains(got, "7") {
+		t.Errorf("cell %q, want it to show how many marks there are", got)
+	}
+	capped := len([]rune(strings.TrimSpace(got)))
+	full := len([]rune(strings.TrimSpace(stripColorTags(markCell(many[:queueMarkTicksMax]).Text))))
+	if capped > full+1 {
+		t.Errorf("summarised cell (%d cols) is wider than a full one (%d)", capped, full)
+	}
+}
+
+// renderPickerLines draws the mark picker and returns what actually
+// lands on screen, one string per row.
+//
+// Asserting on GetItemText instead is what let a real bug ship: tview
+// parses "[...]" in list text as a style tag, so a "[x]" marker was
+// stored perfectly and then swallowed before it was ever drawn. Only the
+// rendered output can tell the difference.
+func renderPickerLines(t *testing.T, m *catalogPicker, w, h int) []string {
+	t.Helper()
+	m.SetRect(0, 0, w, h)
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatalf("init simulation screen: %v", err)
+	}
+	defer screen.Fini()
+	screen.SetSize(w, h)
+	m.Draw(screen)
+	screen.Show()
+
+	cells, sw, _ := screen.GetContents()
+	lines := make([]string, 0, h)
+	for row := 0; row < h; row++ {
+		var b strings.Builder
+		for col := 0; col < w; col++ {
+			c := cells[row*sw+col]
+			if len(c.Runes) == 0 || c.Runes[0] == 0 {
+				b.WriteString(" ")
+				continue
+			}
+			b.WriteString(string(c.Runes))
+		}
+		lines = append(lines, b.String())
+	}
+	return lines
+}
+
+// runeIndex is strings.Index in screen columns rather than bytes.
+func runeIndex(haystack, needle string) int {
+	i := strings.Index(haystack, needle)
+	if i < 0 {
+		return -1
+	}
+	return len([]rune(haystack[:i]))
+}
+
+func TestMarkPickerShowsWhichMarksAreSet(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	if _, err := a.metaDB.AddMarkReason("bad rip"); err != nil {
+		t.Fatalf("AddMarkReason: %v", err)
+	}
+	if err := a.metaDB.SetMarks("artist/track.mp3", []int64{1}); err != nil {
+		t.Fatalf("SetMarks: %v", err)
+	}
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track", File: "artist/track.mp3"}}
+	a.queue.render(-1)
+	a.queue.table.Select(queueHeaderRows, 0)
+	a.tv.SetFocus(a.queue.table)
+	// The picker reads the cache, which render fills from the database.
+	meta, _ := a.metaDB.Get("artist/track.mp3")
+	a.queue.applyTrackMeta("artist/track.mp3", meta)
+
+	a.handleOpenMarkPicker()
+
+	var setLine, unsetLine string
+	for _, l := range renderPickerLines(t, a.markPicker, 44, 8) {
+		if strings.Contains(l, "mark for deletion") {
+			setLine = l
+		}
+		if strings.Contains(l, "bad rip") {
+			unsetLine = l
+		}
+	}
+	if setLine == "" || unsetLine == "" {
+		t.Fatalf("picker did not render both reasons (set=%q unset=%q)", setLine, unsetLine)
+	}
+	if !strings.Contains(setLine, queueMarkTick) {
+		t.Errorf("set mark rendered as %q, want a %q against it", setLine, queueMarkTick)
+	}
+	if strings.Contains(unsetLine, queueMarkTick) {
+		t.Errorf("unset mark rendered as %q, want no tick", unsetLine)
+	}
+	// Both states occupy the same width, so the reasons stay aligned.
+	// Compared in runes, not bytes: the tick is three bytes wide but one
+	// column, so byte offsets would disagree on lines that line up fine.
+	if runeIndex(setLine, "mark for deletion") != runeIndex(unsetLine, "bad rip") {
+		t.Errorf("reasons not aligned:\n%q\n%q", setLine, unsetLine)
+	}
+}
+
+// TestMarkPickerLabelsSurviveTviewsTagParser guards the class of bug
+// directly: anything bracket-shaped in list text is eaten (or, worse,
+// partly eaten) before it reaches the screen.
+func TestMarkPickerLabelsSurviveTviewsTagParser(t *testing.T) {
+	for _, on := range []bool{true, false} {
+		label := catalogPickerLabel("Syncing needed", on)
+		if strings.ContainsAny(label, "[]") {
+			t.Errorf("label %q contains a bracket -- tview will parse it as a style tag", label)
+		}
+		if !strings.Contains(label, "Syncing needed") {
+			t.Errorf("label %q lost the reason itself", label)
+		}
+	}
+	if catalogPickerLabel("x", true) == catalogPickerLabel("x", false) {
+		t.Error("set and unset labels are identical -- nothing distinguishes a marked reason")
+	}
+	if a, b := catalogPickerLabel("x", true), catalogPickerLabel("x", false); len([]rune(a)) != len([]rune(b)) {
+		t.Errorf("set (%q) and unset (%q) labels differ in width, so reasons will not align", a, b)
+	}
+}
+
+// TestMarkPickerStaysOpenAcrossToggles: marks are a set, so adding two
+// must not be a two-popup job.
+func TestMarkPickerStaysOpenAcrossToggles(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	id2, err := a.metaDB.AddMarkReason("bad rip")
+	if err != nil {
+		t.Fatalf("AddMarkReason: %v", err)
+	}
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track", File: "artist/track.mp3"}}
+	a.queue.render(-1)
+	a.queue.table.Select(queueHeaderRows, 0)
+	a.tv.SetFocus(a.queue.table)
+
+	a.handleOpenMarkPicker()
+	a.markPicker.apply(1) // first reason
+	if a.mode != modeOverlay {
+		t.Fatal("popup closed after the first toggle")
+	}
+	a.markPicker.apply(2) // second reason, same popup
+
+	track, err := a.metaDB.Get("artist/track.mp3")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(track.Marks) != 2 {
+		t.Fatalf("marks = %+v, want both", track.Marks)
+	}
+	if track.Marks[0].ID != 1 || track.Marks[1].ID != id2 {
+		t.Errorf("marks = %+v, want them ordered by catalog id", track.Marks)
+	}
+}
+
+// --- tag picker: the same picker, the other catalog ---
+
+func TestTagPickerTogglesTags(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track", File: "artist/track.mp3"}}
+	a.queue.render(-1)
+	a.queue.table.Select(queueHeaderRows, 0)
+	a.tv.SetFocus(a.queue.table)
+
+	a.handleOpenTagPicker()
+	if a.mode != modeOverlay {
+		t.Fatal("tag picker did not open")
+	}
+	// "(clear all tags)" plus the three seeded tags.
+	if got := a.tagPicker.GetItemCount(); got != 4 {
+		t.Fatalf("tag picker item count = %d, want 4", got)
+	}
+
+	a.tagPicker.apply(1)
+	a.tagPicker.apply(2)
+	track, err := a.metaDB.Get("artist/track.mp3")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(track.Tags) != 2 {
+		t.Fatalf("tags after two toggles = %+v, want both", track.Tags)
+	}
+
+	a.tagPicker.apply(1) // toggle the first back off
+	track, _ = a.metaDB.Get("artist/track.mp3")
+	if len(track.Tags) != 1 || track.Tags[0].ID != 2 {
+		t.Errorf("tags after toggling one off = %+v, want just the second", track.Tags)
+	}
+
+	a.tagPicker.apply(0) // "(clear all tags)"
+	track, _ = a.metaDB.Get("artist/track.mp3")
+	if len(track.Tags) != 0 {
+		t.Errorf("tags after clearing = %+v, want none", track.Tags)
+	}
+}
+
+func TestTagPickerRequiresQueueFocusAndMetadata(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.tv.SetFocus(a.library.tree)
+	a.handleOpenTagPicker()
+	if a.mode == modeOverlay {
+		t.Error("tag picker opened from the Library panel")
+	}
+	if got := a.hintBar.GetText(true); !strings.Contains(got, "'t' has no action here") {
+		t.Errorf("hint bar = %q, want the invalid-key feedback", got)
+	}
+
+	b := newTestApp() // no metadata database
+	b.tv.SetFocus(b.queue.table)
+	b.handleOpenTagPicker()
+	if b.mode == modeOverlay {
+		t.Error("tag picker opened without track_metadata active")
+	}
+}
+
+// TestTagAndMarkPickersAreIndependent guards the shared implementation:
+// one catalogPicker type, two instances, and toggling in one must not
+// touch the other's relation.
+func TestTagAndMarkPickersAreIndependent(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track", File: "artist/track.mp3"}}
+	a.queue.render(-1)
+	a.queue.table.Select(queueHeaderRows, 0)
+	a.tv.SetFocus(a.queue.table)
+
+	a.handleOpenMarkPicker()
+	a.markPicker.apply(1)
+	a.closeOverlay()
+	a.handleOpenTagPicker()
+	a.tagPicker.apply(1)
+
+	track, err := a.metaDB.Get("artist/track.mp3")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(track.Marks) != 1 {
+		t.Errorf("marks = %+v, want the one set through the mark picker", track.Marks)
+	}
+	if len(track.Tags) != 1 {
+		t.Errorf("tags = %+v, want the one set through the tag picker", track.Tags)
+	}
+}
+
+func TestTagPickerShowsWhichTagsAreSet(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	if err := a.metaDB.SetTags("artist/track.mp3", []int64{1}); err != nil {
+		t.Fatalf("SetTags: %v", err)
+	}
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track", File: "artist/track.mp3"}}
+	a.queue.render(-1)
+	a.queue.table.Select(queueHeaderRows, 0)
+	a.tv.SetFocus(a.queue.table)
+
+	a.handleOpenTagPicker()
+
+	var setLine, unsetLine string
+	for _, l := range renderPickerLines(t, a.tagPicker, 44, 8) {
+		if strings.Contains(l, "bengali") {
+			setLine = l
+		}
+		if strings.Contains(l, "hindi") {
+			unsetLine = l
+		}
+	}
+	if !strings.Contains(setLine, queueMarkTick) {
+		t.Errorf("set tag rendered as %q, want a tick against it", setLine)
+	}
+	if strings.Contains(unsetLine, queueMarkTick) {
+		t.Errorf("unset tag rendered as %q, want no tick", unsetLine)
+	}
+}
+
+// TestTKeyOpensTagPicker: 't' has to reach the handler, not fall through
+// to the unbound-key default.
+func TestTKeyOpensTagPicker(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "Track", File: "artist/track.mp3"}}
+	a.queue.render(-1)
+	a.queue.table.Select(queueHeaderRows, 0)
+	a.tv.SetFocus(a.queue.table)
+
+	if got := a.globalInputCapture(tcell.NewEventKey(tcell.KeyRune, 't', tcell.ModNone)); got != nil {
+		t.Errorf("'t' should be consumed by the tag picker, got %v", got)
+	}
+	if a.mode != modeOverlay || a.tv.GetFocus() != a.tagPicker {
+		t.Errorf("'t' did not open the tag picker (mode=%v focus=%T)", a.mode, a.tv.GetFocus())
 	}
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
 )
 
@@ -135,8 +136,10 @@ func TestTrackInfoCardHeightMatchesItsSections(t *testing.T) {
 	if withMeta.meta == nil {
 		t.Fatal("setup: metadata-enabled test app has no metadata table")
 	}
-	if got := withMeta.height(); got != want+trackInfoMetaLines {
-		t.Errorf("height with the metadata table = %d, want %d", got, want+trackInfoMetaLines)
+	// The metadata table brings the marks and tags sections with it --
+	// all three live on the same local database.
+	if wantMeta := want + trackInfoMetaLines + trackInfoMarkSectionLines + trackInfoTagSectionLines; withMeta.height() != wantMeta {
+		t.Errorf("height with the metadata table = %d, want %d", withMeta.height(), want+trackInfoMetaLines+trackInfoMarkSectionLines+trackInfoTagSectionLines)
 	}
 }
 
@@ -435,5 +438,220 @@ func TestAudioQualityOnlyShownForTheTrackItDescribes(t *testing.T) {
 	a.renderTrackInfo()
 	if got := a.trackInfo.identity.GetText(true); strings.Contains(got, "320") {
 		t.Errorf("card on another track = %q, must not claim the decoder's bitrate", got)
+	}
+}
+
+// --- marks section ---
+
+func TestMarksSectionListsOnePerLine(t *testing.T) {
+	marks := []metadata.MarkReason{
+		{ID: 1, Reason: "mark for deletion"},
+		{ID: 2, Reason: "AI Generated Lyrics"},
+	}
+	text, rows := marksSection(marks, trackInfoMarkLines)
+
+	lines := strings.Split(text, "\n")
+	if len(lines) != 3 { // heading + two marks
+		t.Fatalf("section rendered %d lines, want a heading and one line per mark: %q", len(lines), text)
+	}
+	for i, m := range marks {
+		if !strings.Contains(stripColorTags(lines[i+1]), m.Reason) {
+			t.Errorf("line %d = %q, want it to carry %q", i+1, lines[i+1], m.Reason)
+		}
+		if !strings.Contains(lines[i+1], markColor(m).String()) {
+			t.Errorf("line %d = %q, want it in that mark's own color", i+1, lines[i+1])
+		}
+	}
+	if rows != len(lines)+1 { // plus the section's padding row
+		t.Errorf("rows = %d, want %d", rows, len(lines)+1)
+	}
+}
+
+func TestMarksSectionSaysNoneWhenUnmarked(t *testing.T) {
+	text, _ := marksSection(nil, trackInfoMarkLines)
+	if !strings.Contains(text, "none") {
+		t.Errorf("section for an unmarked track = %q, want it to say none", text)
+	}
+}
+
+func TestMarksSectionCapsAndCounts(t *testing.T) {
+	var many []metadata.MarkReason
+	for i := 1; i <= trackInfoMarkLines+3; i++ {
+		many = append(many, metadata.MarkReason{ID: int64(i), Reason: fmt.Sprintf("reason %d", i)})
+	}
+	text, _ := marksSection(many, trackInfoMarkLines)
+	if n := strings.Count(text, "•"); n != trackInfoMarkLines {
+		t.Errorf("listed %d marks, want the cap of %d", n, trackInfoMarkLines)
+	}
+	if !strings.Contains(text, "+3 more") {
+		t.Errorf("section %q, want it to summarise the remaining 3", text)
+	}
+}
+
+// TestTabExpandsBothSections is the point of the card-wide flag: Tab
+// means "show me everything", not "show me the playlists".
+func TestTabExpandsBothSections(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.queue.table.SetRect(0, 0, 120, 60)
+	file := "artist/track.mp3"
+	for _, r := range []string{"two", "three", "four", "five"} {
+		if _, err := a.metaDB.AddMarkReason(r); err != nil {
+			t.Fatalf("AddMarkReason: %v", err)
+		}
+	}
+	if err := a.metaDB.SetMarks(file, []int64{1, 2, 3, 4, 5}); err != nil {
+		t.Fatalf("SetMarks: %v", err)
+	}
+	a.playlistMembership = map[string][]string{
+		file: {"One", "Two", "Three", "Four", "Five", "Six"},
+	}
+	song := mpdclient.Song{Title: "Track", File: file}
+
+	a.trackInfo.render(song, mpdclient.Status{})
+	if !strings.Contains(a.trackInfo.marks.GetText(true), "more") {
+		t.Fatal("setup: marks section should be summarised when collapsed")
+	}
+	if !strings.Contains(a.trackInfo.playlists.GetText(true), "more") {
+		t.Fatal("setup: playlists section should be summarised when collapsed")
+	}
+
+	a.trackInfo.expanded = true
+	a.trackInfo.render(song, mpdclient.Status{})
+
+	if got := a.trackInfo.marks.GetText(true); strings.Contains(got, "more") {
+		t.Errorf("marks section still summarised after expanding: %q", got)
+	}
+	if got := a.trackInfo.playlists.GetText(true); strings.Contains(got, "more") {
+		t.Errorf("playlists section still summarised after expanding: %q", got)
+	}
+}
+
+// TestShareGrowthSplitsSpareRows: the two sections draw on one budget,
+// so a long playlist list must not starve the marks beside it.
+func TestShareGrowthSplitsSpareRows(t *testing.T) {
+	cases := []struct {
+		name  string
+		want  []int
+		spare int
+		got   []int
+	}{
+		{"everyone fits", []int{2, 3}, 10, []int{2, 3}},
+		{"split evenly when short", []int{10, 10}, 4, []int{2, 2}},
+		{"odd row goes to the first asker", []int{10, 10}, 3, []int{2, 1}},
+		{"a section wanting nothing takes nothing", []int{0, 5}, 3, []int{0, 3}},
+		{"negative asks are treated as none", []int{-4, 5}, 3, []int{0, 3}},
+		{"no spare at all", []int{5, 5}, 0, []int{0, 0}},
+	}
+	for _, tc := range cases {
+		got := shareGrowth(append([]int(nil), tc.want...), tc.spare)
+		if len(got) != len(tc.got) {
+			t.Fatalf("%s: got %v, want %v", tc.name, got, tc.got)
+		}
+		for i := range got {
+			if got[i] != tc.got[i] {
+				t.Errorf("%s: got %v, want %v", tc.name, got, tc.got)
+				break
+			}
+		}
+		total := 0
+		for _, g := range got {
+			total += g
+		}
+		if total > tc.spare {
+			t.Errorf("%s: handed out %d rows, more than the %d spare", tc.name, total, tc.spare)
+		}
+	}
+}
+
+func TestMarksSectionSharesTheCardWidth(t *testing.T) {
+	long := strings.Repeat("z", 200)
+	text, _ := marksSection([]metadata.MarkReason{{ID: 1, Reason: long}}, trackInfoMarkLines)
+	for _, line := range strings.Split(stripColorTags(text), "\n") {
+		if len([]rune(line)) > trackInfoCardWidth {
+			t.Errorf("line %q is wider than the card (%d)", line, trackInfoCardWidth)
+		}
+	}
+}
+
+func TestTagsSectionMirrorsMarks(t *testing.T) {
+	tags := []metadata.Tag{{ID: 1, Tagname: "bengali"}, {ID: 2, Tagname: "hindi"}}
+	text, rows := tagsSection(tags, trackInfoTagLines)
+	lines := strings.Split(text, "\n")
+	if len(lines) != 3 { // heading + one line per tag
+		t.Fatalf("section rendered %d lines, want a heading and one line per tag: %q", len(lines), text)
+	}
+	for i, tg := range tags {
+		if !strings.Contains(stripColorTags(lines[i+1]), tg.Tagname) {
+			t.Errorf("line %d = %q, want it to carry %q", i+1, lines[i+1], tg.Tagname)
+		}
+	}
+	if rows != len(lines)+1 {
+		t.Errorf("rows = %d, want %d", rows, len(lines)+1)
+	}
+
+	empty, _ := tagsSection(nil, trackInfoTagLines)
+	if !strings.Contains(empty, "none") {
+		t.Errorf("section for an untagged track = %q, want it to say none", empty)
+	}
+
+	var many []metadata.Tag
+	for i := 1; i <= trackInfoTagLines+2; i++ {
+		many = append(many, metadata.Tag{ID: int64(i), Tagname: fmt.Sprintf("tag %d", i)})
+	}
+	capped, _ := tagsSection(many, trackInfoTagLines)
+	if n := strings.Count(capped, "•"); n != trackInfoTagLines {
+		t.Errorf("listed %d tags, want the cap of %d", n, trackInfoTagLines)
+	}
+	if !strings.Contains(capped, "+2 more") {
+		t.Errorf("section %q, want it to summarise the remaining 2", capped)
+	}
+}
+
+// TestTabExpandsAllThreeSections: Tab means "show me everything", and
+// there are three summarised sections now.
+func TestTabExpandsAllThreeSections(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.queue.table.SetRect(0, 0, 120, 70)
+	file := "artist/track.mp3"
+	for _, r := range []string{"two", "three", "four", "five"} {
+		if _, err := a.metaDB.AddMarkReason(r); err != nil {
+			t.Fatalf("AddMarkReason: %v", err)
+		}
+	}
+	for _, tg := range []string{"four", "five"} {
+		if _, err := a.metaDB.AddTag(tg); err != nil {
+			t.Fatalf("AddTag: %v", err)
+		}
+	}
+	if err := a.metaDB.SetMarks(file, []int64{1, 2, 3, 4, 5}); err != nil {
+		t.Fatalf("SetMarks: %v", err)
+	}
+	if err := a.metaDB.SetTags(file, []int64{1, 2, 3, 4, 5}); err != nil {
+		t.Fatalf("SetTags: %v", err)
+	}
+	a.playlistMembership = map[string][]string{file: {"One", "Two", "Three", "Four", "Five", "Six"}}
+	song := mpdclient.Song{Title: "Track", File: file}
+
+	a.trackInfo.render(song, mpdclient.Status{})
+	for name, got := range map[string]string{
+		"marks":     a.trackInfo.marks.GetText(true),
+		"tags":      a.trackInfo.tags.GetText(true),
+		"playlists": a.trackInfo.playlists.GetText(true),
+	} {
+		if !strings.Contains(got, "more") {
+			t.Fatalf("setup: %s section should be summarised when collapsed, got %q", name, got)
+		}
+	}
+
+	a.trackInfo.expanded = true
+	a.trackInfo.render(song, mpdclient.Status{})
+	for name, got := range map[string]string{
+		"marks":     a.trackInfo.marks.GetText(true),
+		"tags":      a.trackInfo.tags.GetText(true),
+		"playlists": a.trackInfo.playlists.GetText(true),
+	} {
+		if strings.Contains(got, "more") {
+			t.Errorf("%s section still summarised after expanding: %q", name, got)
+		}
 	}
 }

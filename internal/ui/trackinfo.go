@@ -8,6 +8,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
+	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
 )
 
@@ -27,6 +28,14 @@ import (
 type trackInfoCard struct {
 	*tview.Flex
 	identity *tview.TextView
+	// marks and tags list the track's marks and tags, one per line.
+	// Lists rather than rows in the metadata table, because a track can
+	// carry several of each and comma-joining them into a single table
+	// cell ran them off the edge of the card. Present only when meta is
+	// -- all three read the same local database.
+	marks *tview.TextView
+	tags  *tview.TextView
+
 	// playlists lists the stored playlists containing this track. Always
 	// present, unlike meta: it needs no local database, only the playlist
 	// scan the Playlists panel already runs (see App.playlistMembership).
@@ -48,9 +57,11 @@ type trackInfoCard struct {
 	// "here's how to enable it" call to action needed here.
 	meta *tview.Table
 
-	// playlistRows is how many card rows the playlist section currently
-	// occupies, kept so height() can report the card's real size after
-	// the section has grown or shrunk (see setPlaylistSection).
+	// markRows/tagRows/playlistRows are how many card rows each list
+	// section currently occupies, kept so height() can report the card's
+	// real size after a section has grown or shrunk.
+	markRows     int
+	tagRows      int
 	playlistRows int
 
 	app *App
@@ -63,13 +74,18 @@ func newTrackInfoCard(app *App) *trackInfoCard {
 	flex := tview.NewFlex().SetDirection(tview.FlexRow)
 	flex.SetBorder(true).SetTitle(" Track Info ")
 
+	marks := tview.NewTextView().SetDynamicColors(true)
+	marks.SetBorderPadding(1, 0, 1, 0)
+
+	tags := tview.NewTextView().SetDynamicColors(true)
+	tags.SetBorderPadding(1, 0, 1, 0)
+
 	playlists := tview.NewTextView().SetDynamicColors(true)
 	// A blank row above the heading: without it the section runs
-	// straight into the metadata table's last row and the two read as
-	// one block.
+	// straight into whatever precedes it and the two read as one block.
 	playlists.SetBorderPadding(1, 0, 1, 0)
 
-	c := &trackInfoCard{Flex: flex, identity: identity, playlists: playlists, app: app}
+	c := &trackInfoCard{Flex: flex, identity: identity, marks: marks, tags: tags, playlists: playlists, app: app}
 
 	// Fixed row counts, not proportions: every section here has a known
 	// maximum number of lines, so stretching them to fill the card just
@@ -83,6 +99,10 @@ func newTrackInfoCard(app *App) *trackInfoCard {
 		meta.SetBorderPadding(0, 0, 1, 0)
 		c.meta = meta
 		flex.AddItem(meta, trackInfoMetaLines, 0, false)
+		flex.AddItem(marks, trackInfoMarkSectionLines, 0, false)
+		c.markRows = trackInfoMarkSectionLines
+		flex.AddItem(tags, trackInfoTagSectionLines, 0, false)
+		c.tagRows = trackInfoTagSectionLines
 	}
 	flex.AddItem(playlists, trackInfoPlaylistSectionLines, 0, false)
 	c.playlistRows = trackInfoPlaylistSectionLines
@@ -98,7 +118,7 @@ func newTrackInfoCard(app *App) *trackInfoCard {
 func (c *trackInfoCard) height() int {
 	h := trackInfoCardBorderLines + trackInfoIdentityLines + c.playlistRows
 	if c.meta != nil {
-		h += trackInfoMetaLines
+		h += trackInfoMetaLines + c.markRows + c.tagRows
 	}
 	return h
 }
@@ -109,7 +129,7 @@ func (c *trackInfoCard) height() int {
 func (c *trackInfoCard) fixedHeight() int {
 	h := trackInfoCardBorderLines + trackInfoIdentityLines + trackInfoPlaylistSectionLines
 	if c.meta != nil {
-		h += trackInfoMetaLines
+		h += trackInfoMetaLines + trackInfoMarkSectionLines + trackInfoTagSectionLines
 	}
 	return h
 }
@@ -175,7 +195,9 @@ const (
 	// names, and the "+N more" line.
 	trackInfoCardBorderLines      = 2
 	trackInfoIdentityLines        = 8
-	trackInfoMetaLines            = 4
+	trackInfoMetaLines            = 2
+	trackInfoMarkSectionLines     = trackInfoMarkLines + 3
+	trackInfoTagSectionLines      = trackInfoTagLines + 3
 	trackInfoPlaylistSectionLines = trackInfoPlaylistLines + 3
 
 	// trackInfoPlaylistLines is how many playlist names the card lists
@@ -183,6 +205,13 @@ const (
 	// handful of playlists; one that sits in thirty should not push the
 	// card past the Queue panel it floats inside.
 	trackInfoPlaylistLines = 4
+
+	// trackInfoMarkLines and trackInfoTagLines are the same cap for
+	// marks and tags, lower because a track carrying more than a couple
+	// of remarks or labels is unusual where belonging to several
+	// playlists is not.
+	trackInfoMarkLines = 3
+	trackInfoTagLines  = 3
 )
 
 // cardRect returns where the floating card sits over the Queue panel
@@ -288,6 +317,12 @@ func (c *trackInfoCard) render(song mpdclient.Song, st mpdclient.Status) {
 		c.setPlaylistSection("", trackInfoPlaylistSectionLines)
 		if c.meta != nil {
 			c.meta.Clear()
+			c.markRows = trackInfoMarkSectionLines
+			c.marks.SetText("")
+			c.ResizeItem(c.marks, trackInfoMarkSectionLines, 0)
+			c.tagRows = trackInfoTagSectionLines
+			c.tags.SetText("")
+			c.ResizeItem(c.tags, trackInfoTagSectionLines, 0)
 		}
 		return
 	}
@@ -311,22 +346,48 @@ func (c *trackInfoCard) render(song mpdclient.Song, st mpdclient.Status) {
 	lines = append(lines, fmt.Sprintf("🎚️ %s", FormatAudioQuality(st.Bitrate, st.AudioFormat)))
 	c.identity.SetText(strings.Join(lines, "\n"))
 
-	c.renderPlaylists(song.File)
-
+	// One database read for both the metadata table and the marks
+	// section, rather than each fetching the same row on every tick.
+	var meta metadata.Track
 	if c.meta != nil {
-		c.renderMeta(song.File)
+		meta, _ = c.app.metaDB.Get(song.File)
+		c.renderMeta(meta)
 	}
+	c.renderSections(song.File, meta)
 }
 
-// renderPlaylists fills the playlist section for file and resizes it to
-// the number of rows it actually needs, so the card grows and shrinks
-// with the list rather than reserving its expanded size permanently.
-func (c *trackInfoCard) renderPlaylists(file string) {
-	max := trackInfoPlaylistLines
+// renderSections fills both list sections for file and resizes each to
+// the rows it actually needs, so the card grows and shrinks with its
+// content rather than reserving its expanded size permanently.
+//
+// The two sections share one growth budget: expanding is bounded by the
+// Queue panel, so a track with thirty playlists must not starve its own
+// marks of every spare row (see shareGrowth).
+func (c *trackInfoCard) renderSections(file string, track metadata.Track) {
+	markMax, tagMax, playlistMax := trackInfoMarkLines, trackInfoTagLines, trackInfoPlaylistLines
 	if c.expanded {
-		max += c.expandableRows()
+		extra := shareGrowth([]int{
+			len(track.Marks) - markMax,
+			len(track.Tags) - tagMax,
+			len(c.app.playlistMembership[file]) - playlistMax,
+		}, c.expandableRows())
+		markMax += extra[0]
+		tagMax += extra[1]
+		playlistMax += extra[2]
 	}
-	text, rows := playlistsSection(c.app.playlistMembership, file, max)
+
+	if c.meta != nil {
+		text, rows := marksSection(track.Marks, markMax)
+		c.markRows = rows
+		c.marks.SetText(text)
+		c.ResizeItem(c.marks, rows, 0)
+
+		text, rows = tagsSection(track.Tags, tagMax)
+		c.tagRows = rows
+		c.tags.SetText(text)
+		c.ResizeItem(c.tags, rows, 0)
+	}
+	text, rows := playlistsSection(c.app.playlistMembership, file, playlistMax)
 	c.setPlaylistSection(text, rows)
 }
 
@@ -337,6 +398,106 @@ func (c *trackInfoCard) setPlaylistSection(text string, rows int) {
 	c.playlistRows = rows
 	c.playlists.SetText(text)
 	c.ResizeItem(c.playlists, rows, 0)
+}
+
+// shareGrowth splits spare rows between sections asking for extra ones.
+// Everyone gets what they ask for when it all fits; otherwise the rows
+// go round one at a time to whoever still wants more, so no section is
+// starved by a longer neighbour and none is handed rows it cannot use.
+func shareGrowth(want []int, spare int) []int {
+	got := make([]int, len(want))
+	for i, w := range want {
+		if w < 0 {
+			want[i] = 0
+		}
+	}
+	for spare > 0 {
+		progressed := false
+		for i := range want {
+			if spare == 0 {
+				break
+			}
+			if got[i] < want[i] {
+				got[i]++
+				spare--
+				progressed = true
+			}
+		}
+		if !progressed {
+			break
+		}
+	}
+	return got
+}
+
+// listSectionText renders one of the card's list sections: a heading,
+// then at most max of items, then a "+N more (Tab)" line if any were
+// left out. Returns the text and how many card rows it occupies, the
+// section's own padding row included.
+//
+// Shared by the marks and playlists sections so the two cannot drift
+// into looking like different kinds of thing, and so a third one is a
+// call rather than a copy.
+func listSectionText(heading string, items []string, max int) (string, int) {
+	const padding = 1 // the section's own top padding row
+	if max < 1 {
+		max = 1
+	}
+
+	shown := items
+	var extra int
+	if len(shown) > max {
+		extra = len(shown) - max
+		shown = shown[:max]
+	}
+
+	lines := make([]string, 0, len(shown)+2)
+	lines = append(lines, heading)
+	lines = append(lines, shown...)
+	if extra > 0 {
+		lines = append(lines, fmt.Sprintf("[::d]  +%d more (Tab)[-:-:-]", extra))
+	}
+	return strings.Join(lines, "\n"), padding + len(lines)
+}
+
+// marksSection renders the "Marks" section from a track's marks, each on
+// its own line in its own color.
+//
+// A list rather than the single metadata-table row this used to be:
+// marks became many-to-many, and comma-joining several reasons into one
+// table cell ran them straight off the side of the card. Reads exactly
+// like the playlists section below it, including responding to Tab.
+func marksSection(marks []metadata.MarkReason, max int) (string, int) {
+	heading := "[::b]🔖 Marks[-:-:-]"
+	if len(marks) == 0 {
+		return heading + "\n[::d]  none[-:-:-]", 2
+	}
+	items := make([]string, len(marks))
+	for i, m := range marks {
+		items[i] = fmt.Sprintf("  • [%s]%s[-]", markColor(m).String(),
+			splitConjuncts(truncateWithEllipsis(m.Reason, trackInfoPlaylistNameMaxLen)))
+	}
+	return listSectionText(heading, items, max)
+}
+
+// tagsSection renders the "Tags" section, the same shape as marks. Tags
+// carry no per-entry color the way marks do -- a mark's color is how the
+// Queue's narrow Mark column tells one tick from another, and tags have
+// no such column to disambiguate.
+func tagsSection(tags []metadata.Tag, max int) (string, int) {
+	// A width-2 glyph, like the other section headings: 🏷 is width 1 in
+	// both tview and the terminal (no drift, but it sits a column short
+	// of 🔖 and 📃 above and below it). Not 🏷️ itself, which is width 2
+	// but already labels Genre in the identity block above.
+	heading := "[::b]📌 Tags[-:-:-]"
+	if len(tags) == 0 {
+		return heading + "\n[::d]  none[-:-:-]", 2
+	}
+	items := make([]string, len(tags))
+	for i, t := range tags {
+		items[i] = "  • " + splitConjuncts(truncateWithEllipsis(t.Tagname, trackInfoPlaylistNameMaxLen))
+	}
+	return listSectionText(heading, items, max)
 }
 
 // playlistsSection renders the "In playlists" section for file from
@@ -352,35 +513,19 @@ func (c *trackInfoCard) setPlaylistSection(text string, rows int) {
 // other MPD-provided string is (see conjuncts.go): this card floats over
 // the Queue, so a name that mis-measures corrupts the rows behind it.
 func playlistsSection(membership map[string][]string, file string, max int) (string, int) {
-	const padding = 1 // the section's own top padding row
 	heading := "[::b]📃 In playlists[-:-:-]"
 	if membership == nil {
-		return heading + "\n[::d]  loading…[-:-:-]", padding + 2
+		return heading + "\n[::d]  loading…[-:-:-]", 2
 	}
 	names := membership[file]
 	if len(names) == 0 {
-		return heading + "\n[::d]  none[-:-:-]", padding + 2
+		return heading + "\n[::d]  none[-:-:-]", 2
 	}
-	if max < 1 {
-		max = 1
+	items := make([]string, len(names))
+	for i, n := range names {
+		items[i] = "  • " + splitConjuncts(truncateWithEllipsis(n, trackInfoPlaylistNameMaxLen))
 	}
-
-	shown := names
-	var extra int
-	if len(shown) > max {
-		extra = len(shown) - max
-		shown = shown[:max]
-	}
-
-	lines := make([]string, 0, len(shown)+2)
-	lines = append(lines, heading)
-	for _, n := range shown {
-		lines = append(lines, "  • "+splitConjuncts(truncateWithEllipsis(n, trackInfoPlaylistNameMaxLen)))
-	}
-	if extra > 0 {
-		lines = append(lines, fmt.Sprintf("[::d]  +%d more (Tab)[-:-:-]", extra))
-	}
-	return strings.Join(lines, "\n"), padding + len(lines)
+	return listSectionText(heading, items, max)
 }
 
 // trackInfoPlaylistNameMaxLen caps a listed playlist name so a long one
@@ -411,32 +556,18 @@ func lyricsFormatBadges(musicDir, file string) string {
 	return strings.Join(labels, " ")
 }
 
-// renderMeta fills the Rating/Plays/Mark/Tags metadata table for file --
-// only called when c.meta != nil (metaDB active). No header row (unlike
-// Settings' Config/Database tables): every row already names its own
-// field in column 0, and this card has much less room to spare than a
-// full-screen overlay. Errors from metaDB.Get are swallowed, same as
-// renderNowPlaying's identical call -- this runs unconditionally on every
-// ~500ms refresh tick regardless of whether the card is actually open, so
-// a transient read error flashing every tick would be far more disruptive
-// than just showing a zero-opinion row until it clears.
-func (c *trackInfoCard) renderMeta(file string) {
+// renderMeta fills the Rating/Plays/Tags metadata table from an
+// already-read Track -- only called when c.meta != nil (metaDB active).
+// No header row (unlike Settings' Config/Database tables): every row
+// already names its own field in column 0, and this card has much less
+// room to spare than a full-screen overlay.
+//
+// Marks and Tags used to be rows here. Both moved out to their own
+// sections once a track could carry several of each: comma-joined into
+// one table cell they ran off the side of the card, where a list can be
+// capped and expanded like the playlists below it.
+func (c *trackInfoCard) renderMeta(track metadata.Track) {
 	c.meta.Clear()
-	track, _ := c.app.metaDB.Get(file)
-
-	mark := tview.NewTableCell("-")
-	if track.Mark != nil {
-		mark = tview.NewTableCell(track.Mark.Reason).SetTextColor(markColor(track.Mark))
-	}
-
-	tags := "-"
-	if len(track.Tags) > 0 {
-		names := make([]string, len(track.Tags))
-		for i, tg := range track.Tags {
-			names[i] = tg.Tagname
-		}
-		tags = strings.Join(names, ", ")
-	}
 
 	rows := []struct {
 		label string
@@ -444,8 +575,6 @@ func (c *trackInfoCard) renderMeta(file string) {
 	}{
 		{"Rating", tview.NewTableCell(ratingStars(track.Rating)).SetTextColor(queueRatingColor)},
 		{"Plays", tview.NewTableCell(strconv.Itoa(track.PlayCount))},
-		{"Mark", mark},
-		{"Tags", tview.NewTableCell(tags)},
 	}
 	for r, row := range rows {
 		c.meta.SetCell(r, 0, tview.NewTableCell(row.label))

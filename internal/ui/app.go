@@ -93,7 +93,8 @@ type App struct {
 	albumArt     *albumArtPanel
 	trackInfo    *trackInfoCard
 	lyricsViewer *lyricsViewer
-	markPicker   *markPicker
+	markPicker   *catalogPicker
+	tagPicker    *catalogPicker
 	settings     *settingsView
 	visualizer   *visualizerPanel
 
@@ -266,7 +267,8 @@ func (a *App) build() {
 	a.albumArt = newAlbumArtPanel(a)
 	a.trackInfo = newTrackInfoCard(a)
 	a.lyricsViewer = newLyricsViewer(a)
-	a.markPicker = newMarkPicker(a)
+	a.markPicker = newCatalogPicker(a, markCatalog{})
+	a.tagPicker = newCatalogPicker(a, tagCatalog{})
 	a.settings = newSettingsView(a)
 	a.visualizer = newVisualizerPanel(a)
 
@@ -366,6 +368,8 @@ func (a *App) reapplyTheme() {
 	a.settings.catalogTable.SetSelectedStyle(selectedStyle)
 	a.markPicker.SetSelectedTextColor(colorSelectedFg)
 	a.markPicker.SetSelectedBackgroundColor(colorSelectedBg)
+	a.tagPicker.SetSelectedTextColor(colorSelectedFg)
+	a.tagPicker.SetSelectedBackgroundColor(colorSelectedBg)
 
 	// Everything above is a widget whose border/title color tview reads
 	// live off a Box field on every Draw. Table cells are different:
@@ -651,6 +655,25 @@ func (a *App) focusPanel(i int) {
 	a.updateHintBar()
 }
 
+// focusQueueAfterAdd moves focus to the Queue panel following an add,
+// without repainting the hint bar.
+//
+// focusPanelPrimitive would repaint it, and the add has just flashed its
+// confirmation there -- "added 12 track(s) from Miles Davis" would be
+// overwritten before it could be read. Skipping the repaint costs
+// nothing visible: the hint bar is showing that confirmation for the
+// moment anyway, and when the flash expires its own timer calls
+// updateHintBar, which paints the Queue's hints because focus is by then
+// already here.
+func (a *App) focusQueueAfterAdd() {
+	for i, p := range a.panels {
+		if p == a.queue.table {
+			a.panelIdx = i
+		}
+	}
+	a.tv.SetFocus(a.queue.table)
+}
+
 func (a *App) focusPanelPrimitive(p tview.Primitive) {
 	for i, pp := range a.panels {
 		if pp == p {
@@ -780,22 +803,27 @@ func (a *App) addAndPlay(song mpdclient.Song) {
 // single track or a directory -- MPD's own "add" command recurses through
 // a directory server-side, so there's no need to fetch and iterate its
 // contents here.
-func (a *App) queueAddPath(path string) {
+// queueAddPath adds path to the queue, reporting whether it landed --
+// callers that follow an add with something else (moving focus to the
+// Queue, say) need to know it actually happened.
+func (a *App) queueAddPath(path string) bool {
 	if err := a.client.QueueAdd(path); err != nil {
 		a.showError(err)
-		return
+		return false
 	}
 	a.queue.refresh()
 	a.showMessage("added to queue: " + baseName(path))
+	return true
 }
 
-func (a *App) appendPlaylist(name string) {
+func (a *App) appendPlaylist(name string) bool {
 	if err := a.client.PlaylistAppend(name); err != nil {
 		a.showError(err)
-		return
+		return false
 	}
 	a.queue.refresh()
 	a.showMessage("appended playlist " + name)
+	return true
 }
 
 // clearAllSearches is 'F': resets every panel's persistent search/filter

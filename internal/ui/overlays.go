@@ -167,9 +167,10 @@ const helpText = `[::b]Global[-:-:-]
                  music_dir set), live audio quality (bitrate, sample
                  rate/bit depth/channels), which stored playlists the
                  track belongs to, and, when track_metadata is active, a
-                 Rating/Plays/Mark/Tags table. Tab expands the
-                 summarised sections (the playlist list) and collapses
-                 them again
+                 Rating/Plays table plus the track's marks and tags
+                 listed one per line. Tab expands every summarised
+                 section (marks, tags, playlists) and collapses them
+                 again
   y              lyrics viewer for the currently playing track (needs
                  music_dir set in ~/.config/mpdtui/config); j/k/g/G/
                  Ctrl-F/Ctrl-B to scroll, 'y' or Esc to close --
@@ -205,10 +206,12 @@ const helpText = `[::b]Global[-:-:-]
 
 [::b]Library panel[-:-:-]
   Enter          expand/collapse a folder, or add+play a track
-  a              add selected folder/track to queue (no play)
+  a              add selected folder/track to queue (no play), then
+                 move focus to the Queue -- only on a real add
   A              add every search result to the queue at once
                  (only after a search -- '/' here, or an artist/album
-                 opened from global search)
+                 opened from global search), then move focus to the
+                 Queue, like 'a'
   Backspace      collapse folder, or go up to its parent
   o              cycle sort: name / most recently modified
   Esc            clear active search
@@ -243,10 +246,16 @@ const helpText = `[::b]Global[-:-:-]
                  Anything rated above 3 stars also gets a star in the
                  left gutter, next to the play marker: full color for
                  5, dimmer for 4
-  m              mark the selected track with a reason (or clear an
-                 existing mark), from a small popup: j/k/g/G to
-                 navigate, Enter to apply, Esc to cancel -- transport
-                 controls still work while it's open
+  m              mark the selected track, from a small popup: j/k/g/G
+                 to navigate, Enter toggles the highlighted reason on or
+                 off, Esc closes -- transport controls still work while
+                 it's open. A track can carry several marks at once, so
+                 the popup is a checklist -- a tick against each mark
+                 that is set -- and stays open as you toggle, with a
+                 "(clear all marks)" entry at the top
+  t              tag the selected track, from the same kind of popup as
+                 'm' -- a track can carry several tags, edit the tag
+                 catalog in Settings ('e', Database tab)
   The narrow "Lyr" column shows a colored tick per lyrics format the
   track has a matching sidecar for (see 'y'): green for synced (.lrc),
   orange for plain (.txt), both adjacent (no gap) if both exist --

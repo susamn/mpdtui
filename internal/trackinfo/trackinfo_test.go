@@ -142,7 +142,7 @@ func TestFormatInfoWithMetadata(t *testing.T) {
 	meta := &metadata.Track{
 		Rating:    4,
 		PlayCount: 7,
-		Mark:      &metadata.MarkReason{ID: 1, Reason: "mark for deletion"},
+		Marks:     []metadata.MarkReason{{ID: 1, Reason: "mark for deletion"}},
 		Tags: []metadata.Tag{
 			{ID: 1, Tagname: "classic"},
 			{ID: 2, Tagname: "rock"},
@@ -154,7 +154,7 @@ func TestFormatInfoWithMetadata(t *testing.T) {
 	expected := []string{
 		"Rating:", "4",
 		"Play Count:", "7",
-		"Mark:", "mark for deletion",
+		"Marks:", "mark for deletion",
 		"Tags:", "classic, rock",
 	}
 	for _, exp := range expected {
@@ -169,7 +169,7 @@ func TestFormatInfoWithMetadata(t *testing.T) {
 	if !strings.Contains(gotZero, "Rating:") || !strings.Contains(gotZero, "0") {
 		t.Errorf("FormatInfo expected 0 rating: %s", gotZero)
 	}
-	if !strings.Contains(gotZero, "Mark:") || !strings.Contains(gotZero, "-") {
+	if !strings.Contains(gotZero, "Marks:") || !strings.Contains(gotZero, "-") {
 		t.Errorf("FormatInfo expected '-' mark: %s", gotZero)
 	}
 	if !strings.Contains(gotZero, "Tags:") || !strings.Contains(gotZero, "-") {

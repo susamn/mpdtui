@@ -92,7 +92,7 @@ func TestGetUnknownTrackReturnsZeroOpinionNotError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if track.PlayCount != 0 || track.Rating != 0 || track.Mark != nil || len(track.Tags) != 0 {
+	if track.PlayCount != 0 || track.Rating != 0 || len(track.Marks) != 0 || len(track.Tags) != 0 {
 		t.Errorf("Get(unknown) = %+v, want all-zero-opinion", track)
 	}
 }
@@ -148,26 +148,26 @@ func TestSetMarkAndClear(t *testing.T) {
 	file := "artist/track.mp3"
 
 	reasonID := int64(1)
-	if err := db.SetMark(file, &reasonID); err != nil {
+	if err := db.SetMarks(file, []int64{reasonID}); err != nil {
 		t.Fatalf("SetMark: %v", err)
 	}
 	track, err := db.Get(file)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if track.Mark == nil || track.Mark.Reason != "mark for deletion" {
-		t.Fatalf("Mark after SetMark = %+v, want {1 mark for deletion}", track.Mark)
+	if len(track.Marks) != 1 || track.Marks[0].Reason != "mark for deletion" {
+		t.Fatalf("Marks after SetMarks = %+v, want [{1 mark for deletion}]", track.Marks)
 	}
 
-	if err := db.SetMark(file, nil); err != nil {
-		t.Fatalf("SetMark(nil): %v", err)
+	if err := db.SetMarks(file, nil); err != nil {
+		t.Fatalf("SetMarks(nil): %v", err)
 	}
 	track, err = db.Get(file)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if track.Mark != nil {
-		t.Errorf("Mark after clearing = %+v, want nil", track.Mark)
+	if len(track.Marks) != 0 {
+		t.Errorf("Marks after clearing = %+v, want none", track.Marks)
 	}
 }
 
@@ -332,7 +332,7 @@ func TestDeleteMarkReasonClearsReferencingTracks(t *testing.T) {
 	db := openTestDB(t)
 	seededID := int64(1) // "mark for deletion", seeded by Open
 
-	if err := db.SetMark("artist/track.mp3", &seededID); err != nil {
+	if err := db.SetMarks("artist/track.mp3", []int64{seededID}); err != nil {
 		t.Fatalf("SetMark: %v", err)
 	}
 	if err := db.DeleteMarkReason(seededID); err != nil {
@@ -343,8 +343,8 @@ func TestDeleteMarkReasonClearsReferencingTracks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get after deleting the referenced mark reason returned an error (dangling reference): %v", err)
 	}
-	if track.Mark != nil {
-		t.Errorf("track.Mark after deleting the referenced reason = %+v, want nil (cleared)", track.Mark)
+	if len(track.Marks) != 0 {
+		t.Errorf("track.Marks after deleting the referenced reason = %+v, want none (cleared)", track.Marks)
 	}
 }
 

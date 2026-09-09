@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -375,8 +376,12 @@ func metaSegments(meta metadata.Track) []segment {
 		{text: ratingStars(meta.Rating), fg: ansiRatingColor},
 		{text: fmt.Sprintf("  played %dx", meta.PlayCount)},
 	}
-	if meta.Mark != nil {
-		segs = append(segs, segment{text: "  marked: " + meta.Mark.Reason})
+	if len(meta.Marks) > 0 {
+		names := make([]string, len(meta.Marks))
+		for i, m := range meta.Marks {
+			names[i] = m.Reason
+		}
+		segs = append(segs, segment{text: "  marked: " + strings.Join(names, ", ")})
 	}
 	return segs
 }

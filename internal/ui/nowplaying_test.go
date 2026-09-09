@@ -120,7 +120,7 @@ func TestRenderNowPlayingSyncsExternalMarkChangeToQueue(t *testing.T) {
 
 	// External write sets mark in metaDB
 	markID := int64(1) // seeded "mark for deletion"
-	if err := a.metaDB.SetMark(song.File, &markID); err != nil {
+	if err := a.metaDB.SetMarks(song.File, []int64{markID}); err != nil {
 		t.Fatalf("SetMark: %v", err)
 	}
 
