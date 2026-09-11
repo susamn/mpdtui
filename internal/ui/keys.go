@@ -15,6 +15,25 @@ import (
 // across per-panel SetInputCapture handlers.
 func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 	if a.mode == modeOverlay {
+		if a.bookmarkPicker.focused() {
+			if a.bookmarkPicker.handleKey(event) {
+				return nil
+			}
+			if event.Key() == tcell.KeyRune && a.bookmarkPicker.allowsGlobalKeys() {
+				if event.Rune() == 'q' {
+					a.tv.Stop()
+					return nil
+				}
+				if a.handleTransportKey(event.Rune()) {
+					return nil
+				}
+			}
+			if event.Key() == tcell.KeyEscape {
+				a.closeOverlay()
+				return nil
+			}
+			return event
+		}
 		if event.Key() == tcell.KeyEscape {
 			a.closeOverlay()
 			return nil
@@ -157,6 +176,12 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			return nil
 		case 'e':
 			a.openSettings()
+			return nil
+		case 'b':
+			a.handleBookmarkTrack()
+			return nil
+		case 'B':
+			a.handleOpenBookmarkManager()
 			return nil
 		case '?':
 			a.openHelp()

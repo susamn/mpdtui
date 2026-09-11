@@ -264,6 +264,9 @@ func TestTrackInfoCardRenderMetaShowsZeroOpinionPlaceholders(t *testing.T) {
 	if got := a.trackInfo.tags.GetText(true); !strings.Contains(got, "none") {
 		t.Errorf("Tags section = %q, want it to say none", got)
 	}
+	if got := a.trackInfo.bookmarks.GetText(true); !strings.Contains(got, "none") {
+		t.Errorf("Bookmarks section = %q, want it to say none", got)
+	}
 }
 
 func TestTrackInfoCardRenderMetaShowsRealValues(t *testing.T) {
@@ -285,6 +288,9 @@ func TestTrackInfoCardRenderMetaShowsRealValues(t *testing.T) {
 	}
 	if err := a.metaDB.SetTags(file, []int64{1, 2}); err != nil { // seeded bengali, hindi
 		t.Fatalf("SetTags: %v", err)
+	}
+	if _, err := a.metaDB.CreateBookmark(file, 75.0, "guitar solo"); err != nil {
+		t.Fatalf("CreateBookmark: %v", err)
 	}
 
 	a.trackInfo.render(mpdclient.Song{Title: "Track", File: file}, mpdclient.Status{})
@@ -311,6 +317,11 @@ func TestTrackInfoCardRenderMetaShowsRealValues(t *testing.T) {
 	}
 	if !strings.Contains(marks, markColor(metadata.MarkReason{ID: 1}).String()) {
 		t.Errorf("Marks section = %q, want the mark in its own color", marks)
+	}
+	// Bookmarks section
+	bookmarks := a.trackInfo.bookmarks.GetText(false)
+	if !strings.Contains(bookmarks, "[1:15] guitar solo") {
+		t.Errorf("Bookmarks section = %q, want it to list '[1:15] guitar solo'", bookmarks)
 	}
 }
 

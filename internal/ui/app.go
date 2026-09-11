@@ -92,10 +92,11 @@ type App struct {
 	hintBar      *tview.TextView
 	albumArt     *albumArtPanel
 	trackInfo    *trackInfoCard
-	lyricsViewer *lyricsViewer
-	markPicker   *catalogPicker
-	tagPicker    *catalogPicker
-	settings     *settingsView
+	lyricsViewer   *lyricsViewer
+	markPicker     *catalogPicker
+	tagPicker      *catalogPicker
+	bookmarkPicker *bookmarkPicker
+	settings       *settingsView
 	visualizer   *visualizerPanel
 
 	// currentSong is refreshNowPlaying's own last-fetched CurrentSong,
@@ -269,6 +270,7 @@ func (a *App) build() {
 	a.lyricsViewer = newLyricsViewer(a)
 	a.markPicker = newCatalogPicker(a, markCatalog{})
 	a.tagPicker = newCatalogPicker(a, tagCatalog{})
+	a.bookmarkPicker = newBookmarkPicker(a)
 	a.settings = newSettingsView(a)
 	a.visualizer = newVisualizerPanel(a)
 
@@ -750,10 +752,10 @@ var globalHints = []hint{
 	{"F", "reset"},
 	{"i", "info"},
 	{"y", "lyrics"},
+	{"b", "bookmark"},
 	{"v", "visualizer"},
 	{"L", "locate"},
 	{"?", "help"},
-	{"Tab/1-3", "panels"},
 	{"q", "quit"},
 }
 
@@ -781,7 +783,7 @@ func (a *App) updateHintBar() {
 	if text != "" {
 		text += "   "
 	}
-	text += "[::d]Global:[-:-:-]  " + formatHints(globalHints)
+	text += formatHints(globalHints)
 	a.hintBar.SetText(text)
 }
 
@@ -859,4 +861,29 @@ func (a *App) loadPlaylist(name string) {
 	a.queue.refresh()
 	a.refreshNowPlaying()
 	a.showMessage("loaded playlist " + name)
+}
+
+// openBookmarkManager opens the 'B' bookmark manager overlay for song.
+func (a *App) openBookmarkManager(song mpdclient.Song) {
+	if a.metaDB == nil {
+		a.metadataNotEnabled()
+		return
+	}
+	a.bookmarkPicker.render(song)
+	a.showOverlay("bookmark-picker", centered(a.bookmarkPicker.Flex, 64, 14), a.bookmarkPicker.table)
+}
+
+// reloadTrackMeta re-reads the track's metadata from metaDB and updates
+// the Queue cache and Track Info card.
+func (a *App) reloadTrackMeta(file string) {
+	if a.metaDB == nil {
+		return
+	}
+	track, err := a.metaDB.Get(file)
+	if err != nil {
+		a.showError(err)
+		return
+	}
+	a.queue.applyTrackMeta(file, track)
+	a.renderTrackInfo()
 }

@@ -136,10 +136,10 @@ func TestTrackInfoCardHeightMatchesItsSections(t *testing.T) {
 	if withMeta.meta == nil {
 		t.Fatal("setup: metadata-enabled test app has no metadata table")
 	}
-	// The metadata table brings the marks and tags sections with it --
+	// The metadata table brings the marks, tags, and bookmarks sections with it --
 	// all three live on the same local database.
-	if wantMeta := want + trackInfoMetaLines + trackInfoMarkSectionLines + trackInfoTagSectionLines; withMeta.height() != wantMeta {
-		t.Errorf("height with the metadata table = %d, want %d", withMeta.height(), want+trackInfoMetaLines+trackInfoMarkSectionLines+trackInfoTagSectionLines)
+	if wantMeta := want + trackInfoMetaLines + trackInfoMarkSectionLines + trackInfoTagSectionLines + trackInfoBookmarkSectionLines; withMeta.height() != wantMeta {
+		t.Errorf("height with the metadata table = %d, want %d", withMeta.height(), wantMeta)
 	}
 }
 

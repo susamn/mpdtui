@@ -36,8 +36,18 @@ func (a *App) showOverlay(name string, root, focus tview.Primitive) {
 // openInput shows a single-line text input overlay. onSubmit is called
 // with the entered text on Enter; Esc cancels without calling it.
 func (a *App) openInput(label, initial string, onSubmit func(string)) {
-	field := tview.NewInputField().SetLabel(label).SetText(initial).SetFieldWidth(40)
+	a.openInputWithTitle("", label, initial, onSubmit)
+}
+
+// openInputWithTitle shows a single-line text input overlay with an optional
+// border title. Sized to fit the label plus typing room, without hardcoding
+// field width which causes text to clobber the right border.
+func (a *App) openInputWithTitle(title, label, initial string, onSubmit func(string)) {
+	field := tview.NewInputField().SetLabel(label).SetText(initial)
 	field.SetBorder(true)
+	if title != "" {
+		field.SetTitle(title)
+	}
 	field.SetDoneFunc(func(key tcell.Key) {
 		text := field.GetText()
 		a.closeOverlay()
@@ -45,7 +55,63 @@ func (a *App) openInput(label, initial string, onSubmit func(string)) {
 			onSubmit(text)
 		}
 	})
-	a.showOverlay("input", centered(field, 60, 3), field)
+	width := len(label) + 44
+	if width < 64 {
+		width = 64
+	}
+	if width > 80 {
+		width = 80
+	}
+	a.showOverlay("input", centered(field, width, 3), field)
+}
+
+// openTextBox shows a multi-line text box overlay with word wrapping,
+// suitable for longer notes (like bookmark annotations).
+// Enter or Ctrl+S saves, Esc cancels. Alt+Enter inserts a newline.
+func (a *App) openTextBox(title, initial string, onSubmit func(string)) {
+	ta := tview.NewTextArea()
+	ta.SetBorder(true)
+	if title != "" {
+		ta.SetTitle(title)
+	}
+	ta.SetWordWrap(true)
+	if initial != "" {
+		ta.SetText(initial, true)
+	}
+	ta.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEscape {
+			a.closeOverlay()
+			return nil
+		}
+		if event.Key() == tcell.KeyEnter {
+			if event.Modifiers()&tcell.ModAlt != 0 {
+				return tcell.NewEventKey(tcell.KeyEnter, '\n', tcell.ModNone)
+			}
+			text := strings.TrimSpace(ta.GetText())
+			a.closeOverlay()
+			if text != "" {
+				onSubmit(text)
+			}
+			return nil
+		}
+		if event.Key() == tcell.KeyCtrlS {
+			text := strings.TrimSpace(ta.GetText())
+			a.closeOverlay()
+			if text != "" {
+				onSubmit(text)
+			}
+			return nil
+		}
+		return event
+	})
+	width := len(title) + 4
+	if width < 66 {
+		width = 66
+	}
+	if width > 76 {
+		width = 76
+	}
+	a.showOverlay("textbox", centered(ta, width, 8), ta)
 }
 
 // openSearch opens the '/' search, contextual on the focused panel:
@@ -193,6 +259,11 @@ const helpText = `[::b]Global[-:-:-]
                  'f' reads only this index, never the filesystem
   v              cycle Now Playing visualizations
   L              locate the currently playing track in the Queue
+  b              bookmark current playback position of the playing track
+                 (applies a 2s pre-roll offset so playback resumes a bit before)
+  B              bookmark manager for the playing or selected track --
+                 browse bookmarks, Enter to jump/seek, 'a' to add,
+                 'e' to edit note, 'd' to delete (y/n to confirm), Esc/B to close
   e              settings: Config tab (read-only: MPD host/port,
                  music_dir, track_metadata status) and Database tab --
                  browse the mark_reason/tags catalog tables (when
