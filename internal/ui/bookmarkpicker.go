@@ -21,8 +21,8 @@ const (
 )
 
 const (
-	bookmarkListHints = " [green::b]Enter[-:-:-] Jump  [green::b]a[-:-:-] Add  [green::b]e[-:-:-] Edit  [green::b]d[-:-:-] Delete  [green::b]Esc/B[-:-:-] Close"
-	bookmarkInputHints = " [green::b]Enter[-:-:-] Save  [green::b]Esc[-:-:-] Cancel"
+	bookmarkListHints    = " [green::b]Enter[-:-:-] Jump  [green::b]a[-:-:-] Add  [green::b]e[-:-:-] Edit  [green::b]d[-:-:-] Delete  [green::b]Esc/B[-:-:-] Close"
+	bookmarkInputHints   = " [green::b]Enter/Ctrl+S[-:-:-] Save  [green::b]Alt+Enter[-:-:-] New line  [green::b]Esc[-:-:-] Cancel"
 	bookmarkConfirmHints = " [green::b]y[-:-:-] Yes  [green::b]n/Esc[-:-:-] No"
 )
 
@@ -42,7 +42,7 @@ type bookmarkPicker struct {
 	pages *tview.Pages
 
 	table       *tview.Table
-	input       *tview.InputField
+	input       *tview.TextArea
 	confirmView *tview.TextView
 	hintBar     *tview.TextView
 
@@ -66,14 +66,26 @@ func newBookmarkPicker(app *App) *bookmarkPicker {
 		}
 	})
 
-	p.input = tview.NewInputField()
+	p.input = tview.NewTextArea()
 	p.input.SetBorder(true)
-	p.input.SetDoneFunc(func(key tcell.Key) {
-		if key == tcell.KeyEnter {
-			p.submitInput()
-		} else if key == tcell.KeyEscape {
+	p.input.SetWordWrap(true)
+	p.input.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEscape {
 			p.cancelInput()
+			return nil
 		}
+		if event.Key() == tcell.KeyEnter {
+			if event.Modifiers()&tcell.ModAlt != 0 {
+				return tcell.NewEventKey(tcell.KeyEnter, '\n', tcell.ModNone)
+			}
+			p.submitInput()
+			return nil
+		}
+		if event.Key() == tcell.KeyCtrlS {
+			p.submitInput()
+			return nil
+		}
+		return event
 	})
 
 	p.confirmView = tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter)
@@ -83,7 +95,7 @@ func newBookmarkPicker(app *App) *bookmarkPicker {
 
 	p.pages = tview.NewPages().
 		AddPage("table", p.table, true, true).
-		AddPage("input", centered(p.input, 66, 3), true, false).
+		AddPage("input", centered(p.input, 66, 8), true, false).
 		AddPage("confirm", centered(p.confirmView, 50, 5), true, false)
 
 	p.Flex = tview.NewFlex().SetDirection(tview.FlexRow).
@@ -175,9 +187,8 @@ func (p *bookmarkPicker) startAdd() {
 		pos = d.Seconds()
 	}
 	p.addPosition = pos
-	p.input.SetTitle(fmt.Sprintf(" Add Bookmark at %s (Enter to save, Esc to cancel) ", formatBookmarkTime(pos)))
-	p.input.SetLabel("What do you want to remember here: ")
-	p.input.SetText("")
+	p.input.SetTitle(fmt.Sprintf(" Add Bookmark at %s (Enter/Ctrl+S to save, Esc to cancel) ", formatBookmarkTime(pos)))
+	p.input.SetText("", true)
 	p.pages.SwitchToPage("input")
 	p.hintBar.SetText(bookmarkInputHints)
 	p.app.tv.SetFocus(p.input)
@@ -191,9 +202,8 @@ func (p *bookmarkPicker) startEdit() {
 	bm := p.bookmarks[row]
 	p.selectedBookmark = bm
 	p.mode = bmModeEdit
-	p.input.SetTitle(fmt.Sprintf(" Edit Bookmark at %s (Enter to save, Esc to cancel) ", formatBookmarkTime(bm.PositionSeconds)))
-	p.input.SetLabel("What do you want to remember here: ")
-	p.input.SetText(bm.Text)
+	p.input.SetTitle(fmt.Sprintf(" Edit Bookmark at %s (Enter/Ctrl+S to save, Esc to cancel) ", formatBookmarkTime(bm.PositionSeconds)))
+	p.input.SetText(bm.Text, true)
 	p.pages.SwitchToPage("input")
 	p.hintBar.SetText(bookmarkInputHints)
 	p.app.tv.SetFocus(p.input)
@@ -300,6 +310,17 @@ func (p *bookmarkPicker) handleKey(event *tcell.EventKey) bool {
 			p.cancelInput()
 			return true
 		}
+		if event.Key() == tcell.KeyEnter {
+			if event.Modifiers()&tcell.ModAlt != 0 {
+				return false
+			}
+			p.submitInput()
+			return true
+		}
+		if event.Key() == tcell.KeyCtrlS {
+			p.submitInput()
+			return true
+		}
 		return false
 	default: // bmModeList
 		if event.Key() == tcell.KeyRune {
@@ -347,12 +368,8 @@ func (a *App) handleBookmarkTrack() {
 	if pos < 0 {
 		pos = 0
 	}
-	title := fmt.Sprintf(" Bookmark [%s] (Enter to save, Esc to cancel) ", formatBookmarkTime(pos.Seconds()))
-	a.openInputWithTitle(title, "What do you want to remember here: ", "", func(text string) {
-		text = strings.TrimSpace(text)
-		if text == "" {
-			return
-		}
+	title := fmt.Sprintf(" What do you want to remember here? [%s] (Enter to save, Esc to cancel) ", formatBookmarkTime(pos.Seconds()))
+	a.openTextBox(title, "", func(text string) {
 		a.runAsync(func() error {
 			_, err := a.metaDB.CreateBookmark(song.File, pos.Seconds(), text)
 			return err

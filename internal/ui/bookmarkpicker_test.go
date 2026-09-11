@@ -58,13 +58,13 @@ func TestBookmarkKeyOffsetAndCreation(t *testing.T) {
 		t.Fatalf("a.mode = %d, want modeOverlay", a.mode)
 	}
 
-	// Focus is on input field
-	field, ok := a.tv.GetFocus().(*tview.InputField)
+	// Focus is on text box
+	field, ok := a.tv.GetFocus().(*tview.TextArea)
 	if !ok {
-		t.Fatalf("focus = %T, want *tview.InputField", a.tv.GetFocus())
+		t.Fatalf("focus = %T, want *tview.TextArea", a.tv.GetFocus())
 	}
-	if !strings.Contains(field.GetLabel(), "What do you want to remember here") {
-		t.Errorf("label = %q, want 'What do you want to remember here: '", field.GetLabel())
+	if !strings.Contains(field.GetTitle(), "What do you want to remember here") {
+		t.Errorf("title = %q, want 'What do you want to remember here'", field.GetTitle())
 	}
 
 	// Check that pressing Esc cancels without saving
@@ -83,8 +83,8 @@ func TestBookmarkKeyOffsetAndCreation(t *testing.T) {
 
 	// Press 'b' again and submit text
 	a.globalInputCapture(bKey)
-	field, _ = a.tv.GetFocus().(*tview.InputField)
-	field.SetText("awesome intro")
+	field, _ = a.tv.GetFocus().(*tview.TextArea)
+	field.SetText("awesome intro", true)
 	enterKey := tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
 	field.InputHandler()(enterKey, nil)
 
@@ -116,11 +116,11 @@ func TestBookmarkKeyClampingAtZero(t *testing.T) {
 	bKey := tcell.NewEventKey(tcell.KeyRune, 'b', tcell.ModNone)
 	a.globalInputCapture(bKey)
 
-	field, ok := a.tv.GetFocus().(*tview.InputField)
+	field, ok := a.tv.GetFocus().(*tview.TextArea)
 	if !ok {
-		t.Fatalf("focus = %T, want *tview.InputField", a.tv.GetFocus())
+		t.Fatalf("focus = %T, want *tview.TextArea", a.tv.GetFocus())
 	}
-	field.SetText("very start")
+	field.SetText("very start", true)
 	enterKey := tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
 	field.InputHandler()(enterKey, nil)
 
@@ -174,7 +174,7 @@ func TestBookmarkManagerListingAndCRUD(t *testing.T) {
 	}
 
 	// Submit input
-	a.bookmarkPicker.input.SetText("guitar riff")
+	a.bookmarkPicker.input.SetText("guitar riff", true)
 	enterKey := tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
 	a.bookmarkPicker.input.InputHandler()(enterKey, nil)
 
@@ -202,7 +202,7 @@ func TestBookmarkManagerListingAndCRUD(t *testing.T) {
 		t.Errorf("input text = %q, want 'guitar riff'", a.bookmarkPicker.input.GetText())
 	}
 	// Edit text and submit
-	a.bookmarkPicker.input.SetText("solo starts here")
+	a.bookmarkPicker.input.SetText("solo starts here", true)
 	a.bookmarkPicker.input.InputHandler()(enterKey, nil)
 
 	if a.bookmarkPicker.mode != bmModeList {
@@ -262,5 +262,70 @@ func TestBookmarkManagerEscapeCloses(t *testing.T) {
 	a.globalInputCapture(escKey)
 	if a.mode != modeNormal {
 		t.Fatalf("a.mode after Esc = %d, want modeNormal", a.mode)
+	}
+}
+
+func TestOpenTextBox(t *testing.T) {
+	a := newTestApp()
+
+	var submitted string
+	a.openTextBox("Test Box", "initial text", func(text string) {
+		submitted = text
+	})
+
+	if a.mode != modeOverlay {
+		t.Fatalf("a.mode = %d, want modeOverlay", a.mode)
+	}
+
+	ta, ok := a.tv.GetFocus().(*tview.TextArea)
+	if !ok {
+		t.Fatalf("focus = %T, want *tview.TextArea", a.tv.GetFocus())
+	}
+	if ta.GetTitle() != "Test Box" {
+		t.Errorf("title = %q, want 'Test Box'", ta.GetTitle())
+	}
+	if ta.GetText() != "initial text" {
+		t.Errorf("text = %q, want 'initial text'", ta.GetText())
+	}
+
+	// Test Esc cancels
+	escKey := tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone)
+	ta.InputHandler()(escKey, nil)
+	if a.mode != modeNormal {
+		t.Fatalf("a.mode after Esc = %d, want modeNormal", a.mode)
+	}
+	if submitted != "" {
+		t.Fatalf("submitted = %q after Esc, want empty", submitted)
+	}
+
+	// Test Enter submits
+	a.openTextBox("Enter Test", "", func(text string) {
+		submitted = text
+	})
+	ta, _ = a.tv.GetFocus().(*tview.TextArea)
+	ta.SetText("note with enter", true)
+	enterKey := tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
+	ta.InputHandler()(enterKey, nil)
+	if a.mode != modeNormal {
+		t.Fatalf("a.mode after Enter = %d, want modeNormal", a.mode)
+	}
+	if submitted != "note with enter" {
+		t.Errorf("submitted = %q, want 'note with enter'", submitted)
+	}
+
+	// Test Ctrl+S submits
+	submitted = ""
+	a.openTextBox("Ctrl+S Test", "", func(text string) {
+		submitted = text
+	})
+	ta, _ = a.tv.GetFocus().(*tview.TextArea)
+	ta.SetText("note with ctrl+s", true)
+	ctrlSKey := tcell.NewEventKey(tcell.KeyCtrlS, 0, tcell.ModNone)
+	ta.InputHandler()(ctrlSKey, nil)
+	if a.mode != modeNormal {
+		t.Fatalf("a.mode after Ctrl+S = %d, want modeNormal", a.mode)
+	}
+	if submitted != "note with ctrl+s" {
+		t.Errorf("submitted = %q, want 'note with ctrl+s'", submitted)
 	}
 }

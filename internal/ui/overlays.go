@@ -65,6 +65,55 @@ func (a *App) openInputWithTitle(title, label, initial string, onSubmit func(str
 	a.showOverlay("input", centered(field, width, 3), field)
 }
 
+// openTextBox shows a multi-line text box overlay with word wrapping,
+// suitable for longer notes (like bookmark annotations).
+// Enter or Ctrl+S saves, Esc cancels. Alt+Enter inserts a newline.
+func (a *App) openTextBox(title, initial string, onSubmit func(string)) {
+	ta := tview.NewTextArea()
+	ta.SetBorder(true)
+	if title != "" {
+		ta.SetTitle(title)
+	}
+	ta.SetWordWrap(true)
+	if initial != "" {
+		ta.SetText(initial, true)
+	}
+	ta.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEscape {
+			a.closeOverlay()
+			return nil
+		}
+		if event.Key() == tcell.KeyEnter {
+			if event.Modifiers()&tcell.ModAlt != 0 {
+				return tcell.NewEventKey(tcell.KeyEnter, '\n', tcell.ModNone)
+			}
+			text := strings.TrimSpace(ta.GetText())
+			a.closeOverlay()
+			if text != "" {
+				onSubmit(text)
+			}
+			return nil
+		}
+		if event.Key() == tcell.KeyCtrlS {
+			text := strings.TrimSpace(ta.GetText())
+			a.closeOverlay()
+			if text != "" {
+				onSubmit(text)
+			}
+			return nil
+		}
+		return event
+	})
+	width := len(title) + 4
+	if width < 66 {
+		width = 66
+	}
+	if width > 76 {
+		width = 76
+	}
+	a.showOverlay("textbox", centered(ta, width, 8), ta)
+}
+
 // openSearch opens the '/' search, contextual on the focused panel:
 // filters Playlists in place, full-text searches the Library (both via a
 // centered popup), or focuses the Queue's own persistent search field
