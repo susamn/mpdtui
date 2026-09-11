@@ -756,7 +756,6 @@ var globalHints = []hint{
 	{"v", "visualizer"},
 	{"L", "locate"},
 	{"?", "help"},
-	{"Tab/1-3", "panels"},
 	{"q", "quit"},
 }
 
