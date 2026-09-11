@@ -38,8 +38,11 @@ func TestUpdateHintBarShowsGlobalLabelAndBoldedKeys(t *testing.T) {
 	a.updateHintBar()
 
 	text := a.hintBar.GetText(false)
-	if !strings.Contains(text, "Global:") {
-		t.Errorf("hint bar text = %q, want it to contain a %q label", text, "Global:")
+	if strings.Contains(text, "Global:") {
+		t.Errorf("hint bar text = %q, want 'Global:' label removed", text)
+	}
+	if !strings.Contains(text, "[skyblue::b]b[-:-:-]:bookmark") {
+		t.Errorf("hint bar text = %q, want the b key bookmark hint bolded/colored", text)
 	}
 	if !strings.Contains(text, "[skyblue::b]Space[-:-:-]:toggle") {
 		t.Errorf("hint bar text = %q, want the Space key bolded/colored", text)

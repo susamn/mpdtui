@@ -752,6 +752,7 @@ var globalHints = []hint{
 	{"F", "reset"},
 	{"i", "info"},
 	{"y", "lyrics"},
+	{"b", "bookmark"},
 	{"v", "visualizer"},
 	{"L", "locate"},
 	{"?", "help"},
@@ -783,7 +784,7 @@ func (a *App) updateHintBar() {
 	if text != "" {
 		text += "   "
 	}
-	text += "[::d]Global:[-:-:-]  " + formatHints(globalHints)
+	text += formatHints(globalHints)
 	a.hintBar.SetText(text)
 }
 
