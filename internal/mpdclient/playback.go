@@ -78,6 +78,11 @@ func (c *Client) SeekCur(d time.Duration, relative bool) error {
 	return callErr(c, func(conn *mpd.Client) error { return conn.SeekCur(d, relative) })
 }
 
+// SeekSongID seeks to the position d of the song identified by id in the queue.
+func (c *Client) SeekSongID(id int, d time.Duration) error {
+	return callErr(c, func(conn *mpd.Client) error { return conn.SeekSongID(id, d) })
+}
+
 // SetVolume sets absolute volume, clamped to [0, 100].
 func (c *Client) SetVolume(v int) error {
 	if v < 0 {

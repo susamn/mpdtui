@@ -36,8 +36,18 @@ func (a *App) showOverlay(name string, root, focus tview.Primitive) {
 // openInput shows a single-line text input overlay. onSubmit is called
 // with the entered text on Enter; Esc cancels without calling it.
 func (a *App) openInput(label, initial string, onSubmit func(string)) {
-	field := tview.NewInputField().SetLabel(label).SetText(initial).SetFieldWidth(40)
+	a.openInputWithTitle("", label, initial, onSubmit)
+}
+
+// openInputWithTitle shows a single-line text input overlay with an optional
+// border title. Sized to fit the label plus typing room, without hardcoding
+// field width which causes text to clobber the right border.
+func (a *App) openInputWithTitle(title, label, initial string, onSubmit func(string)) {
+	field := tview.NewInputField().SetLabel(label).SetText(initial)
 	field.SetBorder(true)
+	if title != "" {
+		field.SetTitle(title)
+	}
 	field.SetDoneFunc(func(key tcell.Key) {
 		text := field.GetText()
 		a.closeOverlay()
@@ -45,7 +55,14 @@ func (a *App) openInput(label, initial string, onSubmit func(string)) {
 			onSubmit(text)
 		}
 	})
-	a.showOverlay("input", centered(field, 60, 3), field)
+	width := len(label) + 44
+	if width < 64 {
+		width = 64
+	}
+	if width > 80 {
+		width = 80
+	}
+	a.showOverlay("input", centered(field, width, 3), field)
 }
 
 // openSearch opens the '/' search, contextual on the focused panel:
@@ -193,6 +210,11 @@ const helpText = `[::b]Global[-:-:-]
                  'f' reads only this index, never the filesystem
   v              cycle Now Playing visualizations
   L              locate the currently playing track in the Queue
+  b              bookmark current playback position of the playing track
+                 (applies a 2s pre-roll offset so playback resumes a bit before)
+  B              bookmark manager for the playing or selected track --
+                 browse bookmarks, Enter to jump/seek, 'a' to add,
+                 'e' to edit note, 'd' to delete (y/n to confirm), Esc/B to close
   e              settings: Config tab (read-only: MPD host/port,
                  music_dir, track_metadata status) and Database tab --
                  browse the mark_reason/tags catalog tables (when

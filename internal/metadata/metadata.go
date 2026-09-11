@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode"
 
 	_ "modernc.org/sqlite"
@@ -58,6 +59,15 @@ CREATE TABLE IF NOT EXISTS track_marks (
 	mark_id  INTEGER NOT NULL REFERENCES mark_reason(id),
 	PRIMARY KEY (track_id, mark_id)
 );
+CREATE TABLE IF NOT EXISTS bookmarks (
+	id               INTEGER PRIMARY KEY AUTOINCREMENT,
+	track_id         INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+	position_seconds REAL NOT NULL,
+	text             TEXT NOT NULL,
+	created_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_bookmarks_track_id ON bookmarks(track_id);
 `
 
 // migrateMarksToJoinTable moves a database created before marks became
@@ -212,8 +222,18 @@ type Tag struct {
 	Tagname string
 }
 
+// Bookmark is one saved playback position and note on a track.
+type Bookmark struct {
+	ID              int64
+	TrackID         int64
+	PositionSeconds float64
+	Text            string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
 // Track is one track's local metadata. Zero-value PlayCount/Rating and
-// empty Marks/Tags are what Get returns for a file with no row yet -- a
+// empty Marks/Tags/Bookmarks are what Get returns for a file with no row yet -- a
 // track with no opinions recorded about it, not an error.
 //
 // Marks and Tags are both many-to-many: a track can carry several of
@@ -226,6 +246,7 @@ type Track struct {
 	Rating         int // 0 (unrated) - 5
 	Marks          []MarkReason
 	Tags           []Tag
+	Bookmarks      []Bookmark
 }
 
 // normalizePath folds file for use as the stable database key: each path
@@ -306,6 +327,11 @@ func (db *DB) Get(file string) (Track, error) {
 		return Track{}, err
 	}
 	t.Tags = tags
+	bookmarks, err := db.bookmarksForTrack(id)
+	if err != nil {
+		return Track{}, err
+	}
+	t.Bookmarks = bookmarks
 	return t, nil
 }
 
@@ -595,3 +621,150 @@ func (db *DB) tagsForTrack(trackID int64) ([]Tag, error) {
 	}
 	return out, rows.Err()
 }
+
+// CreateBookmark inserts a new bookmark for file at positionSeconds with text.
+// It creates the track row if it doesn't already exist.
+func (db *DB) CreateBookmark(file string, positionSeconds float64, text string) (Bookmark, error) {
+	id, err := db.upsertTrack(file)
+	if err != nil {
+		return Bookmark{}, err
+	}
+	res, err := db.sql.Exec(`
+		INSERT INTO bookmarks (track_id, position_seconds, text)
+		VALUES (?, ?, ?)
+	`, id, positionSeconds, text)
+	if err != nil {
+		return Bookmark{}, err
+	}
+	bmID, err := res.LastInsertId()
+	if err != nil {
+		return Bookmark{}, err
+	}
+	return db.GetBookmark(bmID)
+}
+
+// UpdateBookmark updates text on bookmark id, refreshing updated_at.
+func (db *DB) UpdateBookmark(id int64, text string) error {
+	res, err := db.sql.Exec(`
+		UPDATE bookmarks
+		SET text = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, text, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// DeleteBookmark deletes the bookmark with id.
+func (db *DB) DeleteBookmark(id int64) error {
+	res, err := db.sql.Exec(`DELETE FROM bookmarks WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// GetBookmark returns the bookmark with id.
+func (db *DB) GetBookmark(id int64) (Bookmark, error) {
+	row := db.sql.QueryRow(`
+		SELECT id, track_id, position_seconds, text, created_at, updated_at
+		FROM bookmarks
+		WHERE id = ?
+	`, id)
+	return scanBookmark(row)
+}
+
+// BookmarksForTrack returns all bookmarks for file, ordered by position_seconds ascending.
+func (db *DB) BookmarksForTrack(file string) ([]Bookmark, error) {
+	norm := normalizePath(file)
+	var trackID int64
+	err := db.sql.QueryRow(`SELECT id FROM tracks WHERE normalized_path = ?`, norm).Scan(&trackID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return db.bookmarksForTrack(trackID)
+}
+
+// bookmarksForTrack returns all bookmarks for trackID, ordered by position_seconds ascending.
+func (db *DB) bookmarksForTrack(trackID int64) ([]Bookmark, error) {
+	rows, err := db.sql.Query(`
+		SELECT id, track_id, position_seconds, text, created_at, updated_at
+		FROM bookmarks
+		WHERE track_id = ?
+		ORDER BY position_seconds ASC, id ASC
+	`, trackID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Bookmark
+	for rows.Next() {
+		b, err := scanBookmark(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanBookmark(s rowScanner) (Bookmark, error) {
+	var b Bookmark
+	var createdRaw, updatedRaw any
+	if err := s.Scan(&b.ID, &b.TrackID, &b.PositionSeconds, &b.Text, &createdRaw, &updatedRaw); err != nil {
+		return Bookmark{}, err
+	}
+	var err error
+	b.CreatedAt, err = parseTimestamp(createdRaw)
+	if err != nil {
+		return Bookmark{}, fmt.Errorf("parsing created_at: %w", err)
+	}
+	b.UpdatedAt, err = parseTimestamp(updatedRaw)
+	if err != nil {
+		return Bookmark{}, fmt.Errorf("parsing updated_at: %w", err)
+	}
+	return b, nil
+}
+
+func parseTimestamp(val any) (time.Time, error) {
+	switch v := val.(type) {
+	case time.Time:
+		return v, nil
+	case string:
+		if t, err := time.Parse("2006-01-02 15:04:05", v); err == nil {
+			return t, nil
+		}
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			return t, nil
+		}
+		return time.Time{}, fmt.Errorf("unknown timestamp format: %q", v)
+	case []byte:
+		return parseTimestamp(string(v))
+	default:
+		return time.Time{}, fmt.Errorf("unexpected timestamp type: %T", val)
+	}
+}
+
