@@ -13,10 +13,9 @@ import (
 
 // Visualization is a single Now Playing visualization. To add a new one:
 //
-//  1. Create a new file internal/ui/viz_<name>.go with a type implementing
+//  1. Create a new file internal/visualizer/viz_<name>.go with a type implementing
 //     this interface (see viz_equalizer.go for a worked example).
-//  2. Register an instance of it in newVisualizerPanel's vizs slice,
-//     below.
+//  2. Register an instance of it in New's vizs slice, below.
 //
 // That's the whole contract -- the container (Panel, in this
 // file) handles sizing, the border/title, cycling, and re-rendering on
@@ -25,7 +24,7 @@ import (
 //
 // Dimensions: the visualizer container occupies the right 50% of the Now
 // Playing row (see app.go's build(), where nowPlayingRow splits a.nowPlaying
-// and a.visualizer.view 50/50). That row is a fixed 4 rows tall including
+// and the visualizer panel's view 50/50). That row is a fixed 4 rows tall including
 // its border, so Render is called with height=2 in the current layout --
 // deliberately compact, per an explicit "keep the current height" call
 // over growing the row taller. width varies with terminal width (it's
@@ -114,7 +113,7 @@ func (p *Panel) current() Visualization {
 	return p.vizs[p.idx]
 }
 
-// next cycles to the next registered visualization (wrapping around) and
+// Next cycles to the next registered visualization (wrapping around) and
 // updates the border title to match. A single registered visualization
 // makes this a harmless no-op rather than a special case to guard against.
 func (p *Panel) Next(st mpdclient.Status) {
@@ -123,7 +122,7 @@ func (p *Panel) Next(st mpdclient.Status) {
 	p.Tick(st)
 }
 
-// tick redraws the active visualization from the current playback status
+// Tick redraws the active visualization from the current playback status
 // and elapsed wall-clock time. Called from refreshNowPlaying, so it
 // shares that same ~500ms/event-driven cadence -- no separate ticker.
 func (p *Panel) Tick(st mpdclient.Status) {
@@ -135,7 +134,7 @@ func (p *Panel) Tick(st mpdclient.Status) {
 	p.view.SetText(strings.Join(lines, "\n"))
 }
 
-// close releases the panel's audio feed, stopping its reader goroutine.
+// Close releases the panel's audio feed, stopping its reader goroutine.
 // Called from App.Run's shutdown path; safe on a panel built without one
 // (the test helpers do that).
 func (p *Panel) Close() {
@@ -147,4 +146,21 @@ func (p *Panel) Close() {
 
 func (p *Panel) View() *tview.TextView {
 	return p.view
+}
+
+// CurrentName is the name of the visualization currently on screen --
+// the same string shown in the panel's border title.
+func (p *Panel) CurrentName() string {
+	return p.current().Name()
+}
+
+// Names lists the registered visualizations in the order Next cycles
+// through them, first being what the panel shows on startup. Returns a
+// copy so callers can't reorder the registry through it.
+func (p *Panel) Names() []string {
+	names := make([]string, len(p.vizs))
+	for i, v := range p.vizs {
+		names[i] = v.Name()
+	}
+	return names
 }

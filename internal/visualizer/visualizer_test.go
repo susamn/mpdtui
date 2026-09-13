@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
@@ -27,7 +26,7 @@ func (f fakeViz) Render(width, height int, elapsed time.Duration, st mpdclient.S
 }
 
 // recordingViz captures the elapsed duration it was last called with, for
-// asserting Panel.tick actually passes real elapsed time.
+// asserting Panel.Tick actually passes real elapsed time.
 type recordingViz struct {
 	name string
 	got  *time.Duration
@@ -40,129 +39,141 @@ func (r recordingViz) Render(width, height int, elapsed time.Duration, st mpdcli
 	return make([]string, height)
 }
 
-func TestVisualizerPanelStartsOnFirstRegisteredVisualization(t *testing.T) {
-	a := newTestApp()
-	// Balance is the default on purpose -- it is the one showing
-	// something about the music rather than about its loudness. Named
-	// explicitly here (rather than read off the registry) precisely
-	// because it is a deliberate choice, so reordering the registry has
-	// to fail this test rather than quietly change what users see.
-	if got := a.visualizer.current().Name(); got != "Balance" {
-		t.Errorf("initial visualization = %q, want %q", got, "Balance")
-	}
-	if title := a.visualizer.view.GetTitle(); !strings.Contains(title, "Balance") {
-		t.Errorf("border title = %q, want it to contain %q", title, "Balance")
-	}
-}
-
-func TestVisualizerPanelNextCyclesAndWraps(t *testing.T) {
+// newTestPanel builds a Panel over vizs with no audio feed and no
+// terminal, the way New would minus the parts that touch the outside
+// world (the fifo reader, the real registry).
+func newTestPanel(vizs ...Visualization) *Panel {
 	v := tview.NewTextView().SetDynamicColors(true)
 	v.SetBorder(true).SetTitleAlign(tview.AlignRight)
-	p := &Panel{view: v, vizs: []Visualization{fakeViz{"One"}, fakeViz{"Two"}}}
+	p := &Panel{view: v, started: time.Now(), vizs: vizs}
 	p.view.SetTitle(" " + p.current().Name() + " ")
+	return p
+}
 
-	if got := p.current().Name(); got != "One" {
+func TestPanelNextCyclesAndWraps(t *testing.T) {
+	p := newTestPanel(fakeViz{"One"}, fakeViz{"Two"})
+
+	if got := p.CurrentName(); got != "One" {
 		t.Fatalf("initial = %q, want %q", got, "One")
 	}
 
-	p.next()
-	if got := p.current().Name(); got != "Two" {
-		t.Errorf("after next() = %q, want %q", got, "Two")
+	p.Next(mpdclient.Status{})
+	if got := p.CurrentName(); got != "Two" {
+		t.Errorf("after Next() = %q, want %q", got, "Two")
 	}
-	if title := p.view.GetTitle(); !strings.Contains(title, "Two") {
-		t.Errorf("border title after next() = %q, want it to contain %q", title, "Two")
+	if title := p.View().GetTitle(); !strings.Contains(title, "Two") {
+		t.Errorf("border title after Next() = %q, want it to contain %q", title, "Two")
 	}
 
-	p.next()
-	if got := p.current().Name(); got != "One" {
-		t.Errorf("after wrapping next() = %q, want %q", got, "One")
+	p.Next(mpdclient.Status{})
+	if got := p.CurrentName(); got != "One" {
+		t.Errorf("after wrapping Next() = %q, want %q", got, "One")
 	}
 }
 
-func TestVisualizerPanelNextWithSingleVisualizationIsNoOp(t *testing.T) {
-	v := tview.NewTextView().SetDynamicColors(true)
-	p := &Panel{view: v, vizs: []Visualization{fakeViz{"Solo"}}}
-	before := p.current().Name()
-	p.next()
-	if got := p.current().Name(); got != before {
-		t.Errorf("next() with a single registered visualization changed it: %q -> %q", before, got)
+func TestPanelNextWithSingleVisualizationIsNoOp(t *testing.T) {
+	p := newTestPanel(fakeViz{"Solo"})
+	before := p.CurrentName()
+	p.Next(mpdclient.Status{})
+	if got := p.CurrentName(); got != before {
+		t.Errorf("Next() with a single registered visualization changed it: %q -> %q", before, got)
 	}
 }
 
-func TestAppVisualizerPanelCyclesRegisteredVisualizations(t *testing.T) {
-	// Walks whatever is registered rather than naming each one, so
-	// registering a new visualization doesn't fail this test.
-	a := newTestApp()
-	first := a.visualizer.vizs[0].Name()
-	if got := a.visualizer.current().Name(); got != first {
-		t.Fatalf("initial visualization = %q, want the first registered %q", got, first)
-	}
+func TestPanelTickRendersFromActiveVisualization(t *testing.T) {
+	p := newTestPanel(fakeViz{"Probe"})
+	p.View().SetRect(0, 0, 20, 3)
 
-	seen := make(map[string]bool)
-	for i := range a.visualizer.vizs {
-		name := a.visualizer.current().Name()
-		if seen[name] {
-			t.Fatalf("visualization %q repeated at position %d before every one had been shown", name, i)
-		}
-		seen[name] = true
-		a.visualizer.next()
-	}
-	if len(seen) != len(a.visualizer.vizs) {
-		t.Errorf("cycled through %d distinct visualizations, want %d", len(seen), len(a.visualizer.vizs))
-	}
-	if got := a.visualizer.current().Name(); got != first {
-		t.Errorf("after a full cycle = %q, want it to wrap back to %q", got, first)
-	}
-}
+	p.Tick(mpdclient.Status{State: mpdclient.StatePlay})
 
-func TestVisualizerPanelTickRendersFromActiveVisualization(t *testing.T) {
-	v := tview.NewTextView().SetDynamicColors(true)
-	v.SetRect(0, 0, 20, 3)
-	p := &Panel{view: v, started: time.Now(), vizs: []Visualization{fakeViz{"Probe"}}}
-
-	p.tick(mpdclient.Status{State: mpdclient.StatePlay})
-
-	got := v.GetText(true)
+	got := p.View().GetText(true)
 	if !strings.Contains(got, "Probe") {
-		t.Errorf("view text after tick() = %q, want it to contain %q", got, "Probe")
+		t.Errorf("view text after Tick() = %q, want it to contain %q", got, "Probe")
 	}
 }
 
-func TestVisualizerPanelTickPassesRealElapsedTime(t *testing.T) {
-	v := tview.NewTextView().SetDynamicColors(true)
-	v.SetRect(0, 0, 20, 3)
+func TestPanelTickPassesRealElapsedTime(t *testing.T) {
 	var got time.Duration
-	p := &Panel{view: v, started: time.Now(), vizs: []Visualization{recordingViz{"Probe", &got}}}
+	p := newTestPanel(recordingViz{"Probe", &got})
+	p.View().SetRect(0, 0, 20, 3)
 
 	time.Sleep(5 * time.Millisecond)
-	p.tick(mpdclient.Status{})
+	p.Tick(mpdclient.Status{})
 
 	if got < 5*time.Millisecond {
 		t.Errorf("elapsed passed to Render = %v, want at least 5ms since the panel started", got)
 	}
 }
 
-func TestVKeyCyclesVisualizerPanel(t *testing.T) {
-	a := newTestApp()
-	first, second := a.visualizer.vizs[0].Name(), a.visualizer.vizs[1].Name()
-	if got := a.visualizer.current().Name(); got != first {
-		t.Fatalf("initial visualization = %q, want the first registered %q", got, first)
-	}
-	vKey := tcell.NewEventKey(tcell.KeyRune, 'v', tcell.ModNone)
-	if result := a.globalInputCapture(vKey); result != nil {
-		t.Errorf("'v' should be consumed by the visualizer cycle, got %v", result)
-	}
-	if got := a.visualizer.current().Name(); got != second {
-		t.Errorf("after 'v' visualization = %q, want the next registered %q", got, second)
-	}
+// TestPanelTickSkipsRenderWhenCollapsed guards Tick's own size check.
+// tview hands a panel a zero-width rect when the layout collapses it
+// (a narrow terminal, a hidden flex item), and asking a visualization
+// for zero lines is pointless work at best and an out-of-range index
+// into its own output at worst -- so Tick must not call Render at all.
+// Note this needs an explicit SetRect: a tview.Box that has never been
+// laid out reports a nonzero default rect, not 0x0.
+func TestPanelTickSkipsRenderWhenCollapsed(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		width, height int
+	}{
+		{"zero width", 0, 10},
+		{"zero height", 20, 0},
+		{"both zero", 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got time.Duration
+			p := newTestPanel(recordingViz{"Probe", &got})
+			p.View().SetBorder(false)
+			p.View().SetRect(0, 0, tc.width, tc.height)
 
-	// One 'v' per remaining visualization brings it back around.
-	for i := 1; i < len(a.visualizer.vizs); i++ {
-		if result := a.globalInputCapture(vKey); result != nil {
-			t.Errorf("'v' should be consumed by the visualizer cycle, got %v", result)
+			p.Tick(mpdclient.Status{})
+
+			if got != 0 {
+				t.Errorf("Render was called on a collapsed panel (elapsed=%v), want it skipped", got)
+			}
+		})
+	}
+}
+
+// TestNamesReportsRegistryOrder pins Names to the cycle order rather than
+// to any particular set of visualizations, so registering a new one
+// doesn't fail this test.
+func TestNamesReportsRegistryOrder(t *testing.T) {
+	p := newTestPanel(fakeViz{"One"}, fakeViz{"Two"}, fakeViz{"Three"})
+
+	want := []string{"One", "Two", "Three"}
+	got := p.Names()
+	if len(got) != len(want) {
+		t.Fatalf("Names() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Names()[%d] = %q, want %q", i, got[i], want[i])
 		}
 	}
-	if got := a.visualizer.current().Name(); got != first {
-		t.Errorf("after a full cycle of 'v' = %q, want %q", got, first)
+
+	// Names hands out a copy: mutating it must not reorder the registry.
+	got[0] = "Mutated"
+	if p.Names()[0] != "One" {
+		t.Error("mutating the slice returned by Names() changed the registry")
+	}
+}
+
+// TestNewStartsOnBalance pins the default. Balance is the default on
+// purpose -- it is the one showing something about the music rather than
+// about its loudness. Named explicitly here (rather than read off the
+// registry) precisely because it is a deliberate choice, so reordering
+// the registry has to fail this test rather than quietly change what
+// users see.
+func TestNewStartsOnBalance(t *testing.T) {
+	p := New()
+	defer p.Close()
+
+	if got := p.CurrentName(); got != "Balance" {
+		t.Errorf("initial visualization = %q, want %q", got, "Balance")
+	}
+	if title := p.View().GetTitle(); !strings.Contains(title, "Balance") {
+		t.Errorf("border title = %q, want it to contain %q", title, "Balance")
 	}
 }
