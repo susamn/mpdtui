@@ -1,4 +1,4 @@
-package ui
+package visualizer
 
 import (
 	"strings"
@@ -11,7 +11,7 @@ import (
 	"mpdtui/internal/mpdclient"
 )
 
-// fakeViz is a minimal Visualization for exercising visualizerPanel's
+// fakeViz is a minimal Visualization for exercising Panel's
 // container logic (cycling, title updates, rendering) independent of any
 // specific visualization's own drawing logic.
 type fakeViz struct{ name string }
@@ -27,7 +27,7 @@ func (f fakeViz) Render(width, height int, elapsed time.Duration, st mpdclient.S
 }
 
 // recordingViz captures the elapsed duration it was last called with, for
-// asserting visualizerPanel.tick actually passes real elapsed time.
+// asserting Panel.tick actually passes real elapsed time.
 type recordingViz struct {
 	name string
 	got  *time.Duration
@@ -58,7 +58,7 @@ func TestVisualizerPanelStartsOnFirstRegisteredVisualization(t *testing.T) {
 func TestVisualizerPanelNextCyclesAndWraps(t *testing.T) {
 	v := tview.NewTextView().SetDynamicColors(true)
 	v.SetBorder(true).SetTitleAlign(tview.AlignRight)
-	p := &visualizerPanel{view: v, vizs: []Visualization{fakeViz{"One"}, fakeViz{"Two"}}}
+	p := &Panel{view: v, vizs: []Visualization{fakeViz{"One"}, fakeViz{"Two"}}}
 	p.view.SetTitle(" " + p.current().Name() + " ")
 
 	if got := p.current().Name(); got != "One" {
@@ -81,7 +81,7 @@ func TestVisualizerPanelNextCyclesAndWraps(t *testing.T) {
 
 func TestVisualizerPanelNextWithSingleVisualizationIsNoOp(t *testing.T) {
 	v := tview.NewTextView().SetDynamicColors(true)
-	p := &visualizerPanel{view: v, vizs: []Visualization{fakeViz{"Solo"}}}
+	p := &Panel{view: v, vizs: []Visualization{fakeViz{"Solo"}}}
 	before := p.current().Name()
 	p.next()
 	if got := p.current().Name(); got != before {
@@ -118,7 +118,7 @@ func TestAppVisualizerPanelCyclesRegisteredVisualizations(t *testing.T) {
 func TestVisualizerPanelTickRendersFromActiveVisualization(t *testing.T) {
 	v := tview.NewTextView().SetDynamicColors(true)
 	v.SetRect(0, 0, 20, 3)
-	p := &visualizerPanel{view: v, started: time.Now(), vizs: []Visualization{fakeViz{"Probe"}}}
+	p := &Panel{view: v, started: time.Now(), vizs: []Visualization{fakeViz{"Probe"}}}
 
 	p.tick(mpdclient.Status{State: mpdclient.StatePlay})
 
@@ -132,7 +132,7 @@ func TestVisualizerPanelTickPassesRealElapsedTime(t *testing.T) {
 	v := tview.NewTextView().SetDynamicColors(true)
 	v.SetRect(0, 0, 20, 3)
 	var got time.Duration
-	p := &visualizerPanel{view: v, started: time.Now(), vizs: []Visualization{recordingViz{"Probe", &got}}}
+	p := &Panel{view: v, started: time.Now(), vizs: []Visualization{recordingViz{"Probe", &got}}}
 
 	time.Sleep(5 * time.Millisecond)
 	p.tick(mpdclient.Status{})

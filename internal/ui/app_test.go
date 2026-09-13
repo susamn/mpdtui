@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -240,4 +241,11 @@ func TestLKeyWithNothingPlayingFlashesMessageWithoutChangingFocus(t *testing.T) 
 	if a.tv.GetFocus() != a.library.tree {
 		t.Errorf("focus after 'L' with nothing playing = %T, want it to stay on Library", a.tv.GetFocus())
 	}
+}
+
+
+var stripColorRe = regexp.MustCompile(`\[[a-zA-Z0-9#:-]+\]`)
+
+func stripColorTags(s string) string {
+	return stripColorRe.ReplaceAllString(s, "")
 }

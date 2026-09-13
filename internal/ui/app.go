@@ -15,6 +15,7 @@ import (
 
 	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/visualizer"
 )
 
 const (
@@ -98,7 +99,7 @@ type App struct {
 	tagPicker      *catalogPicker
 	bookmarkPicker *bookmarkPicker
 	settings       *settingsView
-	visualizer   *visualizerPanel
+	visualizer   *visualizer.Panel
 
 	// currentSong is refreshNowPlaying's own last-fetched CurrentSong,
 	// kept around so openLyricsViewer can show it without a redundant
@@ -188,7 +189,7 @@ func Run(client *mpdclient.Client, musicDir string, metaDB *metadata.DB, cfg Con
 	defer func() {
 		close(a.done)
 		w.Close()
-		a.visualizer.close()
+		a.visualizer.Close()
 	}()
 
 	sigCh := make(chan os.Signal, 1)
@@ -274,7 +275,7 @@ func (a *App) build() {
 	a.tagPicker = newCatalogPicker(a, tagCatalog{})
 	a.bookmarkPicker = newBookmarkPicker(a)
 	a.settings = newSettingsView(a)
-	a.visualizer = newVisualizerPanel(a)
+	a.visualizer = visualizer.New()
 
 	a.hintBar = tview.NewTextView().SetDynamicColors(true)
 
@@ -303,7 +304,7 @@ func (a *App) build() {
 	// visualizer.go's Visualization doc comment for its sizing contract).
 	nowPlayingRow := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(a.nowPlaying, 0, 1, false).
-		AddItem(a.visualizer.view, 0, 1, false)
+		AddItem(a.visualizer.View(), 0, 1, false)
 
 	a.root = tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(main, 0, 1, true).
@@ -450,7 +451,7 @@ func (a *App) eventLoop() {
 		case <-animTicker.C:
 			a.tv.QueueUpdateDraw(func() {
 				if a.currentStatus.State == mpdclient.StatePlay {
-					a.visualizer.tick(a.currentStatus)
+					a.visualizer.Tick(a.currentStatus)
 				}
 			})
 		case <-countTicker.C:
@@ -572,7 +573,7 @@ func (a *App) refreshNowPlaying() {
 	a.maybeRefreshLyricsViewer(song, trackChanged)
 	a.maybeUpdateLyricsHighlight(st)
 	a.maybeTrackPlayCount(st, song)
-	a.visualizer.tick(st)
+	a.visualizer.Tick(st)
 
 	a.maybeJumpToCurrentTrack(trackChanged)
 }

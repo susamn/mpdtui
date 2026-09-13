@@ -1,4 +1,4 @@
-package ui
+package visualizer
 
 import (
 	"encoding/binary"

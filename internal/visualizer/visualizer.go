@@ -1,4 +1,4 @@
-package ui
+package visualizer
 
 import (
 	"strings"
@@ -18,7 +18,7 @@ import (
 //  2. Register an instance of it in newVisualizerPanel's vizs slice,
 //     below.
 //
-// That's the whole contract -- the container (visualizerPanel, in this
+// That's the whole contract -- the container (Panel, in this
 // file) handles sizing, the border/title, cycling, and re-rendering on
 // every playback tick; a visualization only has to turn (width, height,
 // elapsed, status) into `height` lines of text.
@@ -68,12 +68,11 @@ type Visualization interface {
 	Render(width, height int, elapsed time.Duration, st mpdclient.Status) []string
 }
 
-// visualizerPanel is the container: it owns the bordered TextView, the
+// Panel is the container: it owns the bordered TextView, the
 // registry of available visualizations, which one is active, and the
 // clock used for elapsed. It doesn't know how to draw any specific
 // visualization -- that's entirely delegated to Visualization.Render.
-type visualizerPanel struct {
-	app     *App
+type Panel struct {
 	view    *tview.TextView
 	vizs    []Visualization
 	idx     int
@@ -84,15 +83,14 @@ type visualizerPanel struct {
 	spectrum *audio.Spectrum
 }
 
-func newVisualizerPanel(app *App) *visualizerPanel {
+func New() *Panel {
 	v := tview.NewTextView().SetDynamicColors(true)
 	v.SetBorder(true).SetTitleAlign(tview.AlignRight)
 
 	spectrum := audio.NewSpectrum(config.LoadVisualizerFIFO())
 	spectrum.Start()
 
-	p := &visualizerPanel{
-		app:      app,
+	p := &Panel{
 		view:     v,
 		started:  time.Now(),
 		spectrum: spectrum,
@@ -112,25 +110,23 @@ func newVisualizerPanel(app *App) *visualizerPanel {
 	return p
 }
 
-func (p *visualizerPanel) current() Visualization {
+func (p *Panel) current() Visualization {
 	return p.vizs[p.idx]
 }
 
 // next cycles to the next registered visualization (wrapping around) and
 // updates the border title to match. A single registered visualization
 // makes this a harmless no-op rather than a special case to guard against.
-func (p *visualizerPanel) next() {
+func (p *Panel) Next(st mpdclient.Status) {
 	p.idx = (p.idx + 1) % len(p.vizs)
 	p.view.SetTitle(" " + p.current().Name() + " ")
-	if p.app != nil {
-		p.tick(p.app.currentStatus)
-	}
+	p.Tick(st)
 }
 
 // tick redraws the active visualization from the current playback status
 // and elapsed wall-clock time. Called from refreshNowPlaying, so it
 // shares that same ~500ms/event-driven cadence -- no separate ticker.
-func (p *visualizerPanel) tick(st mpdclient.Status) {
+func (p *Panel) Tick(st mpdclient.Status) {
 	_, _, w, h := p.view.GetInnerRect()
 	if w <= 0 || h <= 0 {
 		return
@@ -142,9 +138,13 @@ func (p *visualizerPanel) tick(st mpdclient.Status) {
 // close releases the panel's audio feed, stopping its reader goroutine.
 // Called from App.Run's shutdown path; safe on a panel built without one
 // (the test helpers do that).
-func (p *visualizerPanel) close() {
+func (p *Panel) Close() {
 	if p == nil {
 		return
 	}
 	p.spectrum.Close()
+}
+
+func (p *Panel) View() *tview.TextView {
+	return p.view
 }

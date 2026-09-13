@@ -160,7 +160,7 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			a.openLyricsViewer()
 			return nil
 		case 'v':
-			a.visualizer.next()
+			a.visualizer.Next(a.currentStatus)
 			return nil
 		case 'o':
 			a.handleCycleSort()
