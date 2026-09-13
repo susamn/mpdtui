@@ -522,3 +522,113 @@ func TestImageToHalfBlocksUsesSpaceForTransparency(t *testing.T) {
 		t.Error("a fully transparent image rendered no spaces")
 	}
 }
+
+// TestDrawIsANoOpWithoutKittySupport covers the first guard: on an
+// ordinary terminal the image path is off entirely and Draw must write
+// nothing at all, since the ASCII fallback already rendered into the
+// view.
+func TestDrawIsANoOpWithoutKittySupport(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("KITTY_WINDOW_ID", "")
+
+	p := newTestPanel()
+	p.currentURI = "track-a.mp3"
+	p.kittyPNG = []byte("fake-png-data")
+	p.view.SetRect(0, 0, 20, 10)
+
+	if out := captureDraw(t, p.Draw); out != "" {
+		t.Errorf("Draw wrote %q on a non-Kitty terminal, want nothing", out)
+	}
+}
+
+// TestDrawIsANoOpWhenThePanelHasNoSize covers a collapsed layout: there
+// is nowhere to put the image, and asking Kitty for a zero-cell
+// placement is meaningless.
+func TestDrawIsANoOpWhenThePanelHasNoSize(t *testing.T) {
+	t.Setenv("TERM", "xterm-kitty")
+
+	p := newTestPanel()
+	p.currentURI = "track-a.mp3"
+	p.kittyPNG = []byte("fake-png-data")
+	p.view.SetBorder(false)
+	p.view.SetRect(0, 0, 0, 0)
+
+	if out := captureDraw(t, p.Draw); out != "" {
+		t.Errorf("Draw wrote %q for a zero-sized panel, want nothing", out)
+	}
+}
+
+// TestDrawChunksALargeImage covers the multi-chunk transmit: Kitty
+// takes at most 4096 base64 bytes per escape, so anything bigger has to
+// be split, with m=1 on every chunk but the last.
+func TestDrawChunksALargeImage(t *testing.T) {
+	t.Setenv("TERM", "xterm-kitty")
+
+	p := newTestPanel()
+	p.currentURI = "track-a.mp3"
+	// Comfortably past one chunk once base64-encoded.
+	p.kittyPNG = bytes.Repeat([]byte("album-art-bytes"), 800)
+	p.view.SetRect(0, 0, 20, 10)
+
+	out := captureDraw(t, p.Draw)
+
+	if n := strings.Count(out, "\033_Gm="); n == 0 {
+		t.Fatalf("a large image was sent as one chunk: %d continuation escapes", n)
+	}
+	if !strings.Contains(out, "m=1") {
+		t.Error("no chunk was marked as having more to follow (m=1)")
+	}
+	if !strings.Contains(out, "m=0") {
+		t.Error("no chunk was marked as the last (m=0)")
+	}
+}
+
+// TestFetchResultsForASupersededTrackNeverReachTheView covers the
+// guards inside each UI callback, as opposed to the ones around the
+// data: even if a stale fetch's closure runs, it must leave the view
+// showing the newer track.
+func TestFetchResultsForASupersededTrackNeverReachTheView(t *testing.T) {
+	const newer = "the newer track's art"
+
+	for _, tc := range []struct {
+		name string
+		f    *fakeFetcher
+		term string
+	}{
+		{"no art", &fakeFetcher{}, "xterm-256color"},
+		{"decode error", &fakeFetcher{data: []byte("not an image")}, "xterm-256color"},
+		{"kitty success", &fakeFetcher{}, "xterm-kitty"},
+		{"ascii success", &fakeFetcher{}, "xterm-256color"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("TERM", tc.term)
+			t.Setenv("KITTY_WINDOW_ID", "")
+			if strings.Contains(tc.name, "success") {
+				tc.f.data = testPNG(t, 8, 8)
+			}
+
+			p := newFetchPanel(tc.f)
+			oldSeq, _ := p.startFetch("track-a.mp3")
+			p.startFetch("track-b.mp3") // supersedes it
+			p.view.SetText(newer)
+
+			p.fetch("track-a.mp3", oldSeq)
+
+			if got := p.view.GetText(true); !strings.Contains(got, newer) {
+				t.Errorf("view = %q, want the superseded result to have left it alone", got)
+			}
+		})
+	}
+}
+
+// TestNewWiresTheRealUIApplier covers the constructor's own closure,
+// which the other tests replace with a synchronous stand-in.
+func TestNewWiresTheRealUIApplier(t *testing.T) {
+	p := New(&fakeFetcher{}, tview.NewApplication())
+	if p.applyToUI == nil {
+		t.Error("New did not wire an applyToUI")
+	}
+	if p.client == nil {
+		t.Error("New did not keep the fetcher")
+	}
+}
