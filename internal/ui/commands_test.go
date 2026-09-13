@@ -4,11 +4,13 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/theme"
 )
 
 // newFakeApp builds an App wired to an in-memory MPD stand-in, so the
@@ -17,6 +19,10 @@ import (
 func newFakeApp(t *testing.T, f *fakeMPD) *App {
 	t.Helper()
 	a := &App{tv: tview.NewApplication(), client: f, playCountedSongID: -1}
+	// Apply background results on the calling goroutine: nothing drains
+	// a tview application's update queue unless Run() is going. Set
+	// before build(), which otherwise wires the real QueueUpdateDraw.
+	a.applyToUI = func(fn func()) { fn() }
 	a.build()
 	a.queue.table.SetRect(0, 0, 150, 40)
 	a.runAsync = func(work func() error, onSuccess func()) {
@@ -380,4 +386,25 @@ func TestShowErrorPutsTheMessageInTheHintBar(t *testing.T) {
 	if !strings.Contains(got, "something broke") {
 		t.Errorf("hint bar = %q, want the error text", got)
 	}
+}
+
+// waitFor polls cond for up to a second, for the handful of paths that
+// genuinely hand work to a goroutine.
+func waitFor(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("condition was never met")
+}
+
+// paletteWithAccent builds a complete-enough palette for repaint tests.
+func paletteWithAccent(accent string) theme.Palette {
+	p := theme.Default()
+	p.Accent = theme.Color(accent)
+	return p
 }

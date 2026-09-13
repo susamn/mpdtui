@@ -77,7 +77,7 @@ func (a *App) runLocateFlashPhase(seq, i int) {
 	phase := locateFlashPhases[i]
 	a.setLocateFlash(phase.on)
 	time.AfterFunc(phase.d, func() {
-		a.tv.QueueUpdateDraw(func() {
+		a.applyToUI(func() {
 			a.runLocateFlashPhase(seq, i+1)
 		})
 	})

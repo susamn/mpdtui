@@ -86,6 +86,15 @@ type App struct {
 	// otherwise never complete inside a test.
 	runAsync func(work func() error, onSuccess func())
 
+	// applyToUI hands a closure to the UI goroutine to run, followed by
+	// a redraw. Every background result in this package lands through
+	// it -- the playlist-count scan, the lyrics reindex, the locate
+	// flash, runAsyncDefault itself. A field, wired by build() to
+	// tv.QueueUpdateDraw, for the same reason runAsync is one: nothing
+	// drains tv's update queue unless tv.Run() is actually running, so
+	// a test would otherwise never see any of those results.
+	applyToUI func(func())
+
 	pages *tview.Pages
 	root  *tview.Flex
 
@@ -221,7 +230,7 @@ func Run(client *mpdclient.Client, musicDir string, metaDB *metadata.DB, cfg Con
 		for {
 			select {
 			case <-themeCh:
-				a.tv.QueueUpdateDraw(a.reapplyTheme)
+				a.applyToUI(a.reapplyTheme)
 			case <-a.done:
 				return
 			}
@@ -244,7 +253,7 @@ func Run(client *mpdclient.Client, musicDir string, metaDB *metadata.DB, cfg Con
 func (a *App) runAsyncDefault(work func() error, onSuccess func()) {
 	go func() {
 		err := work()
-		a.tv.QueueUpdateDraw(func() {
+		a.applyToUI(func() {
 			if err != nil {
 				a.showError(err)
 				return
@@ -255,6 +264,9 @@ func (a *App) runAsyncDefault(work func() error, onSuccess func()) {
 }
 
 func (a *App) build() {
+	if a.applyToUI == nil {
+		a.applyToUI = func(f func()) { a.tv.QueueUpdateDraw(f) }
+	}
 	uitheme.ApplyToTviewStyles()
 	a.runAsync = a.runAsyncDefault
 
@@ -439,12 +451,12 @@ func (a *App) eventLoop() {
 			if !ok {
 				return
 			}
-			a.tv.QueueUpdateDraw(func() { a.handleSubsystem(name) })
+			a.applyToUI(func() { a.handleSubsystem(name) })
 		case _, ok := <-a.watcher.Errors():
 			if !ok {
 				return
 			}
-			a.tv.QueueUpdateDraw(func() { a.showError(fmt.Errorf("lost MPD event connection, reconnecting...")) })
+			a.applyToUI(func() { a.showError(fmt.Errorf("lost MPD event connection, reconnecting...")) })
 
 			a.watcher = nil // Nil watcher channels block forever in select, preventing CPU spin while reconnecting
 
@@ -452,7 +464,7 @@ func (a *App) eventLoop() {
 				for {
 					w, err := a.client.Watch("player", "mixer", "options", "playlist", "stored_playlist", "database")
 					if err == nil {
-						a.tv.QueueUpdateDraw(func() {
+						a.applyToUI(func() {
 							a.watcher = w
 						})
 						break
@@ -462,9 +474,9 @@ func (a *App) eventLoop() {
 			}()
 
 		case <-ticker.C:
-			a.tv.QueueUpdateDraw(func() { a.refreshNowPlaying() })
+			a.applyToUI(func() { a.refreshNowPlaying() })
 		case <-animTicker.C:
-			a.tv.QueueUpdateDraw(func() {
+			a.applyToUI(func() {
 				if a.currentStatus.State == mpdclient.StatePlay {
 					a.visualizer.Tick(a.currentStatus)
 				}
@@ -505,7 +517,7 @@ func (a *App) refreshTrackCounts(silent bool) {
 			return
 		}
 
-		a.tv.QueueUpdateDraw(func() {
+		a.applyToUI(func() {
 			if ctx.Err() != nil {
 				return
 			}
@@ -747,7 +759,7 @@ func (a *App) flash(text string) {
 	seq := a.msgSeq
 	a.hintBar.SetText(text)
 	time.AfterFunc(flashDuration, func() {
-		a.tv.QueueUpdateDraw(func() {
+		a.applyToUI(func() {
 			if a.msgSeq == seq {
 				a.updateHintBar()
 			}
