@@ -488,3 +488,76 @@ func TestConfirmDeleteReportsAFailedDelete(t *testing.T) {
 		t.Error("a failed delete was swallowed")
 	}
 }
+
+// TestRefreshCatalogTableReportsAFailedRead covers the read arm behind
+// the Database tab: the catalog is re-read on every sub-tab switch and
+// after every write, so a failure there has to surface.
+func TestRefreshCatalogTableReportsAFailedRead(t *testing.T) {
+	db := newTestDB(t)
+	app := tview.NewApplication()
+	var reported error
+	v := New(Deps{
+		App:         app,
+		MetaDB:      db,
+		Config:      []Row{{Label: "k", Value: "v"}},
+		ShowError:   func(err error) { reported = err },
+		ShowMessage: func(string) {},
+		RunAsync:    func(work func() error, onSuccess func()) { work(); onSuccess() },
+	})
+	v.Reset()
+	app.SetFocus(v.InitialFocus())
+	v.HandleKey(tabKeyEvent()) // to the Database tab
+
+	db.Close()
+
+	v.refreshCatalogTable()
+	if reported == nil {
+		t.Error("a failed mark-reason read was swallowed")
+	}
+
+	reported = nil
+	v.switchSubTab(dbSubTabTags)
+	if reported == nil {
+		t.Error("a failed tag read was swallowed")
+	}
+}
+
+// TestStartDeleteWithNothingSelected covers the guard: an empty catalog
+// (or the header row) has nothing to confirm deleting.
+func TestStartDeleteWithNothingSelected(t *testing.T) {
+	s := openDatabaseTab(t)
+
+	// Clear the catalog so there is nothing below the header.
+	reasons, err := s.deps.MetaDB.ListMarkReasons()
+	if err != nil {
+		t.Fatalf("ListMarkReasons: %v", err)
+	}
+	for _, r := range reasons {
+		if err := s.deps.MetaDB.DeleteMarkReason(r.ID); err != nil {
+			t.Fatalf("DeleteMarkReason: %v", err)
+		}
+	}
+	s.refreshCatalogTable()
+
+	s.startDelete()
+
+	if s.dbMode == dbModeConfirmDelete {
+		t.Error("a confirm prompt opened with nothing selected")
+	}
+}
+
+// TestFocusedWithoutADatabase covers the non-interactive Database tab:
+// it is a plain explanation, so the pages primitive itself holds focus.
+func TestFocusedWithoutADatabase(t *testing.T) {
+	s := newTestView(t, nil)
+	s.HandleKey(tabKeyEvent()) // to the Database tab
+
+	if !s.Focused() {
+		t.Error("Focused() is false on a non-interactive Database tab that holds focus")
+	}
+
+	s.deps.App.SetFocus(tview.NewBox())
+	if s.Focused() {
+		t.Error("Focused() is true while something else entirely holds focus")
+	}
+}

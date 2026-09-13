@@ -420,3 +420,123 @@ func TestLoadVisualizerFIFO(t *testing.T) {
 		}
 	})
 }
+
+// TestConfigPathsFallBackToHome covers the non-XDG branch of every path
+// helper: with XDG_CONFIG_HOME unset they all hang off ~/.config/mpdtui.
+func TestConfigPathsFallBackToHome(t *testing.T) {
+	withEnv(t, "XDG_CONFIG_HOME", "")
+	home := t.TempDir()
+	withEnv(t, "HOME", home)
+
+	want := filepath.Join(home, ".config", "mpdtui")
+	if got := config.ConfigDir(); got != want {
+		t.Errorf("ConfigDir() = %q, want %q", got, want)
+	}
+	for name, got := range map[string]string{
+		"ConfigFile":        config.ConfigFile(),
+		"DBFile":            config.DBFile(),
+		"LyricsIndexFile":   config.LyricsIndexFile(),
+		"DefaultColorsFile": config.DefaultColorsFile(),
+	} {
+		if filepath.Dir(got) != want {
+			t.Errorf("%s() = %q, want it inside %q", name, got, want)
+		}
+		if filepath.Base(got) == "" {
+			t.Errorf("%s() has no filename: %q", name, got)
+		}
+	}
+}
+
+// TestEnsureConfigFilesSeedsBothFiles covers the first-run path: the
+// directory and both files are created, with the color file holding a
+// real serialized palette.
+func TestEnsureConfigFilesSeedsBothFiles(t *testing.T) {
+	xdgHome := t.TempDir()
+	withEnv(t, "XDG_CONFIG_HOME", xdgHome)
+
+	if err := config.EnsureConfigFiles(); err != nil {
+		t.Fatalf("EnsureConfigFiles: %v", err)
+	}
+
+	for _, path := range []string{config.ConfigFile(), config.DefaultColorsFile()} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Errorf("%s was not created: %v", path, err)
+			continue
+		}
+		if info.Size() == 0 {
+			t.Errorf("%s was created empty", path)
+		}
+	}
+}
+
+// TestEnsureConfigFilesNeverClobbers is the property that matters on
+// every launch after the first: an existing file is left exactly as the
+// user wrote it.
+func TestEnsureConfigFilesNeverClobbers(t *testing.T) {
+	xdgHome := t.TempDir()
+	withEnv(t, "XDG_CONFIG_HOME", xdgHome)
+
+	if err := config.EnsureConfigFiles(); err != nil {
+		t.Fatalf("first EnsureConfigFiles: %v", err)
+	}
+	const mine = "music_dir = /my/own/music\n"
+	if err := os.WriteFile(config.ConfigFile(), []byte(mine), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	if err := config.EnsureConfigFiles(); err != nil {
+		t.Fatalf("second EnsureConfigFiles: %v", err)
+	}
+
+	got, err := os.ReadFile(config.ConfigFile())
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(got) != mine {
+		t.Errorf("the config file was rewritten: %q", got)
+	}
+}
+
+// TestEnsureConfigFilesReportsAnUnwritableDirectory covers the failure
+// arm, which main treats as non-fatal but still reports.
+func TestEnsureConfigFilesReportsAnUnwritableDirectory(t *testing.T) {
+	parent := t.TempDir()
+	blocked := filepath.Join(parent, "blocked")
+	if err := os.WriteFile(blocked, []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	withEnv(t, "XDG_CONFIG_HOME", blocked)
+
+	if err := config.EnsureConfigFiles(); err == nil {
+		t.Error("EnsureConfigFiles succeeded with a file where its directory should be")
+	}
+}
+
+// TestExpandHomeLeavesOtherPathsAlone covers the branches around the
+// leading "~/".
+func TestExpandHomeLeavesOtherPathsAlone(t *testing.T) {
+	home := t.TempDir()
+	withEnv(t, "HOME", home)
+	xdgHome := t.TempDir()
+	withEnv(t, "XDG_CONFIG_HOME", xdgHome)
+
+	for _, tc := range []struct{ in, want string }{
+		{"/absolute/path", "/absolute/path"},
+		{"relative/path", "relative/path"},
+		{"~notahome/path", "~notahome/path"},
+		{"", ""},
+	} {
+		writeConfigFile(t, xdgHome, "music_dir = "+tc.in+"\n")
+		// LoadMusicDir verifies existence, so use the fifo loader, which
+		// deliberately does not.
+		writeConfigFile(t, xdgHome, "visualizer_fifo = "+tc.in+"\n")
+		got := config.LoadVisualizerFIFO()
+		if tc.in == "" {
+			continue // an empty value reads as unset; covered elsewhere
+		}
+		if got != tc.want {
+			t.Errorf("a %q path resolved to %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
