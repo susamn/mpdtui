@@ -1,4 +1,4 @@
-package ui
+package albumart
 
 import (
 	"fmt"
@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// captureDraw redirects os.Stdout for the duration of fn (draw's own raw
+// captureDraw redirects os.Stdout for the duration of fn (Draw's own raw
 // terminal writes have no other seam to observe) and returns everything
 // written.
 func captureDraw(t *testing.T, fn func()) string {
@@ -29,9 +29,17 @@ func captureDraw(t *testing.T, fn func()) string {
 	return string(out)
 }
 
+// newTestPanel builds a Panel the way New does, minus the dependencies
+// the Kitty draw path never touches: Draw reads only the panel's own
+// image bytes and its view's rect, never the MPD client or the tview
+// Application (those belong to fetch, which runs on another goroutine).
+func newTestPanel() *Panel {
+	return New(nil, nil)
+}
+
 // TestDrawDeletesPreviousPlacementOnResize covers the actual bug seen in
 // the wild: a terminal resize changes the Album Art panel's own pixel
-// rect mid-session, and draw() retransmits the image at the new
+// rect mid-session, and Draw retransmits the image at the new
 // position/size -- but Kitty's a=T (transmit+display) always creates a
 // *new* placement rather than replacing the last one. Without an
 // explicit, targeted a=d,d=i (delete by id) of the previous placement,
@@ -43,29 +51,29 @@ func captureDraw(t *testing.T, fn func()) string {
 func TestDrawDeletesPreviousPlacementOnResize(t *testing.T) {
 	t.Setenv("TERM", "xterm-kitty")
 
-	p := newAlbumArtPanel(&App{})
+	p := newTestPanel()
 	p.currentURI = "track-a.mp3"
 	p.kittyPNG = []byte("fake-png-data")
 
 	p.view.SetRect(0, 0, 20, 10)
-	first := captureDraw(t, p.draw)
+	first := captureDraw(t, p.Draw)
 	if strings.Contains(first, "d=i") {
-		t.Errorf("first draw() sent a delete with nothing previously placed: %q", first)
+		t.Errorf("first Draw sent a delete with nothing previously placed: %q", first)
 	}
 	if !strings.Contains(first, "\033_Ga=T") {
-		t.Errorf("first draw() didn't transmit an image: %q", first)
+		t.Errorf("first Draw didn't transmit an image: %q", first)
 	}
 
 	// Simulate a terminal resize: the panel's inner rect changes, so
-	// draw()'s own signature (URI:len:w:h) changes too, without the
+	// Draw's own signature (URI:len:w:h) changes too, without the
 	// image data or currentURI changing at all.
 	p.view.SetRect(0, 0, 30, 15)
-	second := captureDraw(t, p.draw)
+	second := captureDraw(t, p.Draw)
 	if !strings.Contains(second, "d=i") {
-		t.Errorf("resize draw() didn't delete the previous placement (by id) after retransmitting: %q", second)
+		t.Errorf("resize Draw didn't delete the previous placement (by id) after retransmitting: %q", second)
 	}
 	if !strings.Contains(second, "\033_Ga=T") {
-		t.Errorf("resize draw() didn't retransmit the image: %q", second)
+		t.Errorf("resize Draw didn't retransmit the image: %q", second)
 	}
 	// The new image must be transmitted *before* the old one is deleted
 	// -- deleting first leaves a visible blank gap until the new image
@@ -84,22 +92,22 @@ func TestDrawDeletesPreviousPlacementOnResize(t *testing.T) {
 	}
 }
 
-// TestDrawSkipsRetransmitWhenNothingChanged covers draw()'s own
+// TestDrawSkipsRetransmitWhenNothingChanged covers Draw's own
 // deduplication: calling it again with the same URI/data/size should
 // neither delete nor retransmit anything -- called once per screen
 // redraw, this runs far more often than the image actually changes.
 func TestDrawSkipsRetransmitWhenNothingChanged(t *testing.T) {
 	t.Setenv("TERM", "xterm-kitty")
 
-	p := newAlbumArtPanel(&App{})
+	p := newTestPanel()
 	p.currentURI = "track-a.mp3"
 	p.kittyPNG = []byte("fake-png-data")
 	p.view.SetRect(0, 0, 20, 10)
 
-	captureDraw(t, p.draw)
-	again := captureDraw(t, p.draw)
+	captureDraw(t, p.Draw)
+	again := captureDraw(t, p.Draw)
 	if again != "" {
-		t.Errorf("second draw() with nothing changed wrote %q, want nothing", again)
+		t.Errorf("second Draw with nothing changed wrote %q, want nothing", again)
 	}
 }
 
@@ -111,12 +119,12 @@ func TestDrawSkipsRetransmitWhenNothingChanged(t *testing.T) {
 func TestDrawClearsPlacementByIDWhenArtGoesAway(t *testing.T) {
 	t.Setenv("TERM", "xterm-kitty")
 
-	p := newAlbumArtPanel(&App{})
+	p := newTestPanel()
 	p.currentURI = "track-a.mp3"
 	p.kittyPNG = []byte("fake-png-data")
 	p.view.SetRect(0, 0, 20, 10)
 
-	captureDraw(t, p.draw)
+	captureDraw(t, p.Draw)
 	placedID := p.lastImageID
 	if placedID == 0 {
 		t.Fatal("lastImageID = 0 after a successful transmit, want nonzero")
@@ -126,10 +134,10 @@ func TestDrawClearsPlacementByIDWhenArtGoesAway(t *testing.T) {
 	p.kittyPNG = nil
 	p.mu.Unlock()
 
-	cleared := captureDraw(t, p.draw)
+	cleared := captureDraw(t, p.Draw)
 	want := fmt.Sprintf("\033_Ga=d,d=i,i=%d\033\\", placedID)
 	if cleared != want {
-		t.Errorf("draw() after art went away wrote %q, want exactly %q", cleared, want)
+		t.Errorf("Draw after art went away wrote %q, want exactly %q", cleared, want)
 	}
 	if p.lastImageID != 0 {
 		t.Errorf("lastImageID = %d after clearing, want 0", p.lastImageID)
@@ -137,39 +145,39 @@ func TestDrawClearsPlacementByIDWhenArtGoesAway(t *testing.T) {
 }
 
 // TestDrawForceRetransmitsAfterResendInterval covers the self-heal for a
-// change draw() has no way to detect directly: a pure display-scale
+// change Draw has no way to detect directly: a pure display-scale
 // change (e.g. a Wayland compositor DPI change) can leave the terminal's
 // character grid -- all that GetInnerRect()/sig can see -- completely
 // unchanged while the actual pixel size of each cell changes underneath
-// it. With no resize signal to react to, draw() must eventually
+// it. With no resize signal to react to, Draw must eventually
 // retransmit anyway, on a timer, or a stale placement (sized for the old
 // pixel-per-cell mapping) would stay wrong on screen indefinitely.
 func TestDrawForceRetransmitsAfterResendInterval(t *testing.T) {
 	t.Setenv("TERM", "xterm-kitty")
 
-	p := newAlbumArtPanel(&App{})
+	p := newTestPanel()
 	p.currentURI = "track-a.mp3"
 	p.kittyPNG = []byte("fake-png-data")
 	p.view.SetRect(0, 0, 20, 10)
 
-	captureDraw(t, p.draw)
+	captureDraw(t, p.Draw)
 
 	// Still well inside the resend interval: nothing changed, so this
 	// must stay a no-op (same as TestDrawSkipsRetransmitWhenNothingChanged).
-	soon := captureDraw(t, p.draw)
+	soon := captureDraw(t, p.Draw)
 	if soon != "" {
-		t.Errorf("draw() well inside the resend interval wrote %q, want nothing", soon)
+		t.Errorf("Draw well inside the resend interval wrote %q, want nothing", soon)
 	}
 
 	// Simulate the resend interval having elapsed, with nothing else
 	// about the image/panel changed -- same sig as before.
-	p.lastSentAt = p.lastSentAt.Add(-albumArtResendInterval)
-	stale := captureDraw(t, p.draw)
+	p.lastSentAt = p.lastSentAt.Add(-resendInterval)
+	stale := captureDraw(t, p.Draw)
 	if !strings.Contains(stale, "d=i") {
-		t.Errorf("draw() past the resend interval didn't delete the previous placement (by id): %q", stale)
+		t.Errorf("Draw past the resend interval didn't delete the previous placement (by id): %q", stale)
 	}
 	if !strings.Contains(stale, "\033_Ga=T") {
-		t.Errorf("draw() past the resend interval didn't retransmit: %q", stale)
+		t.Errorf("Draw past the resend interval didn't retransmit: %q", stale)
 	}
 	// Same ordering requirement as the resize case: transmit new, then
 	// delete old -- never the reverse (visible blank gap).
@@ -201,7 +209,7 @@ func TestSupportsKittyGraphics(t *testing.T) {
 }
 
 func TestAlbumArtStartFetchDedupesSameURI(t *testing.T) {
-	p := &albumArtPanel{}
+	p := &Panel{}
 
 	seq1, ok1 := p.startFetch("track-a.mp3")
 	if !ok1 || seq1 != 1 {
@@ -217,7 +225,7 @@ func TestAlbumArtStartFetchDedupesSameURI(t *testing.T) {
 }
 
 func TestAlbumArtStartFetchIgnoresEmptyURI(t *testing.T) {
-	p := &albumArtPanel{}
+	p := &Panel{}
 	if _, ok := p.startFetch(""); ok {
 		t.Error("empty URI should not start a fetch")
 	}
@@ -228,7 +236,7 @@ func TestAlbumArtStartFetchIgnoresEmptyURI(t *testing.T) {
 // newer one's result. setKittyPNGIfCurrent must reject a seq that's no
 // longer current.
 func TestAlbumArtStaleFetchRejected(t *testing.T) {
-	p := &albumArtPanel{}
+	p := &Panel{}
 
 	seqOld, _ := p.startFetch("track-a.mp3")
 	seqNew, _ := p.startFetch("track-b.mp3")

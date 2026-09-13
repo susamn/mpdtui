@@ -16,6 +16,7 @@ import (
 	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
 	"mpdtui/internal/visualizer"
+	"mpdtui/internal/albumart"
 )
 
 const (
@@ -92,7 +93,7 @@ type App struct {
 
 	nowPlaying   *tview.TextView
 	hintBar      *tview.TextView
-	albumArt     *albumArtPanel
+	albumArt     *albumart.Panel
 	trackInfo    *trackInfoCard
 	lyricsViewer   *lyricsViewer
 	markPicker     *catalogPicker
@@ -268,7 +269,7 @@ func (a *App) build() {
 	a.nowPlaying.SetBorder(true).SetTitle(" Now Playing ").SetTitleColor(nowPlayingBorderColor)
 	a.nowPlaying.SetBorderColor(nowPlayingBorderColor)
 
-	a.albumArt = newAlbumArtPanel(a)
+	a.albumArt = albumart.New(a.client, a.tv)
 	a.trackInfo = newTrackInfoCard(a)
 	a.lyricsViewer = newLyricsViewer(a)
 	a.markPicker = newCatalogPicker(a, markCatalog{})
@@ -280,7 +281,7 @@ func (a *App) build() {
 	a.hintBar = tview.NewTextView().SetDynamicColors(true)
 
 	bottomLeft := tview.NewFlex().SetDirection(tview.FlexColumn).
-		AddItem(a.albumArt.view, 0, 1, false).
+		AddItem(a.albumArt.View(), 0, 1, false).
 		AddItem(a.playlists.table, 0, 1, false)
 
 	left := tview.NewFlex().SetDirection(tview.FlexRow).
@@ -326,7 +327,7 @@ func (a *App) build() {
 	a.focusPanel(queuePanelIdx)
 
 	a.tv.SetAfterDrawFunc(func(tcell.Screen) {
-		a.albumArt.draw()
+		a.albumArt.Draw()
 	})
 }
 
@@ -468,7 +469,7 @@ func (a *App) eventLoop() {
 // second even for a few hundred playlists but is still real enough that
 // it must never block the single UI goroutine, whether triggered by
 // countTicker's automatic cadence or the 'R' key (handleRefreshPlaylistCounts).
-// Mirrors albumArtPanel.fetch's own background-MPD-round-trip-then-
+// Mirrors albumart.Panel's own background-MPD-round-trip-then-
 // QueueUpdateDraw pattern; unlike that one, there's no sequence-number
 // guard needed here since every call fetches the same thing (a full
 // snapshot of current counts) rather than a call being superseded by a
@@ -568,7 +569,7 @@ func (a *App) refreshNowPlaying() {
 	trackChanged := trackChangedForJump(a.startedUp, a.queue.currentID, st.SongID)
 
 	a.queue.setCurrent(st.SongID)
-	a.albumArt.onTrackChanged(song.File)
+	a.albumArt.OnTrackChanged(song.File)
 	a.renderTrackInfo()
 	a.maybeRefreshLyricsViewer(song, trackChanged)
 	a.maybeUpdateLyricsHighlight(st)
