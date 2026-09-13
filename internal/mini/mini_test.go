@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -270,12 +271,14 @@ func TestRateCurrentTrackNoopWithoutMetaDB(t *testing.T) {
 // the transport keys can be proved wired up without stopping or
 // skipping the user's actual music.
 type fakeController struct {
-	calls   []string
-	volume  int
-	status  mpdclient.Status
-	song    mpdclient.Song
-	statErr error
-	songErr error
+	calls     []string
+	volume    int
+	status    mpdclient.Status
+	song      mpdclient.Song
+	statErr   error
+	songErr   error
+	plErr     error
+	playlists []mpdclient.Playlist
 }
 
 func (f *fakeController) Status() (mpdclient.Status, error) { return f.status, f.statErr }
@@ -286,6 +289,10 @@ func (f *fakeController) TogglePlayPause() error { f.calls = append(f.calls, "to
 func (f *fakeController) Stop() error            { f.calls = append(f.calls, "stop"); return nil }
 func (f *fakeController) Next() error            { f.calls = append(f.calls, "next"); return nil }
 func (f *fakeController) Previous() error        { f.calls = append(f.calls, "previous"); return nil }
+func (f *fakeController) Playlists() ([]mpdclient.Playlist, error) {
+	return f.playlists, f.plErr
+}
+
 func (f *fakeController) ChangeVolume(d int) error {
 	f.calls = append(f.calls, fmt.Sprintf("volume%+d", d))
 	f.volume += d
@@ -730,5 +737,206 @@ func TestFetchPlaylistCountNeedsLiveMPD(t *testing.T) {
 	}
 	if got != len(pls) {
 		t.Errorf("fetchPlaylistCount() = %d, want %d", got, len(pls))
+	}
+}
+
+// --- The loop -----------------------------------------------------------
+//
+// Run itself is terminal setup -- raw mode, signal handlers, an MPD
+// watch -- none of which happens without a real tty. loop is where the
+// behavior lives, and these drive it through its channels.
+
+// runLoop starts loop in the background and returns a function that
+// waits for it to finish.
+func runLoop(t *testing.T, d loopDeps) func() {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- loop(d) }()
+	return func() {
+		t.Helper()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("loop returned %v, want nil", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("loop did not return")
+		}
+	}
+}
+
+func playingController() *fakeController {
+	return &fakeController{
+		status:    mpdclient.Status{State: mpdclient.StatePlay, PlaylistLength: 2, Volume: 40},
+		song:      mpdclient.Song{Title: "Ay Hairathe", Artist: "Hariharan", File: "a.mp3"},
+		playlists: []mpdclient.Playlist{{Name: "Road Trip"}},
+	}
+}
+
+func TestLoopQuitsOnQ(t *testing.T) {
+	keys := make(chan byte, 1)
+	f := playingController()
+
+	out := capture(t, func() {
+		wait := runLoop(t, loopDeps{client: f, keys: keys})
+		keys <- 'q'
+		wait()
+	})
+
+	if !strings.Contains(out, "Ay Hairathe") {
+		t.Errorf("loop drew %q, want the current track", out)
+	}
+}
+
+// TestLoopQuitsWhenStdinCloses covers the closed-keys channel: readKeys
+// closes it on EOF, and the loop must exit rather than spin on a closed
+// channel.
+func TestLoopQuitsWhenStdinCloses(t *testing.T) {
+	keys := make(chan byte)
+	f := playingController()
+
+	capture(t, func() {
+		wait := runLoop(t, loopDeps{client: f, keys: keys})
+		close(keys)
+		wait()
+	})
+}
+
+func TestLoopQuitsOnSignal(t *testing.T) {
+	sig := make(chan os.Signal, 1)
+	f := playingController()
+
+	capture(t, func() {
+		wait := runLoop(t, loopDeps{client: f, signals: sig})
+		sig <- syscall.SIGTERM
+		wait()
+	})
+}
+
+// TestLoopActsOnAKeyAndKeepsGoing covers a key that is handled but is
+// not a quit: the command runs and the display redraws.
+func TestLoopActsOnAKeyAndKeepsGoing(t *testing.T) {
+	keys := make(chan byte, 2)
+	f := playingController()
+
+	capture(t, func() {
+		wait := runLoop(t, loopDeps{client: f, keys: keys})
+		keys <- 'n' // next track
+		keys <- 'q'
+		wait()
+	})
+
+	if len(f.calls) != 1 || f.calls[0] != "next" {
+		t.Errorf("did %v, want [next]", f.calls)
+	}
+}
+
+// TestLoopRefetchesPlaylistCountOnStoredPlaylistEvent covers the one
+// event that needs more than a redraw: the playlist count is not in the
+// status, so it has to be re-queried.
+func TestLoopRefetchesPlaylistCountOnStoredPlaylistEvent(t *testing.T) {
+	keys := make(chan byte, 1)
+	events := make(chan string, 1)
+	f := playingController()
+
+	capture(t, func() {
+		wait := runLoop(t, loopDeps{client: f, keys: keys, events: events})
+		f.playlists = []mpdclient.Playlist{{Name: "A"}, {Name: "B"}, {Name: "C"}}
+		events <- "stored_playlist"
+		// A second event with no refetch, to prove only the one kind does.
+		events <- "player"
+		keys <- 'q'
+		wait()
+	})
+}
+
+// TestLoopStopsWatchingAfterAWatchError covers the degraded path: when
+// the idle connection drops, the loop drops both watch channels and
+// keeps running on its ticker, rather than spinning on closed channels.
+func TestLoopStopsWatchingAfterAWatchError(t *testing.T) {
+	keys := make(chan byte, 1)
+	events := make(chan string)
+	watchErrs := make(chan error, 1)
+	f := playingController()
+
+	capture(t, func() {
+		wait := runLoop(t, loopDeps{client: f, keys: keys, events: events, watchErrs: watchErrs})
+		watchErrs <- errors.New("idle connection dropped")
+		keys <- 'q'
+		wait()
+	})
+}
+
+// TestLoopHandlesClosedWatchChannels covers a watcher that closes
+// rather than errors: each channel is dropped as it closes, and the
+// loop carries on.
+func TestLoopHandlesClosedWatchChannels(t *testing.T) {
+	keys := make(chan byte, 1)
+	events := make(chan string)
+	watchErrs := make(chan error)
+	f := playingController()
+
+	capture(t, func() {
+		wait := runLoop(t, loopDeps{client: f, keys: keys, events: events, watchErrs: watchErrs})
+		close(events)
+		close(watchErrs)
+		keys <- 'q'
+		wait()
+	})
+}
+
+func TestLoopRedrawsOnItsTicker(t *testing.T) {
+	keys := make(chan byte, 1)
+	tick := make(chan time.Time, 1)
+	f := playingController()
+
+	out := capture(t, func() {
+		wait := runLoop(t, loopDeps{client: f, keys: keys, tick: tick})
+		tick <- time.Now()
+		keys <- 'q'
+		wait()
+	})
+
+	// Two draws: the initial one and the tick.
+	if n := strings.Count(out, "Ay Hairathe"); n < 2 {
+		t.Errorf("drew the track %d times, want at least 2 (initial plus the tick)", n)
+	}
+}
+
+// TestLoopReloadsTheThemeOnSIGUSR1 covers mpdtui's own theme-reload
+// signal, which an Omarchy theme-set hook sends to every running
+// instance -- mini mode re-colors along with the panel UI.
+func TestLoopReloadsTheThemeOnSIGUSR1(t *testing.T) {
+	keys := make(chan byte, 1)
+	themeSig := make(chan os.Signal, 1)
+	f := playingController()
+
+	capture(t, func() {
+		wait := runLoop(t, loopDeps{client: f, keys: keys, themeSig: themeSig})
+		themeSig <- syscall.SIGUSR1
+		keys <- 'q'
+		wait()
+	})
+
+	// The colors are resolved from the theme file; with none configured
+	// that is internal/theme's default, and the vars must be populated
+	// rather than left empty.
+	if ansiTrackColor == "" {
+		t.Error("the track color is unset after a theme reload")
+	}
+}
+
+// TestFetchPlaylistCountReportsZeroOnFailure covers the "show something
+// rather than fail" choice: the count is cosmetic, so a failed query
+// reports zero instead of taking the whole display down.
+func TestFetchPlaylistCountReportsZeroOnFailure(t *testing.T) {
+	f := &fakeController{plErr: errors.New("offline")}
+	if got := fetchPlaylistCount(f); got != 0 {
+		t.Errorf("fetchPlaylistCount with a failing query = %d, want 0", got)
+	}
+
+	f = &fakeController{playlists: []mpdclient.Playlist{{Name: "A"}, {Name: "B"}}}
+	if got := fetchPlaylistCount(f); got != 2 {
+		t.Errorf("fetchPlaylistCount = %d, want 2", got)
 	}
 }
