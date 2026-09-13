@@ -261,7 +261,12 @@ func (a *App) build() {
 	wireFocusColors(a.queue.table)
 	wireFocusColors(a.queue.search)
 
-	a.nowPlaying = tview.NewTextView().SetDynamicColors(true)
+	// Wrap off: the panel gets exactly 2 inner rows (see the row
+	// height below) and renders exactly 2 lines, so a long title must
+	// be truncated to the panel's width (renderNowPlaying does that)
+	// rather than wrapped -- a wrapped line 1 pushed line 2 out of
+	// view entirely on narrow terminals.
+	a.nowPlaying = tview.NewTextView().SetDynamicColors(true).SetWrap(false)
 	a.nowPlaying.SetBorder(true).SetTitle(" Now Playing ").SetTitleColor(nowPlayingBorderColor)
 	a.nowPlaying.SetBorderColor(nowPlayingBorderColor)
 
