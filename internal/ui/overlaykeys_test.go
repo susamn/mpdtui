@@ -264,3 +264,151 @@ func TestGlobalSearchLyricsReportsAFailedLoad(t *testing.T) {
 		t.Error("a failed index load reported nothing")
 	}
 }
+
+// TestCatalogPickerKeepsTransportKeysLive covers the two selection
+// lists in globalInputCapture's overlay table: like the lyrics viewer
+// they are meant to be used while music plays, and 'q' still quits --
+// but neither has a "same key closes it" shortcut, since only Esc and
+// Enter make sense on a selection list.
+func TestCatalogPickerKeepsTransportKeysLive(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		open func(*App)
+		key  rune
+	}{
+		{"marks", (*App).handleOpenMarkPicker, 'm'},
+		{"tags", (*App).handleOpenTagPicker, 't'},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeMPD{}
+			a := newFakeAppWithMetaDB(t, f)
+			seedQueue(a, f, mpdclient.Song{ID: 1, Pos: 0, File: "a/b.mp3", Title: "Track"})
+			a.tv.SetFocus(a.queue.table)
+			a.queue.table.Select(queueHeaderRows, 0)
+			tc.open(a)
+
+			if a.mode != modeOverlay {
+				t.Fatal("the picker did not open")
+			}
+
+			if got := a.globalInputCapture(runeKey(' ')); got != nil {
+				t.Error("Space was not consumed while the picker is open")
+			}
+			if !f.did("toggle") {
+				t.Errorf("did %v, want play/pause to work under the picker", f.commands())
+			}
+			if got := a.globalInputCapture(runeKey('q')); got != nil {
+				t.Error("'q' was not consumed while the picker is open")
+			}
+
+			// The opening key is not a close shortcut here.
+			if got := a.globalInputCapture(runeKey(tc.key)); got == nil && a.mode == modeNormal {
+				t.Errorf("%q closed the picker, want only Esc/Enter to", tc.key)
+			}
+		})
+	}
+}
+
+// TestDeleteKeyGuards covers handleDelete's three arms that do nothing:
+// an empty Playlists selection, an empty Queue, and any other panel.
+func TestDeleteKeyGuards(t *testing.T) {
+	t.Run("no playlist selected", func(t *testing.T) {
+		f := &fakeMPD{}
+		a := newFakeApp(t, f)
+		setPlaylistsForTest(a.playlists, nil)
+		a.tv.SetFocus(a.playlists.table)
+
+		a.handleDelete()
+
+		if a.mode == modeOverlay {
+			t.Error("a confirmation opened with no playlist selected")
+		}
+		if got := f.commands(); len(got) != 0 {
+			t.Errorf("did %v, want nothing", got)
+		}
+	})
+
+	t.Run("empty queue", func(t *testing.T) {
+		f := &fakeMPD{}
+		a := newFakeApp(t, f)
+		a.tv.SetFocus(a.queue.table)
+
+		a.handleDelete()
+
+		if got := f.commands(); len(got) != 0 {
+			t.Errorf("did %v with an empty Queue, want nothing", got)
+		}
+	})
+
+	t.Run("wrong panel", func(t *testing.T) {
+		a := newFakeApp(t, &fakeMPD{})
+		a.tv.SetFocus(a.library.tree)
+
+		a.handleDelete()
+
+		if got := a.hintBar.GetText(true); !strings.Contains(got, "d") {
+			t.Errorf("hint bar = %q, want an invalid-key flash", got)
+		}
+	})
+}
+
+// TestDeleteQueueTrackReportsAFailure covers the error arm of the
+// non-confirmed delete.
+func TestDeleteQueueTrackReportsAFailure(t *testing.T) {
+	f := &fakeMPD{err: errTest}
+	a := newFakeApp(t, f)
+	seedQueue(a, f, mpdclient.Song{ID: 7, Pos: 0, Title: "Track", File: "a.mp3"})
+	a.tv.SetFocus(a.queue.table)
+	a.queue.table.Select(queueHeaderRows, 0)
+
+	a.handleDelete()
+
+	if got := a.hintBar.GetText(true); !strings.Contains(got, errTest.Error()) {
+		t.Errorf("hint bar = %q, want the failure reported", got)
+	}
+}
+
+// TestDeletePlaylistReportsAFailure covers the same for the confirmed
+// path.
+func TestDeletePlaylistReportsAFailure(t *testing.T) {
+	f := &fakeMPD{}
+	a := newFakeApp(t, f)
+	setPlaylistsForTest(a.playlists, []string{"Road Trip"})
+	a.tv.SetFocus(a.playlists.table)
+	a.playlists.table.Select(1, 0)
+
+	a.handleDelete()
+	f.err = errTest
+	answerConfirm(t, a, "Yes")
+
+	if got := a.hintBar.GetText(true); !strings.Contains(got, errTest.Error()) {
+		t.Errorf("hint bar = %q, want the failure reported", got)
+	}
+}
+
+// TestSettingsTabWorksWithMetadataOff is a regression test. With the
+// track-metadata feature off, the Database tab is a plain explanation,
+// and tview delegates focus from the tab's Pages down to that notice.
+// settingsview.Focused compared only against the Pages, so it reported
+// "not focused", globalInputCapture stopped routing keys to the view,
+// and Tab died -- leaving the user stuck on the Database tab until Esc.
+func TestSettingsTabWorksWithMetadataOff(t *testing.T) {
+	a := newFakeApp(t, &fakeMPD{}) // no metaDB
+	a.openSettings()
+
+	tab := tabKeyEvent()
+
+	if got := a.globalInputCapture(tab); got != nil {
+		t.Fatal("Tab was not consumed on the Config tab")
+	}
+	if !a.settings.Focused() {
+		t.Error("the settings view stopped recognising its own focus on the Database tab")
+	}
+
+	if got := a.globalInputCapture(tab); got != nil {
+		t.Fatal("Tab was not consumed on the Database tab")
+	}
+	if a.tv.GetFocus() != a.settings.InitialFocus() {
+		t.Errorf("focus after tabbing back = %T, want the Config tab", a.tv.GetFocus())
+	}
+}

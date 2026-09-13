@@ -142,6 +142,10 @@ type View struct {
 	// this is decided once in New rather than re-checked.
 	databaseInteractive bool
 
+	// dbNotice is the Database tab's stand-in when there is no
+	// database: a plain explanation instead of the catalog editor.
+	dbNotice *tview.TextView
+
 	subTabBar    *tview.TextView
 	dbPages      *tview.Pages
 	catalogTable *tview.Table
@@ -189,6 +193,7 @@ func (s *View) buildDatabaseTab() tview.Primitive {
 		s.databaseInteractive = false
 		view := tview.NewTextView().SetDynamicColors(true)
 		view.SetText("[red]track metadata not enabled -- set track_metadata = true in ~/.config/mpdtui/config[-]")
+		s.dbNotice = view
 		return view
 	}
 	s.databaseInteractive = true
@@ -527,7 +532,11 @@ func (s *View) Focused() bool {
 		return true
 	}
 	if !s.databaseInteractive {
-		return focus == s.pages
+		// tview delegates focus from a Pages down to the primitive on
+		// the visible page, so the notice itself is what actually holds
+		// it -- comparing against s.pages alone reported "not focused"
+		// and left Tab dead on this tab.
+		return focus == s.pages || (s.dbNotice != nil && focus == s.dbNotice)
 	}
 	return focus == s.catalogTable || focus == s.addInput || focus == s.confirmView
 }
