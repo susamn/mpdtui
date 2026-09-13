@@ -279,9 +279,22 @@ type fakeController struct {
 	songErr   error
 	plErr     error
 	playlists []mpdclient.Playlist
+
+	// drawn, when set, receives once per render pass -- render asks for
+	// the status first, so it is the cheapest observable "a redraw
+	// happened" signal.
+	drawn chan struct{}
 }
 
-func (f *fakeController) Status() (mpdclient.Status, error) { return f.status, f.statErr }
+func (f *fakeController) Status() (mpdclient.Status, error) {
+	if f.drawn != nil {
+		select {
+		case f.drawn <- struct{}{}:
+		default:
+		}
+	}
+	return f.status, f.statErr
+}
 func (f *fakeController) CurrentSong() (mpdclient.Song, error) {
 	return f.song, f.songErr
 }
@@ -889,15 +902,17 @@ func TestLoopRedrawsOnItsTicker(t *testing.T) {
 	keys := make(chan byte, 1)
 	tick := make(chan time.Time, 1)
 	f := playingController()
+	f.drawn = make(chan struct{}, 8)
 
 	out := capture(t, func() {
 		wait := runLoop(t, loopDeps{client: f, keys: keys, tick: tick})
+		<-f.drawn // the initial draw
 		tick <- time.Now()
+		<-f.drawn // the tick's draw -- waited for, so 'q' cannot race it
 		keys <- 'q'
 		wait()
 	})
 
-	// Two draws: the initial one and the tick.
 	if n := strings.Count(out, "Ay Hairathe"); n < 2 {
 		t.Errorf("drew the track %d times, want at least 2 (initial plus the tick)", n)
 	}
