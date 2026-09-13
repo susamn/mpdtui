@@ -72,6 +72,23 @@ type mpdConn interface {
 	Watch(subsystems ...string) (*mpdclient.Watcher, error)
 }
 
+// watcher is the MPD idle connection as the event loop sees it: a
+// stream of changed subsystem names and a stream of failures, either of
+// which closing means it is finished. *mpdclient.Watcher satisfies it.
+//
+// The field is an interface rather than that concrete type so the
+// loop's event and reconnect arms can be driven from a test -- gompd's
+// own watcher owns unexported channels there is no way to feed.
+//
+// A nil watcher is meaningful and expected: its channels are nil, and a
+// nil channel in a select is never ready, which is what parks the loop
+// on its tickers while a reconnect is in flight instead of spinning.
+type watcher interface {
+	Events() <-chan string
+	Errors() <-chan error
+	Close() error
+}
+
 // Compile-time proof that the real client still satisfies the interface,
 // so adding a method here fails the build rather than at a call site.
 var _ mpdConn = (*mpdclient.Client)(nil)

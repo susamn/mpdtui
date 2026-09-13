@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -186,4 +187,131 @@ func statusText(t *testing.T, a *App) string {
 		return ""
 	}
 	return view.GetText(true)
+}
+
+// fakeWatcher is an MPD idle connection whose streams a test can feed.
+type fakeWatcher struct {
+	events chan string
+	errs   chan error
+	closed bool
+}
+
+func newFakeWatcher() *fakeWatcher {
+	return &fakeWatcher{events: make(chan string, 4), errs: make(chan error, 4)}
+}
+
+func (w *fakeWatcher) Events() <-chan string { return w.events }
+func (w *fakeWatcher) Errors() <-chan error  { return w.errs }
+func (w *fakeWatcher) Close() error          { w.closed = true; return nil }
+
+// TestEventLoopRoutesAWatcherEvent covers the arm that does the real
+// work in production: MPD reports a subsystem changed and the matching
+// panel refreshes, without waiting for the poll.
+func TestEventLoopRoutesAWatcherEvent(t *testing.T) {
+	f := &fakeMPD{
+		pls:   []mpdclient.Playlist{{Name: "Road Trip"}},
+		queue: []mpdclient.Song{{ID: 1, Pos: 0, Title: "Queued", File: "a.mp3"}},
+	}
+	a := newFakeApp(t, f)
+	a.done = make(chan struct{})
+	w := newFakeWatcher()
+	a.watcher = w
+
+	go a.eventLoop()
+	t.Cleanup(func() { close(a.done) })
+
+	w.events <- "playlist"
+	waitFor(t, func() bool { return len(a.queue.songs) == 1 })
+
+	w.events <- "stored_playlist"
+	waitFor(t, func() bool { return len(a.playlists.pls) == 1 })
+}
+
+// TestEventLoopStopsWhenTheWatcherCloses covers a watcher that shuts
+// down cleanly: the loop has nothing left to listen to and returns.
+func TestEventLoopStopsWhenTheWatcherCloses(t *testing.T) {
+	a := newFakeApp(t, &fakeMPD{})
+	a.done = make(chan struct{})
+	w := newFakeWatcher()
+	a.watcher = w
+
+	done := make(chan struct{})
+	go func() { a.eventLoop(); close(done) }()
+
+	close(w.events)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("eventLoop kept running after its watcher closed")
+	}
+	close(a.done)
+}
+
+// TestEventLoopReconnectsAfterAWatchError is the recovery path: when the
+// idle connection drops, the loop reports it, drops the dead watcher so
+// its select parks on the tickers rather than spinning, and retries in
+// the background until a new watch succeeds.
+func TestEventLoopReconnectsAfterAWatchError(t *testing.T) {
+	f := &fakeMPD{}
+	a := newFakeApp(t, f)
+	a.done = make(chan struct{})
+	w := newFakeWatcher()
+	a.watcher = w
+
+	go a.eventLoop()
+	t.Cleanup(func() { close(a.done) })
+
+	w.errs <- errors.New("idle connection dropped")
+
+	waitFor(t, func() bool {
+		return strings.Contains(a.hintBar.GetText(true), "reconnecting")
+	})
+
+	// fakeMPD.Watch returns a typed-nil *mpdclient.Watcher with no
+	// error, so the retry succeeds immediately and the loop carries on
+	// with a watcher whose channels are nil -- exactly the shape the
+	// nil-watcher guard is written for.
+	waitFor(t, func() bool { return a.watcher != nil })
+}
+
+// TestEventLoopKeepsRunningWhenTheErrorStreamCloses covers a watcher
+// whose error channel closes rather than delivering: the loop returns,
+// the same as for a closed event stream.
+func TestEventLoopKeepsRunningWhenTheErrorStreamCloses(t *testing.T) {
+	a := newFakeApp(t, &fakeMPD{})
+	a.done = make(chan struct{})
+	w := newFakeWatcher()
+	a.watcher = w
+
+	done := make(chan struct{})
+	go func() { a.eventLoop(); close(done) }()
+
+	close(w.errs)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("eventLoop kept running after its error stream closed")
+	}
+	close(a.done)
+}
+
+// TestWatcherChannelsWithNoWatcher covers the guard directly: no
+// watcher means a pair of nil channels, which never fire.
+func TestWatcherChannelsWithNoWatcher(t *testing.T) {
+	a := newFakeApp(t, &fakeMPD{})
+	a.watcher = nil
+
+	events, errs := a.watcherChannels()
+	if events != nil || errs != nil {
+		t.Error("watcherChannels returned non-nil channels with no watcher")
+	}
+	select {
+	case <-events:
+		t.Error("a nil event channel fired")
+	case <-errs:
+		t.Error("a nil error channel fired")
+	default:
+	}
 }

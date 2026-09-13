@@ -44,7 +44,7 @@ const flashDuration = 3 * time.Second
 type App struct {
 	tv      *tview.Application
 	client  mpdConn
-	watcher *mpdclient.Watcher
+	watcher watcher
 
 	// musicDir is the local filesystem path mirroring MPD's own
 	// music_directory (see internal/config.LoadMusicDir), needed by
@@ -457,6 +457,17 @@ func (a *App) refreshAll() {
 // this is a plain timer rather than something event-driven.
 const playlistCountRefreshInterval = 10 * time.Minute
 
+// watcherChannels is the current watcher's event and error streams, or
+// a pair of nils when there is no watcher. Reading them through here
+// rather than off a.watcher directly is what makes "no watcher" safe:
+// a nil channel simply never fires.
+func (a *App) watcherChannels() (<-chan string, <-chan error) {
+	if a.watcher == nil {
+		return nil, nil
+	}
+	return a.watcher.Events(), a.watcher.Errors()
+}
+
 func (a *App) eventLoop() {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -466,19 +477,26 @@ func (a *App) eventLoop() {
 	defer countTicker.Stop()
 
 	for {
+		// Recomputed each pass: the watcher is replaced by the
+		// reconnect below, and is nil while one is in flight.
+		events, watchErrs := a.watcherChannels()
+
 		select {
-		case name, ok := <-a.watcher.Events():
+		case name, ok := <-events:
 			if !ok {
 				return
 			}
 			a.applyToUI(func() { a.handleSubsystem(name) })
-		case _, ok := <-a.watcher.Errors():
+		case _, ok := <-watchErrs:
 			if !ok {
 				return
 			}
 			a.applyToUI(func() { a.showError(fmt.Errorf("lost MPD event connection, reconnecting...")) })
 
-			a.watcher = nil // Nil watcher channels block forever in select, preventing CPU spin while reconnecting
+			// No watcher means nil channels, which are never ready in
+			// a select -- the loop parks on its tickers instead of
+			// spinning while the reconnect below runs.
+			a.watcher = nil
 
 			go func() {
 				for {
