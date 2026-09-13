@@ -88,3 +88,72 @@ func TestMagnitudesOfSilenceIsZero(t *testing.T) {
 		}
 	}
 }
+
+// TestHannWindowDegenerateSizes covers the guard for windows too small
+// to taper. A 0- or 1-point window has no shoulders to roll off, and
+// the general formula would divide by n-1 == 0, so those return an
+// all-ones (rectangular) window instead.
+func TestHannWindowDegenerateSizes(t *testing.T) {
+	for _, n := range []int{0, 1} {
+		w := hannWindow(n)
+		if len(w) != n {
+			t.Errorf("hannWindow(%d) returned %d points, want %d", n, len(w), n)
+		}
+		for i, v := range w {
+			if v != 1 {
+				t.Errorf("hannWindow(%d)[%d] = %v, want 1 (rectangular)", n, i, v)
+			}
+		}
+	}
+}
+
+// TestHannWindowShape pins the taper: zero at both ends, peaking at the
+// middle, which is what stops a partial cycle smearing its energy
+// across every bin.
+func TestHannWindowShape(t *testing.T) {
+	const n = 16
+	w := hannWindow(n)
+	if len(w) != n {
+		t.Fatalf("hannWindow(%d) returned %d points", n, len(w))
+	}
+	if w[0] != 0 || w[n-1] != 0 {
+		t.Errorf("window ends are %v and %v, want both 0", w[0], w[n-1])
+	}
+	mid := w[n/2]
+	for i, v := range w {
+		if v < 0 || v > 1.0000001 {
+			t.Errorf("w[%d] = %v, want it within [0,1]", i, v)
+		}
+		if v > mid+1e-9 {
+			t.Errorf("w[%d] = %v exceeds the midpoint %v", i, v, mid)
+		}
+	}
+	if mid < 0.9 {
+		t.Errorf("midpoint = %v, want it near 1", mid)
+	}
+}
+
+// TestDBFromLevelInvertsLevelFromDB covers the round trip the two
+// functions exist to make possible: a visualization whose fallback
+// produces display levels but whose drawing works in decibels.
+func TestDBFromLevelInvertsLevelFromDB(t *testing.T) {
+	for _, level := range []float64{0, 0.25, 0.5, 0.75, 1} {
+		db := DBFromLevel(level)
+		if got := LevelFromDB(db); math.Abs(got-level) > 1e-9 {
+			t.Errorf("LevelFromDB(DBFromLevel(%v)) = %v, want %v", level, got, level)
+		}
+	}
+
+	// Out-of-range levels clamp rather than running off the scale.
+	if got, want := DBFromLevel(-1), DBFromLevel(0); got != want {
+		t.Errorf("DBFromLevel(-1) = %v, want it clamped to %v", got, want)
+	}
+	if got, want := DBFromLevel(2), DBFromLevel(1); got != want {
+		t.Errorf("DBFromLevel(2) = %v, want it clamped to %v", got, want)
+	}
+
+	// The ends of the scale are ordered: silence is below full level.
+	if DBFromLevel(0) >= DBFromLevel(1) {
+		t.Error("DBFromLevel is not increasing in level")
+	}
+}

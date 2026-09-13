@@ -177,3 +177,12 @@ func TestNewStartsOnBalance(t *testing.T) {
 		t.Errorf("border title = %q, want it to contain %q", title, "Balance")
 	}
 }
+
+// TestCloseOnANilPanelIsSafe covers App.Run's shutdown path, which
+// defers Close before the panel is necessarily built -- an early
+// failure in Run (a refused MPD watch, say) reaches that defer with the
+// field still nil.
+func TestCloseOnANilPanelIsSafe(t *testing.T) {
+	var p *Panel
+	p.Close() // must not panic
+}
