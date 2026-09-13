@@ -1,6 +1,7 @@
 package config
 
 import (
+	"mpdtui/internal/kvparser"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,19 +76,7 @@ func loadConfigValues() map[string]string {
 	if err != nil {
 		return nil
 	}
-	values := make(map[string]string)
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		values[strings.TrimSpace(key)] = strings.TrimSpace(value)
-	}
-	return values
+	return kvparser.Parse(data)
 }
 
 // LoadMusicDir reads music_dir from ConfigFile -- the local filesystem
