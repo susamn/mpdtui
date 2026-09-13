@@ -3,9 +3,11 @@ package ui
 import (
 	"errors"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
+	"mpdtui/internal/config"
 	"mpdtui/internal/mpdclient"
 	"mpdtui/internal/uitheme"
 )
@@ -282,5 +284,120 @@ func TestSetThemeFileDerivesEveryPanelColor(t *testing.T) {
 	ResetPaletteForTest()
 	if queueTitleColor == 0 {
 		t.Error("panel colors are zero after ResetPaletteForTest")
+	}
+}
+
+// --- start --------------------------------------------------------------
+
+// dialOrSkipUI mirrors the other helpers of this name: start takes a
+// concrete *mpdclient.Client because it opens an idle watch, which the
+// fake cannot provide.
+func dialOrSkipUI(t *testing.T) *mpdclient.Client {
+	t.Helper()
+	c, err := mpdclient.Dial(config.Load())
+	if err != nil {
+		t.Skipf("no MPD server reachable: %v", err)
+	}
+	t.Cleanup(func() { c.Close() })
+	return c
+}
+
+// TestStartBuildsAPrimedApp covers everything App.Run does except the
+// one call that needs a terminal: the watch, the signal handlers, the
+// panels and the first refresh.
+func TestStartBuildsAPrimedApp(t *testing.T) {
+	client := dialOrSkipUI(t)
+
+	a, cleanup, err := start(client, "", nil, ConfigSummary{})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer cleanup()
+
+	if a.watcher == nil {
+		t.Error("no MPD watch was opened")
+	}
+	if a.queue == nil || a.library == nil || a.playlists == nil {
+		t.Error("start returned an App with unbuilt panels")
+	}
+	if !a.startedUp {
+		t.Error("startedUp = false, so refreshAll did not run")
+	}
+	if a.applyToUI == nil {
+		t.Error("applyToUI was not wired")
+	}
+	if a.runAsync == nil {
+		t.Error("runAsync was not wired")
+	}
+	// The Queue reflects whatever the server actually has.
+	if got := a.queue.stats.GetText(true); got == "" {
+		t.Error("the stats panel is empty after refreshAll")
+	}
+}
+
+// TestStartReportsAFailedWatch covers the one error start returns: with
+// no idle connection there is no way to see changes, so it refuses
+// rather than running blind.
+func TestStartReportsAFailedWatch(t *testing.T) {
+	c, err := mpdclient.Dial(config.Config{Host: "127.0.0.1", Port: "1"})
+	if err != nil {
+		// Dial itself failed, which is the same class of problem and
+		// means there is nothing to watch either.
+		return
+	}
+	t.Cleanup(func() { c.Close() })
+
+	if _, _, err := start(c, "", nil, ConfigSummary{}); err == nil {
+		t.Error("start succeeded against an unreachable server, want a watch error")
+	}
+}
+
+// TestStartCleanupStopsTheEventLoop covers the teardown: cleanup closes
+// done, which is what stops the event loop and the two signal
+// goroutines.
+func TestStartCleanupStopsTheEventLoop(t *testing.T) {
+	client := dialOrSkipUI(t)
+
+	a, cleanup, err := start(client, "", nil, ConfigSummary{})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	cleanup()
+
+	select {
+	case <-a.done:
+	default:
+		t.Error("cleanup did not close the done channel")
+	}
+}
+
+// TestStartTheThemeSignalRepaints covers the SIGUSR1 goroutine start
+// installs -- the hook an Omarchy theme-set drops in to recolor every
+// running mpdtui.
+func TestStartTheThemeSignalRepaints(t *testing.T) {
+	client := dialOrSkipUI(t)
+
+	a, cleanup, err := start(client, "", nil, ConfigSummary{})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer cleanup()
+
+	repainted := make(chan struct{}, 1)
+	a.applyToUI = func(fn func()) {
+		fn()
+		select {
+		case repainted <- struct{}{}:
+		default:
+		}
+	}
+
+	if err := syscall.Kill(syscall.Getpid(), syscall.SIGUSR1); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	select {
+	case <-repainted:
+	case <-time.After(2 * time.Second):
+		t.Error("SIGUSR1 did not trigger a repaint")
 	}
 }

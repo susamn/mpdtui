@@ -181,6 +181,26 @@ type App struct {
 // same as the MPD client. cfg is a read-only snapshot shown in the
 // Settings overlay's Config tab ('e') -- see ConfigSummary.
 func Run(client *mpdclient.Client, musicDir string, metaDB *metadata.DB, cfg ConfigSummary) error {
+	a, cleanup, err := start(client, musicDir, metaDB, cfg)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	// The only part that needs a terminal. Everything above is
+	// reachable from a test; this is not.
+	return a.tv.Run()
+}
+
+// start builds the App, opens the MPD watch, installs the signal
+// handlers and primes every panel, returning the App and the teardown
+// its caller must defer.
+//
+// Split from Run so all of that is reachable without a terminal: Run's
+// own remainder is a single tv.Run() call, which is the one thing that
+// cannot happen in a test. The caller owns the returned cleanup rather
+// than start deferring it itself, since the App has to outlive start.
+func start(client *mpdclient.Client, musicDir string, metaDB *metadata.DB, cfg ConfigSummary) (*App, func(), error) {
 	SetThemeFile(cfg.ThemeFile)
 
 	a := &App{
@@ -195,18 +215,12 @@ func Run(client *mpdclient.Client, musicDir string, metaDB *metadata.DB, cfg Con
 
 	w, err := client.Watch("player", "mixer", "options", "playlist", "stored_playlist", "database")
 	if err != nil {
-		return fmt.Errorf("watch mpd: %w", err)
+		return nil, nil, fmt.Errorf("watch mpd: %w", err)
 	}
 	a.watcher = w
-	defer func() {
-		close(a.done)
-		w.Close()
-		a.visualizer.Close()
-	}()
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigCh)
 	go func() {
 		select {
 		case <-sigCh:
@@ -225,7 +239,6 @@ func Run(client *mpdclient.Client, musicDir string, metaDB *metadata.DB, cfg Con
 	// set ..." up to this.
 	themeCh := make(chan os.Signal, 1)
 	signal.Notify(themeCh, syscall.SIGUSR1)
-	defer signal.Stop(themeCh)
 	go func() {
 		for {
 			select {
@@ -241,7 +254,14 @@ func Run(client *mpdclient.Client, musicDir string, metaDB *metadata.DB, cfg Con
 	a.refreshAll()
 	go a.eventLoop()
 
-	return a.tv.Run()
+	cleanup := func() {
+		close(a.done)
+		signal.Stop(sigCh)
+		signal.Stop(themeCh)
+		w.Close()
+		a.visualizer.Close()
+	}
+	return a, cleanup, nil
 }
 
 // runAsyncDefault is runAsync's real (production) implementation: work
