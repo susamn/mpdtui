@@ -44,10 +44,26 @@ const resendInterval = 4 * time.Second
 // a newer one, and all direct terminal writes happen from a single place
 // (Draw, invoked from the App's SetAfterDrawFunc) so they never overlap
 // tview's own single-threaded draw cycle or each other.
+// artFetcher is the one thing this package needs from the MPD client.
+// Narrowed to an interface so the fetch path -- everything between
+// "the track changed" and "there is a picture on screen" -- can be
+// tested against canned bytes instead of requiring a live server with
+// embedded art.
+type artFetcher interface {
+	FetchAlbumArt(uri string) ([]byte, error)
+}
+
 type Panel struct {
-	client *mpdclient.Client
-	tv     *tview.Application
+	client artFetcher
 	view   *tview.TextView
+
+	// applyToUI hands a closure to the UI goroutine to run and redraw.
+	// A field rather than a direct tv.QueueUpdateDraw call so tests can
+	// substitute a synchronous stand-in -- nothing drains a tview
+	// application's update queue unless Run() is actually running, so
+	// the real one would block forever in a test and the whole fetch
+	// path would stay untestable. Same reason App.runAsync is a field.
+	applyToUI func(func())
 
 	mu       sync.Mutex
 	seq      int    // bumped on every track change; a fetch checks this before applying its result
@@ -88,7 +104,7 @@ func New(client *mpdclient.Client, tv *tview.Application) *Panel {
 	v := tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter)
 	v.SetBorder(true).SetTitle(" Album Art ")
 	v.SetText("\n\n[::d]Album Art Loading...[-:-:-]")
-	return &Panel{client: client, tv: tv, view: v}
+	return &Panel{client: client, view: v, applyToUI: func(f func()) { tv.QueueUpdateDraw(f) }}
 }
 
 // supportsKittyGraphics reports whether the terminal is likely to
@@ -160,7 +176,7 @@ func (p *Panel) fetch(uri string, seq int) {
 	b, err := p.client.FetchAlbumArt(uri)
 	if err != nil || len(b) == 0 {
 		p.setKittyPNGIfCurrent(seq, nil)
-		p.tv.QueueUpdateDraw(func() {
+		p.applyToUI(func() {
 			if !p.isCurrent(seq) {
 				return
 			}
@@ -173,7 +189,7 @@ func (p *Panel) fetch(uri string, seq int) {
 	img, _, err := image.Decode(bytes.NewReader(b))
 	if err != nil {
 		p.setKittyPNGIfCurrent(seq, nil)
-		p.tv.QueueUpdateDraw(func() {
+		p.applyToUI(func() {
 			if !p.isCurrent(seq) {
 				return
 			}
@@ -187,7 +203,7 @@ func (p *Panel) fetch(uri string, seq int) {
 		var buf bytes.Buffer
 		if err := png.Encode(&buf, img); err != nil {
 			p.setKittyPNGIfCurrent(seq, nil)
-			p.tv.QueueUpdateDraw(func() {
+			p.applyToUI(func() {
 				if !p.isCurrent(seq) {
 					return
 				}
@@ -197,7 +213,7 @@ func (p *Panel) fetch(uri string, seq int) {
 			return
 		}
 		p.setKittyPNGIfCurrent(seq, buf.Bytes())
-		p.tv.QueueUpdateDraw(func() {
+		p.applyToUI(func() {
 			if !p.isCurrent(seq) {
 				return
 			}
@@ -211,7 +227,7 @@ func (p *Panel) fetch(uri string, seq int) {
 	// Fallback to high-resolution ASCII using Unicode half-blocks and true color
 	asciiStr := imageToHalfBlocks(img, 30, 15)
 
-	p.tv.QueueUpdateDraw(func() {
+	p.applyToUI(func() {
 		if !p.isCurrent(seq) {
 			return
 		}

@@ -1,11 +1,18 @@
 package albumart
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/rivo/tview"
 )
 
 // captureDraw redirects os.Stdout for the duration of fn (Draw's own raw
@@ -263,5 +270,255 @@ func TestAlbumArtStaleFetchRejected(t *testing.T) {
 	}
 	if p.isCurrent(seqOld) {
 		t.Error("isCurrent(seqOld) = true, want false (superseded)")
+	}
+}
+
+// --- The fetch pipeline -------------------------------------------------
+//
+// Everything below covers the path from "the track changed" to "there is
+// something on screen": fetching the bytes, decoding them, and either
+// encoding a PNG for the Kitty protocol or rendering half-blocks for
+// every other terminal. None of it had a test before -- only Draw's
+// escape-sequence bookkeeping did -- which is why a regression anywhere
+// in here would have gone unnoticed.
+
+// fakeFetcher stands in for the MPD client, returning canned bytes.
+type fakeFetcher struct {
+	data  []byte
+	err   error
+	calls int
+	uris  []string
+}
+
+func (f *fakeFetcher) FetchAlbumArt(uri string) ([]byte, error) {
+	f.calls++
+	f.uris = append(f.uris, uri)
+	return f.data, f.err
+}
+
+// newFetchPanel builds a Panel wired to f, applying UI updates
+// synchronously so a test sees the result without a running
+// tview.Application.
+func newFetchPanel(f *fakeFetcher) *Panel {
+	v := tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter)
+	v.SetBorder(true).SetTitle(" Album Art ")
+	return &Panel{client: f, view: v, applyToUI: func(fn func()) { fn() }}
+}
+
+// testPNG is a tiny real image, encoded the way MPD would hand one over.
+func testPNG(t *testing.T, w, h int) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.Set(x, y, color.RGBA{R: uint8(x * 8), G: uint8(y * 8), B: 128, A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("png.Encode: %v", err)
+	}
+	return buf.Bytes()
+}
+
+// TestFetchRendersHalfBlocksOnNonKittyTerminal is the ASCII-fallback
+// path -- the one most users on a non-Kitty terminal actually see. It
+// must put real half-block glyphs in the view, not leave the "Album Art
+// Loading..." placeholder up.
+func TestFetchRendersHalfBlocksOnNonKittyTerminal(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("KITTY_WINDOW_ID", "")
+
+	f := &fakeFetcher{data: testPNG(t, 8, 8)}
+	p := newFetchPanel(f)
+
+	seq, ok := p.startFetch("track-a.mp3")
+	if !ok {
+		t.Fatal("startFetch should have started a fetch")
+	}
+	p.fetch("track-a.mp3", seq)
+
+	got := p.view.GetText(true)
+	if !strings.Contains(got, "▀") {
+		t.Errorf("view after fetch on a non-Kitty terminal = %q, want half-block glyphs", got)
+	}
+	if strings.Contains(got, "Loading") {
+		t.Error("the loading placeholder is still showing after a successful fetch")
+	}
+	// The Kitty path must not have run: no PNG stashed for Draw.
+	if len(p.kittyPNG) != 0 {
+		t.Error("kittyPNG was set on a terminal with no Kitty support")
+	}
+}
+
+// TestFetchStashesPNGForKittyTerminal is the Kitty path: the view's text
+// is cleared (so it cannot obscure the image Draw composites on top) and
+// the encoded PNG is stashed for Draw to transmit.
+func TestFetchStashesPNGForKittyTerminal(t *testing.T) {
+	t.Setenv("TERM", "xterm-kitty")
+
+	f := &fakeFetcher{data: testPNG(t, 8, 8)}
+	p := newFetchPanel(f)
+
+	seq, _ := p.startFetch("track-a.mp3")
+	p.fetch("track-a.mp3", seq)
+
+	if len(p.kittyPNG) == 0 {
+		t.Fatal("kittyPNG is empty after a successful fetch on a Kitty terminal")
+	}
+	if !bytes.HasPrefix(p.kittyPNG, []byte("\x89PNG")) {
+		t.Error("kittyPNG is not a PNG")
+	}
+	if got := strings.TrimSpace(p.view.GetText(true)); got != "" {
+		t.Errorf("view text = %q, want it cleared so it cannot obscure the image", got)
+	}
+	// And Draw actually transmits what fetch stashed.
+	p.currentURI = "track-a.mp3"
+	p.view.SetRect(0, 0, 20, 10)
+	if out := captureDraw(t, p.Draw); !strings.Contains(out, "\033_Ga=T") {
+		t.Error("Draw did not transmit the image fetch had stashed")
+	}
+}
+
+func TestFetchShowsNoAlbumArtWhenThereIsNone(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	for _, tc := range []struct {
+		name string
+		f    *fakeFetcher
+	}{
+		{"empty response", &fakeFetcher{data: nil}},
+		{"fetch error", &fakeFetcher{err: errors.New("no art")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := newFetchPanel(tc.f)
+			seq, _ := p.startFetch("track-a.mp3")
+			p.fetch("track-a.mp3", seq)
+
+			if got := p.view.GetText(true); !strings.Contains(got, "No Album Art") {
+				t.Errorf("view = %q, want it to say there is no album art", got)
+			}
+			if len(p.kittyPNG) != 0 {
+				t.Error("kittyPNG should be cleared when there is no art")
+			}
+		})
+	}
+}
+
+// TestFetchShowsDecodeErrorOnGarbage covers art that arrives but is not
+// a decodable image -- it must say so rather than sit on the loading
+// placeholder forever.
+func TestFetchShowsDecodeErrorOnGarbage(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+
+	p := newFetchPanel(&fakeFetcher{data: []byte("this is not an image")})
+	seq, _ := p.startFetch("track-a.mp3")
+	p.fetch("track-a.mp3", seq)
+
+	if got := p.view.GetText(true); !strings.Contains(got, "Decode Error") {
+		t.Errorf("view = %q, want a decode error", got)
+	}
+}
+
+// TestFetchDiscardsSupersededResult is the out-of-order-completion case
+// at the level that matters: a slow fetch for a track the user has
+// already skipped past must not paint over the newer track's art.
+func TestFetchDiscardsSupersededResult(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+
+	p := newFetchPanel(&fakeFetcher{data: testPNG(t, 8, 8)})
+	oldSeq, _ := p.startFetch("track-a.mp3")
+	p.startFetch("track-b.mp3") // supersedes it
+
+	p.view.SetText("newer track's art")
+	p.fetch("track-a.mp3", oldSeq)
+
+	if got := p.view.GetText(true); !strings.Contains(got, "newer track's art") {
+		t.Errorf("view = %q, want the superseded fetch to have left it alone", got)
+	}
+}
+
+// TestOnTrackChangedFetchesOncePerTrack covers the exported entry point,
+// including that it does not re-fetch the track already showing.
+func TestOnTrackChangedFetchesOncePerTrack(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+
+	f := &fakeFetcher{data: testPNG(t, 4, 4)}
+	p := newFetchPanel(f)
+
+	done := make(chan struct{}, 8)
+	p.applyToUI = func(fn func()) { fn(); done <- struct{}{} }
+
+	p.OnTrackChanged("track-a.mp3")
+	<-done
+	p.OnTrackChanged("track-a.mp3") // same track: must not refetch
+	p.OnTrackChanged("")            // nothing playing: must not refetch
+
+	if f.calls != 1 {
+		t.Errorf("FetchAlbumArt called %d times for one distinct track, want 1 (uris=%v)", f.calls, f.uris)
+	}
+
+	p.OnTrackChanged("track-b.mp3")
+	<-done
+	if f.calls != 2 {
+		t.Errorf("FetchAlbumArt called %d times after a real track change, want 2", f.calls)
+	}
+}
+
+func TestViewIsTheRenderedPanel(t *testing.T) {
+	p := New(nil, nil)
+	if p.View() == nil {
+		t.Fatal("View() is nil")
+	}
+	if p.View() != p.view {
+		t.Error("View() returned something other than the panel's own view")
+	}
+	if got := p.View().GetTitle(); !strings.Contains(got, "Album Art") {
+		t.Errorf("panel title = %q, want it to name the panel", got)
+	}
+	// Before any fetch, the panel says it is loading rather than sitting
+	// blank -- a blank bordered box reads as a bug.
+	if got := p.View().GetText(true); !strings.Contains(got, "Loading") {
+		t.Errorf("initial view text = %q, want a loading placeholder", got)
+	}
+}
+
+// TestImageToHalfBlocksDimensions pins the geometry the fallback relies
+// on: one character row per two pixel rows, and one character per pixel
+// column, so the art fits the width it was asked for.
+func TestImageToHalfBlocksDimensions(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 16, 16))
+	for y := 0; y < 16; y++ {
+		for x := 0; x < 16; x++ {
+			img.Set(x, y, color.RGBA{R: 200, G: 100, B: 50, A: 255})
+		}
+	}
+
+	out := imageToHalfBlocks(img, 10, 4)
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 4 {
+		t.Errorf("rendered %d lines, want 4 (height*2 pixel rows, two per character row)", len(lines))
+	}
+	for i, ln := range lines {
+		if got := strings.Count(ln, "▀"); got != 10 {
+			t.Errorf("line %d has %d half-blocks, want 10 (one per column)", i, got)
+		}
+	}
+	if !strings.Contains(out, "\033[38;2;") || !strings.Contains(out, "\033[48;2;") {
+		t.Error("output has no 24-bit foreground/background colors")
+	}
+}
+
+// TestImageToHalfBlocksUsesSpaceForTransparency covers the alpha case:
+// a fully transparent image must render as blank space, not as opaque
+// black blocks over the whole panel.
+func TestImageToHalfBlocksUsesSpaceForTransparency(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 8, 8)) // zero value: fully transparent
+
+	out := imageToHalfBlocks(img, 4, 2)
+	if strings.Contains(out, "▀") {
+		t.Errorf("a fully transparent image rendered half-blocks: %q", out)
+	}
+	if !strings.Contains(out, " ") {
+		t.Error("a fully transparent image rendered no spaces")
 	}
 }
