@@ -227,3 +227,72 @@ func TestCliampFallsBackToSimulationWithoutAudio(t *testing.T) {
 		t.Error("fallback output identical across elapsed times -- expected animation")
 	}
 }
+
+// TestCliampRenderLayoutsAcrossWidths covers the bar-layout branches:
+// the visualizer narrows its bars and drops the gap as the panel
+// shrinks, and must always return exactly height lines whatever it
+// decides.
+func TestCliampRenderLayoutsAcrossWidths(t *testing.T) {
+	v := newCliampVisualization(nil)
+
+	for _, width := range []int{60, 30, 25, 12, 11, 4, 1} {
+		const height = 2
+		lines := v.Render(width, height, time.Second, mpdclient.Status{
+			State: mpdclient.StatePlay, Volume: 70,
+		})
+		if len(lines) != height {
+			t.Errorf("width %d returned %d lines, want %d", width, len(lines), height)
+		}
+	}
+}
+
+// TestCliampRenderDegenerateSizes covers the guard: a collapsed panel
+// still gets exactly height (possibly zero) lines rather than a nil
+// slice the container would have to special-case.
+func TestCliampRenderDegenerateSizes(t *testing.T) {
+	v := newCliampVisualization(nil)
+
+	if got := v.Render(0, 3, 0, mpdclient.Status{}); len(got) != 3 {
+		t.Errorf("zero width returned %d lines, want 3", len(got))
+	}
+	if got := v.Render(20, 0, 0, mpdclient.Status{}); len(got) != 0 {
+		t.Errorf("zero height returned %d lines, want none", len(got))
+	}
+}
+
+// TestCliampResetsPeaksWhenTheClockRewinds covers the peak-decay
+// bookkeeping: a new track restarts elapsed from zero, and stale peaks
+// from the previous one must not hang above the new bars.
+func TestCliampResetsPeaksWhenTheClockRewinds(t *testing.T) {
+	v := newCliampVisualization(nil)
+	st := mpdclient.Status{State: mpdclient.StatePlay, Volume: 80}
+
+	v.Render(40, 3, 10*time.Second, st)
+	if len(v.peaks) == 0 {
+		t.Fatal("no peaks tracked after a render")
+	}
+	for i := range v.peaks {
+		v.peaks[i] = 999 // obviously stale
+	}
+
+	v.Render(40, 3, time.Second, st) // the clock went backwards
+
+	for i, p := range v.peaks {
+		if p == 999 {
+			t.Errorf("peak %d survived a rewound clock", i)
+			break
+		}
+	}
+}
+
+// TestCliampHandlesUnknownVolume covers the negative-volume case MPD
+// reports when it has no mixer.
+func TestCliampHandlesUnknownVolume(t *testing.T) {
+	v := newCliampVisualization(nil)
+	lines := v.Render(40, 2, time.Second, mpdclient.Status{
+		State: mpdclient.StatePlay, Volume: -1,
+	})
+	if len(lines) != 2 {
+		t.Fatalf("returned %d lines, want 2", len(lines))
+	}
+}
