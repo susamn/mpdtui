@@ -484,3 +484,53 @@ func TestSpectrumOpenAfterCloseReportsClosed(t *testing.T) {
 		t.Error("open succeeded on a closed Spectrum, want it to report closed")
 	}
 }
+
+// TestBandDecibelsDegenerateInputs covers the guards: too few bins or a
+// non-positive band count still returns exactly n floor-level bands, so
+// a visualization never has to special-case a nil slice.
+func TestBandDecibelsDegenerateInputs(t *testing.T) {
+	if got := bandDecibels(nil, 8); len(got) != 8 {
+		t.Errorf("nil magnitudes returned %d bands, want 8", len(got))
+	}
+	for _, v := range bandDecibels(nil, 8) {
+		if v != bandFloorDB {
+			t.Errorf("a band from nil magnitudes = %v, want the floor %v", v, bandFloorDB)
+		}
+	}
+	if got := bandDecibels([]float64{1}, 4); len(got) != 4 {
+		t.Errorf("a single magnitude returned %d bands, want 4", len(got))
+	}
+	if got := bandDecibels(make([]float64, 512), 0); len(got) != 0 {
+		t.Errorf("zero bands returned %d, want none", len(got))
+	}
+}
+
+// TestBandDecibelsSkipsDCAndClampsTheTopBin covers the two bin bounds:
+// band 0 must never include bin 0 (DC offset, not audible), and the
+// highest band must not run past the end of the magnitudes.
+func TestBandDecibelsSkipsDCAndClampsTheTopBin(t *testing.T) {
+	mags := make([]float64, 513)
+	mags[0] = 1e6 // a huge DC offset that must be ignored
+	for i := 1; i < len(mags); i++ {
+		mags[i] = 1e-6
+	}
+
+	bands := bandDecibels(mags, 16)
+	if bands[0] > bandFloorDB+40 {
+		t.Errorf("the lowest band = %v, want it near the floor -- the DC bin leaked in", bands[0])
+	}
+
+	// Many narrow bands over few bins forces both the "narrow band
+	// inside one bin" and the top-bin clamp.
+	if got := bandDecibels(mags, 128); len(got) != 128 {
+		t.Fatalf("returned %d bands, want 128", len(got))
+	}
+}
+
+// The smoothing between frames is deliberately not tested here. It runs
+// inline in BandsDB against time.Now(), so its two interesting arms --
+// the dt guard after a stall, and attack moving faster than release --
+// need a clock this package does not expose. Reaching them means either
+// a multi-second sleep in the suite or a time seam on Spectrum; neither
+// is worth it for a smoothing filter whose inputs and outputs are both
+// covered.

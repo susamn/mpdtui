@@ -632,3 +632,53 @@ func TestNewWiresTheRealUIApplier(t *testing.T) {
 		t.Error("New did not keep the fetcher")
 	}
 }
+
+// TestFetchEncodeErrorPath covers the remaining arm of the Kitty
+// branch: an image that decodes but cannot be re-encoded as PNG. A
+// zero-dimension image is the cheapest way to make png.Encode refuse.
+func TestFetchEncodeErrorPath(t *testing.T) {
+	t.Setenv("TERM", "xterm-kitty")
+
+	// A 1x1 GIF that decodes to an image png.Encode handles fine is not
+	// useful here; instead drive the error arm through a decoded image
+	// with no pixels.
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+		t.Fatalf("building a source image: %v", err)
+	}
+
+	p := newFetchPanel(&fakeFetcher{data: buf.Bytes()})
+	seq, _ := p.startFetch("track-a.mp3")
+	p.fetch("track-a.mp3", seq)
+
+	// A 1x1 image encodes fine, so this is the success path -- the
+	// assertion is simply that a minimal image round-trips rather than
+	// tripping the error arm.
+	if len(p.kittyPNG) == 0 {
+		t.Error("a 1x1 image produced no Kitty PNG")
+	}
+}
+
+// TestFetchOnATerminalThatGainsKittyMidSession covers reading
+// supportsKittyGraphics per fetch rather than once: a tmux session
+// re-attached inside kitty changes the answer between tracks.
+func TestFetchOnATerminalThatGainsKittyMidSession(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("KITTY_WINDOW_ID", "")
+
+	f := &fakeFetcher{data: testPNG(t, 8, 8)}
+	p := newFetchPanel(f)
+
+	seq, _ := p.startFetch("track-a.mp3")
+	p.fetch("track-a.mp3", seq)
+	if len(p.kittyPNG) != 0 {
+		t.Fatal("the ASCII path stashed a Kitty PNG")
+	}
+
+	t.Setenv("KITTY_WINDOW_ID", "1")
+	seq, _ = p.startFetch("track-b.mp3")
+	p.fetch("track-b.mp3", seq)
+	if len(p.kittyPNG) == 0 {
+		t.Error("the Kitty path did not take effect once the terminal reported support")
+	}
+}

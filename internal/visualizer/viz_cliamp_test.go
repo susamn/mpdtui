@@ -296,3 +296,56 @@ func TestCliampHandlesUnknownVolume(t *testing.T) {
 		t.Fatalf("returned %d lines, want 2", len(lines))
 	}
 }
+
+// TestCliampClampsOutOfRangeVolume covers the guards either side of the
+// 0..100 range MPD is supposed to report.
+func TestCliampClampsOutOfRangeVolume(t *testing.T) {
+	v := newCliampVisualization(nil)
+	for _, vol := range []int{-50, -1, 0, 50, 100, 150, 1000} {
+		lines := v.Render(40, 2, time.Second, mpdclient.Status{State: mpdclient.StatePlay, Volume: vol})
+		if len(lines) != 2 {
+			t.Errorf("volume %d returned %d lines, want 2", vol, len(lines))
+		}
+	}
+}
+
+// TestCliampSingleBarOnAVeryNarrowPanel covers the floor on the bar
+// count: however little width there is, there is always at least one
+// bar rather than a division by zero.
+func TestCliampSingleBarOnAVeryNarrowPanel(t *testing.T) {
+	v := newCliampVisualization(nil)
+	lines := v.Render(1, 2, time.Second, mpdclient.Status{State: mpdclient.StatePlay, Volume: 50})
+	if len(lines) != 2 {
+		t.Fatalf("returned %d lines, want 2", len(lines))
+	}
+	if len(v.peaks) != 1 {
+		t.Errorf("tracked %d bars on a 1-column panel, want 1", len(v.peaks))
+	}
+}
+
+// TestCliampSustainedLoudAudioSaturatesAndDecays drives the level and
+// peak clamps: a loud feed pins both at the top of the panel, and the
+// peaks then fall back once it goes quiet.
+func TestCliampSustainedLoudAudioSaturatesAndDecays(t *testing.T) {
+	v := newCliampVisualization(nil)
+	st := mpdclient.Status{State: mpdclient.StatePlay, Volume: 100}
+
+	for i := 1; i <= 40; i++ {
+		v.Render(40, 3, time.Duration(i)*100*time.Millisecond, st)
+	}
+	loud := append([]float64(nil), v.peaks...)
+
+	// Let a long time pass with nothing new: the peaks decay.
+	for i := 41; i <= 120; i++ {
+		v.Render(40, 3, time.Duration(i)*100*time.Millisecond, mpdclient.Status{State: mpdclient.StateStop})
+	}
+
+	var before, after float64
+	for i := range loud {
+		before += loud[i]
+		after += v.peaks[i]
+	}
+	if after > before {
+		t.Errorf("peaks rose after the audio stopped: %v -> %v", before, after)
+	}
+}

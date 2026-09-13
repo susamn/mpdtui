@@ -412,3 +412,43 @@ func TestSettingsTabWorksWithMetadataOff(t *testing.T) {
 		t.Errorf("focus after tabbing back = %T, want the Config tab", a.tv.GetFocus())
 	}
 }
+
+// TestOverlayKeysFallThroughToTheFocusedWidget covers globalInputCapture's
+// overlay default: anything it does not claim has to reach whatever is
+// focused, so text overlays stay typeable.
+func TestOverlayKeysFallThroughToTheFocusedWidget(t *testing.T) {
+	a := newFakeApp(t, &fakeMPD{})
+	a.openHelp()
+
+	// Help is not in the no-text-input table and claims no runes of its
+	// own, so an unrelated key passes through untouched.
+	ev := runeKey('Z')
+	if got := a.globalInputCapture(ev); got != ev {
+		t.Errorf("%q was captured under the Help overlay, want it passed through", 'Z')
+	}
+
+	// A non-rune key that no overlay claims also passes through.
+	down := tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone)
+	if got := a.globalInputCapture(down); got != down {
+		t.Error("Down was captured under the Help overlay, want it passed through")
+	}
+}
+
+// TestTransportKeysAreNotLiveUnderTheTrackInfoCard covers the other
+// side of the deliberate split: unlike the lyrics viewer, the card is
+// something to read rather than watch while playing, so the transport
+// cluster is not kept live there.
+func TestTransportKeysAreNotLiveUnderTheTrackInfoCard(t *testing.T) {
+	f := &fakeMPD{}
+	a := newFakeApp(t, f)
+	seedQueue(a, f, mpdclient.Song{ID: 1, Pos: 0, Title: "Track", File: "a/b.mp3"})
+	a.tv.SetFocus(a.queue.table)
+	a.queue.table.Select(queueHeaderRows, 0)
+	a.openTrackInfo()
+
+	a.globalInputCapture(runeKey('s')) // stop, if it were live
+
+	if f.did("stop") {
+		t.Errorf("did %v, want the transport cluster inactive under the Track Info card", f.commands())
+	}
+}

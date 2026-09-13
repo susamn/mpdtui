@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -298,3 +299,30 @@ func TestColumnExists(t *testing.T) {
 		t.Error("columnExists on a closed database reported no error")
 	}
 }
+
+// TestOpenReportsAFailedSchema covers Open's own setup arms. Each runs
+// on every launch, and a failure there has to come back as an error
+// rather than a DB that fails later on first use.
+func TestOpenReportsAFailedSchema(t *testing.T) {
+	// A path inside a directory that does not exist.
+	if _, err := Open(filepath.Join(t.TempDir(), "no-such-dir", "x.db")); err == nil {
+		t.Error("Open succeeded with a nonexistent parent directory")
+	}
+
+	// A file that exists but is not a database.
+	path := filepath.Join(t.TempDir(), "notadb")
+	if err := os.WriteFile(path, []byte("this is not sqlite"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, err := Open(path); err == nil {
+		t.Error("Open succeeded on a file that is not a database")
+	}
+}
+
+// The migration's own read arms (the before-count and the copy) are
+// deliberately not tested. Reaching them needs the legacy `mark` column
+// to exist while the statements over it fail, and dropping the tracks
+// table takes the column with it, so the migration short-circuits on
+// columnExists before it gets there. Its two decisions that matter --
+// moving the rows across, and refusing to drop the column when the copy
+// comes up short -- are both covered above.

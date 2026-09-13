@@ -396,3 +396,62 @@ func TestLocateRevealsATrackInTheTree(t *testing.T) {
 		t.Error("revealInLibrary claimed to find a track that is not in the tree")
 	}
 }
+
+// TestQueueEnterPlaysTheSelectedTrack covers newQueuePanel's own
+// selected-row handler, including its bounds guard and failure arm.
+func TestQueueEnterPlaysTheSelectedTrack(t *testing.T) {
+	f := &fakeMPD{}
+	a := newFakeApp(t, f)
+	seedQueue(a, f,
+		mpdclient.Song{ID: 10, Pos: 0, Title: "One", File: "a/1.mp3"},
+		mpdclient.Song{ID: 11, Pos: 1, Title: "Two", File: "a/2.mp3"},
+	)
+
+	a.queue.table.Select(1+queueHeaderRows, 0)
+	sendKey(a.queue.table, tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), a)
+
+	if !f.did("play:11") {
+		t.Errorf("did %v, want the selected track played", f.commands())
+	}
+
+	// The header row maps to a negative index and must do nothing.
+	f.calls = nil
+	a.queue.table.Select(0, 0)
+	sendKey(a.queue.table, tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), a)
+	if got := f.commands(); len(got) != 0 {
+		t.Errorf("Enter on the header did %v, want nothing", got)
+	}
+
+	// A failure is reported rather than silently leaving the row looking
+	// as though it started playing.
+	f.err = errTest
+	a.queue.table.Select(queueHeaderRows, 0)
+	sendKey(a.queue.table, tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), a)
+	if got := a.hintBar.GetText(true); !strings.Contains(got, errTest.Error()) {
+		t.Errorf("hint bar = %q, want the failure reported", got)
+	}
+}
+
+// TestQueueDrawFuncCollapsesOnATinyPanel covers the inner-rect guard:
+// below a few columns there is no room for a border and content, so it
+// reports a zero inner rect rather than negative dimensions.
+func TestQueueDrawFuncCollapsesOnATinyPanel(t *testing.T) {
+	f := &fakeMPD{}
+	a := newFakeApp(t, f)
+	seedQueue(a, f, mpdclient.Song{ID: 1, Pos: 0, Title: "Track", File: "a.mp3"})
+
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatalf("init simulation screen: %v", err)
+	}
+	defer screen.Fini()
+	screen.SetSize(80, 24)
+
+	a.queue.table.SetRect(0, 0, 2, 2)
+	a.queue.table.Draw(screen)
+
+	_, _, w, h := a.queue.table.GetInnerRect()
+	if w < 0 || h < 0 {
+		t.Errorf("inner rect is %dx%d on a tiny panel, want no negative dimensions", w, h)
+	}
+}
