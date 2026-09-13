@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/term"
+
 	"mpdtui/internal/config"
 	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
@@ -953,5 +955,89 @@ func TestFetchPlaylistCountReportsZeroOnFailure(t *testing.T) {
 	f = &fakeController{playlists: []mpdclient.Playlist{{Name: "A"}, {Name: "B"}}}
 	if got := fetchPlaylistCount(f); got != 2 {
 		t.Errorf("fetchPlaylistCount = %d, want 2", got)
+	}
+}
+
+// TestRunOnARealTerminal covers Run's own body -- the terminal setup
+// the loop tests deliberately skip: raw mode, the signal handlers, the
+// key reader, the MPD watch, and restoring the terminal on the way out.
+//
+// Needs both a pty (for the tty checks) and a reachable MPD (Run dials
+// a watch), so it skips without either.
+func TestRunOnARealTerminal(t *testing.T) {
+	client := dialOrSkip(t)
+	ptmx := withPTYStdio(t)
+
+	done := make(chan error, 1)
+	go func() { done <- Run(client, nil, "") }()
+
+	waitForRawMode(t, 5*time.Second)
+	// Quit through the same path a user would: a byte on stdin.
+	if _, err := ptmx.Write([]byte("q")); err != nil {
+		t.Fatalf("writing to the pty: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Run returned %v, want nil", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after 'q'")
+	}
+}
+
+// TestRunRestoresTheTerminal covers the deferred term.Restore: mini
+// mode puts the terminal into raw mode, and leaving it that way would
+// wreck the shell it was run from.
+func TestRunRestoresTheTerminal(t *testing.T) {
+	client := dialOrSkip(t)
+	ptmx := withPTYStdio(t)
+
+	before, err := term.GetState(int(os.Stdin.Fd()))
+	if err != nil {
+		t.Skipf("cannot read the terminal state: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- Run(client, nil, "") }()
+	waitForRawMode(t, 5*time.Second)
+	ptmx.Write([]byte("q"))
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return")
+	}
+
+	after, err := term.GetState(int(os.Stdin.Fd()))
+	if err != nil {
+		t.Fatalf("reading the terminal state back: %v", err)
+	}
+	if fmt.Sprintf("%+v", before) != fmt.Sprintf("%+v", after) {
+		t.Error("Run left the terminal in a different state than it found it")
+	}
+}
+
+// TestRunQuitsOnCtrlC covers the other way out, and the interrupt
+// handler Run installs alongside it.
+func TestRunQuitsOnCtrlC(t *testing.T) {
+	client := dialOrSkip(t)
+	ptmx := withPTYStdio(t)
+
+	done := make(chan error, 1)
+	go func() { done <- Run(client, nil, "") }()
+
+	// Ctrl-C only reaches the key reader once raw mode has cleared
+	// ISIG; before that the line discipline treats it as a signal.
+	waitForRawMode(t, 5*time.Second)
+	ptmx.Write([]byte{3}) // Ctrl-C, which handleKey treats as quit
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Run returned %v, want nil", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after Ctrl-C")
 	}
 }
