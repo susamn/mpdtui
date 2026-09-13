@@ -40,6 +40,15 @@ func openPTY(t *testing.T) (controller, terminal *os.File) {
 		t.Skipf("opening the pty slave failed: %v", err)
 	}
 
+	// A pty starts with a zero window size, which tcell refuses to
+	// initialize a screen on. Give it a normal terminal's dimensions.
+	ws := &unix.Winsize{Row: 40, Col: 120}
+	if err := unix.IoctlSetWinsize(int(pts.Fd()), unix.TIOCSWINSZ, ws); err != nil {
+		pts.Close()
+		ptmx.Close()
+		t.Skipf("setting the pty window size failed: %v", err)
+	}
+
 	t.Cleanup(func() { pts.Close(); ptmx.Close() })
 	return ptmx, pts
 }
