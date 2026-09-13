@@ -15,8 +15,6 @@ import (
 
 	"github.com/nfnt/resize"
 	"github.com/rivo/tview"
-
-	"mpdtui/internal/mpdclient"
 )
 
 // resendInterval bounds how long a stale Kitty placement can
@@ -44,17 +42,20 @@ const resendInterval = 4 * time.Second
 // a newer one, and all direct terminal writes happen from a single place
 // (Draw, invoked from the App's SetAfterDrawFunc) so they never overlap
 // tview's own single-threaded draw cycle or each other.
-// artFetcher is the one thing this package needs from the MPD client.
-// Narrowed to an interface so the fetch path -- everything between
-// "the track changed" and "there is a picture on screen" -- can be
-// tested against canned bytes instead of requiring a live server with
-// embedded art.
-type artFetcher interface {
+// Fetcher is the one thing this package needs from the MPD client:
+// given a track URI, the bytes of its embedded album art.
+//
+// An interface rather than *mpdclient.Client so the fetch path --
+// everything between "the track changed" and "there is a picture on
+// screen" -- can be tested against canned bytes instead of requiring a
+// live server with embedded art. It also means this package needs no
+// dependency on internal/mpdclient at all.
+type Fetcher interface {
 	FetchAlbumArt(uri string) ([]byte, error)
 }
 
 type Panel struct {
-	client artFetcher
+	client Fetcher
 	view   *tview.TextView
 
 	// applyToUI hands a closure to the UI goroutine to run and redraw.
@@ -100,7 +101,7 @@ func nextImageID(last int) int {
 	return 1
 }
 
-func New(client *mpdclient.Client, tv *tview.Application) *Panel {
+func New(client Fetcher, tv *tview.Application) *Panel {
 	v := tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter)
 	v.SetBorder(true).SetTitle(" Album Art ")
 	v.SetText("\n\n[::d]Album Art Loading...[-:-:-]")

@@ -43,7 +43,7 @@ const flashDuration = 3 * time.Second
 // App is the full panel-based TUI application.
 type App struct {
 	tv      *tview.Application
-	client  *mpdclient.Client
+	client  mpdConn
 	watcher *mpdclient.Watcher
 
 	// musicDir is the local filesystem path mirroring MPD's own
