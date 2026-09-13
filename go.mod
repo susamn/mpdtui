@@ -7,6 +7,7 @@ require (
 	github.com/gdamore/tcell/v2 v2.8.1
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
 	github.com/rivo/tview v0.42.0
+	github.com/rivo/uniseg v0.4.7
 	golang.org/x/term v0.45.0
 	golang.org/x/text v0.21.0
 	modernc.org/sqlite v1.56.0
@@ -21,7 +22,6 @@ require (
 	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	github.com/rivo/uniseg v0.4.7 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	modernc.org/libc v1.74.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
