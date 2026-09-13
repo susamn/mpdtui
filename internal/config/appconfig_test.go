@@ -344,3 +344,79 @@ func writeConfigFile(t *testing.T, xdgConfigHome, content string) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 }
+
+// LoadVisualizerFIFO has three answers rather than two: a configured
+// path, the default when nothing is configured, and "" for a user who
+// has explicitly switched the feature off.
+func TestLoadVisualizerFIFO(t *testing.T) {
+	t.Run("defaults when unset", func(t *testing.T) {
+		withEnv(t, "XDG_CONFIG_HOME", t.TempDir())
+		if got, want := config.LoadVisualizerFIFO(), config.DefaultVisualizerFIFO; got != want {
+			t.Errorf("LoadVisualizerFIFO() with nothing configured = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("reads a configured path", func(t *testing.T) {
+		xdgHome := t.TempDir()
+		withEnv(t, "XDG_CONFIG_HOME", xdgHome)
+		writeConfigFile(t, xdgHome, "visualizer_fifo = /run/mpd/my.fifo\n")
+
+		if got, want := config.LoadVisualizerFIFO(), "/run/mpd/my.fifo"; got != want {
+			t.Errorf("LoadVisualizerFIFO() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("off switches it off", func(t *testing.T) {
+		xdgHome := t.TempDir()
+		withEnv(t, "XDG_CONFIG_HOME", xdgHome)
+		writeConfigFile(t, xdgHome, "visualizer_fifo = off\n")
+
+		if got := config.LoadVisualizerFIFO(); got != "" {
+			t.Errorf("LoadVisualizerFIFO() with \"off\" = %q, want empty", got)
+		}
+	})
+
+	// LoadVisualizerFIFO's doc comment says an empty value switches the
+	// feature off, the same as "off". It does not, and cannot: the
+	// config parser drops any key whose value is empty before this
+	// function sees it (see kvparser.Parse), so the key reads as unset
+	// and the default path comes back instead. "off" is the only way to
+	// turn it off from a config file.
+	//
+	// Pinned rather than fixed: making an empty value mean "off" would
+	// be a behavior change for every other setting too, since they all
+	// share that parser. The comment is the thing that is wrong.
+	t.Run("an empty value reads as unset, not as off", func(t *testing.T) {
+		xdgHome := t.TempDir()
+		withEnv(t, "XDG_CONFIG_HOME", xdgHome)
+		writeConfigFile(t, xdgHome, "visualizer_fifo =\n")
+
+		if got, want := config.LoadVisualizerFIFO(), config.DefaultVisualizerFIFO; got != want {
+			t.Errorf("LoadVisualizerFIFO() with an empty value = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("~ is expanded", func(t *testing.T) {
+		xdgHome := t.TempDir()
+		withEnv(t, "XDG_CONFIG_HOME", xdgHome)
+		home := t.TempDir()
+		withEnv(t, "HOME", home)
+		writeConfigFile(t, xdgHome, "visualizer_fifo = ~/mpd.fifo\n")
+
+		if got, want := config.LoadVisualizerFIFO(), filepath.Join(home, "mpd.fifo"); got != want {
+			t.Errorf("LoadVisualizerFIFO() = %q, want %q", got, want)
+		}
+	})
+
+	// The path is deliberately not checked for existence: MPD creates
+	// the fifo, so it can legitimately appear after mpdtui starts.
+	t.Run("a path that does not exist is still returned", func(t *testing.T) {
+		xdgHome := t.TempDir()
+		withEnv(t, "XDG_CONFIG_HOME", xdgHome)
+		writeConfigFile(t, xdgHome, "visualizer_fifo = /nope/not/here.fifo\n")
+
+		if got, want := config.LoadVisualizerFIFO(), "/nope/not/here.fifo"; got != want {
+			t.Errorf("LoadVisualizerFIFO() = %q, want %q", got, want)
+		}
+	})
+}

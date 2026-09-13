@@ -206,8 +206,14 @@ const DefaultVisualizerFIFO = "/tmp/mpd.fifo"
 // pipe MPD's "fifo" audio output writes decoded PCM to, which is the
 // only source of real audio data available to an MPD client (see
 // internal/audio's package comment). Returns DefaultVisualizerFIFO when
-// the key isn't set, and "" when it's set to an empty value or the word
-// "off", which is how a user turns the feature off outright.
+// the key isn't set, and "" when it's set to the word "off", which is
+// how a user turns the feature off outright.
+//
+// Note that an empty value ("visualizer_fifo =") reads as unset rather
+// than as off: the config parser drops keys with empty values before
+// this sees them (see kvparser.Parse), which every setting shares. The
+// empty-string check below is therefore unreachable from a config file
+// and kept only as a guard for direct callers.
 //
 // Unlike LoadMusicDir, the path isn't checked for existence here: the
 // fifo is created by MPD, so it can legitimately appear after mpdtui

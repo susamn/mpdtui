@@ -50,7 +50,18 @@ func Window(lines []lyrics.LyricLine, idx int) [windowSize]string {
 // when nothing is playing or the track has no synced lyrics -- the whole
 // point of the fixed-line-count output is that an external layout
 // (conky, a status bar) never has to special-case those states.
-func Print(client *mpdclient.Client, musicDir string, w io.Writer) error {
+// source is what Print needs from the MPD client. An interface rather
+// than *mpdclient.Client so the window this prints -- which external
+// tools poll once a second -- can be tested against a fixed playback
+// position instead of whatever happens to be playing.
+type source interface {
+	CurrentSong() (mpdclient.Song, error)
+	Status() (mpdclient.Status, error)
+}
+
+var _ source = (*mpdclient.Client)(nil)
+
+func Print(client source, musicDir string, w io.Writer) error {
 	var window [windowSize]string
 	song, err := client.CurrentSong()
 	if err != nil {

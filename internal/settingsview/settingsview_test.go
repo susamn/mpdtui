@@ -409,3 +409,82 @@ func TestPopulateConfigTableRendersRows(t *testing.T) {
 		t.Errorf("row count after re-render = %d, want %d", got, want)
 	}
 }
+
+// TestHostFacingAccessors covers the handful of methods the host calls
+// to place and repaint the view.
+func TestHostFacingAccessors(t *testing.T) {
+	s := newTestView(t, newTestDB(t))
+
+	if s.Root() == nil {
+		t.Error("Root() is nil")
+	}
+	if s.InitialFocus() == nil {
+		t.Error("InitialFocus() is nil")
+	}
+	// The Config tab browses, so global keys stay live there.
+	if !s.AllowsGlobalKeys() {
+		t.Error("AllowsGlobalKeys() is false on the Config tab, want true")
+	}
+
+	// ReapplyTheme repaints the catalog table's selected-row style,
+	// which is baked in when set rather than read live. tview exposes no
+	// getter for it, so this checks it runs against a built table
+	// without panicking; the colors themselves are uitheme's contract.
+	s.ReapplyTheme()
+}
+
+// TestReapplyThemeWithoutADatabase covers the nil guard: with track
+// metadata off there is no catalog table to repaint.
+func TestReapplyThemeWithoutADatabase(t *testing.T) {
+	s := newTestView(t, nil)
+	s.ReapplyTheme() // must not panic
+}
+
+// TestAllowsGlobalKeysWhileTyping is the other half of the gate: a mark
+// reason like "single" contains letters that double as transport
+// shortcuts, so they must stay literal while the add field has focus.
+func TestAllowsGlobalKeysWhileTyping(t *testing.T) {
+	s := openDatabaseTab(t)
+	if !s.AllowsGlobalKeys() {
+		t.Fatal("global keys should be live while browsing the catalog")
+	}
+
+	s.startAdd()
+	if s.AllowsGlobalKeys() {
+		t.Error("global keys are live while typing a new entry, want them literal")
+	}
+}
+
+// TestConfirmDeleteReportsAFailedDelete covers the error arm of the
+// delete flow.
+func TestConfirmDeleteReportsAFailedDelete(t *testing.T) {
+	db := newTestDB(t)
+	app := tview.NewApplication()
+	var reported error
+	v := New(Deps{
+		App:         app,
+		MetaDB:      db,
+		Config:      []Row{{Label: "k", Value: "v"}},
+		ShowError:   func(err error) { reported = err },
+		ShowMessage: func(string) {},
+		RunAsync: func(work func() error, onSuccess func()) {
+			if err := work(); err != nil {
+				reported = err
+				return
+			}
+			onSuccess()
+		},
+	})
+	v.Reset()
+	app.SetFocus(v.InitialFocus())
+	v.HandleKey(tabKeyEvent())
+
+	v.catalogTable.Select(1, 0)
+	v.startDelete()
+	db.Close() // make the delete fail
+	v.confirmDeleteNow()
+
+	if reported == nil {
+		t.Error("a failed delete was swallowed")
+	}
+}

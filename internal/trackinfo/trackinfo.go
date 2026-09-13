@@ -86,7 +86,18 @@ func FormatInfo(song mpdclient.Song, st mpdclient.Status, musicDir string, meta 
 // PrintInfo performs an MPD query for the currently playing track and
 // writes its details to w. If metaDB is non-nil, local track metadata is
 // included; if musicDir is non-empty, sidecar lyrics availability is checked.
-func PrintInfo(client *mpdclient.Client, musicDir string, metaDB *metadata.DB, w io.Writer) error {
+// source is what these printers need from the MPD client. An interface
+// rather than *mpdclient.Client so the -i and -iu output can be checked
+// against a fixed track instead of whatever is playing -- and so -iu's
+// rating write can be proved without rating a real track.
+type source interface {
+	CurrentSong() (mpdclient.Song, error)
+	Status() (mpdclient.Status, error)
+}
+
+var _ source = (*mpdclient.Client)(nil)
+
+func PrintInfo(client source, musicDir string, metaDB *metadata.DB, w io.Writer) error {
 	song, err := client.CurrentSong()
 	if err != nil {
 		return err
@@ -115,7 +126,7 @@ func PrintInfo(client *mpdclient.Client, musicDir string, metaDB *metadata.DB, w
 }
 
 // UpdateRating sets the rating (1-5) for the currently playing track in metaDB.
-func UpdateRating(client *mpdclient.Client, metaDB *metadata.DB, rating int, w io.Writer) error {
+func UpdateRating(client source, metaDB *metadata.DB, rating int, w io.Writer) error {
 	if rating < 1 || rating > 5 {
 		return fmt.Errorf("rating must be between 1 and 5")
 	}
