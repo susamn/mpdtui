@@ -397,7 +397,14 @@ func TestShowErrorPutsTheMessageInTheHintBar(t *testing.T) {
 // genuinely hand work to a goroutine.
 func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
+	waitForUpTo(t, time.Second, cond)
+}
+
+// waitForUpTo is waitFor with an explicit budget, for waits that are
+// bounded by a real timer rather than by scheduling.
+func waitForUpTo(t *testing.T, limit time.Duration, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(limit)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return
