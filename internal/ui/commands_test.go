@@ -35,6 +35,9 @@ func newFakeApp(t *testing.T, f *fakeMPD) *App {
 	return a
 }
 
+// errTest is a stand-in failure for the error arms.
+var errTest = errors.New("mpd is unreachable")
+
 func runeKey(r rune) *tcell.EventKey { return tcell.NewEventKey(tcell.KeyRune, r, tcell.ModNone) }
 
 // --- Transport ----------------------------------------------------------
