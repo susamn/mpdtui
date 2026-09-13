@@ -148,17 +148,17 @@ func (s *settingsView) buildDatabaseTab() tview.Primitive {
 // populateConfigTable renders cfg into table as a plain Setting/Value
 // grid -- explicit follow-up request ("also show the config same way
 // please for keeping things similar") to match the Database tab's own
-// bordered, tabular look (header row styled with queueHeaderFg/
-// queueHeaderBg, same as the catalog table and every other table in
+// bordered, tabular look (header row styled with uitheme's shared
+// table-header colors, same as the catalog table and every other table in
 // this app) rather than a plain block of text. Non-selectable
 // (SetSelectable(false, false), set by the caller): there's nothing to
 // act on here, only to read.
 func populateConfigTable(table *tview.Table, cfg ConfigSummary) {
 	table.Clear()
 	table.SetCell(0, 0, tview.NewTableCell("Setting").
-		SetSelectable(false).SetTextColor(queueHeaderFg).SetBackgroundColor(queueHeaderBg))
+		SetSelectable(false).SetTextColor(uitheme.TableHeaderFg()).SetBackgroundColor(uitheme.TableHeaderBg()))
 	table.SetCell(0, 1, tview.NewTableCell("Value").
-		SetSelectable(false).SetTextColor(queueHeaderFg).SetBackgroundColor(queueHeaderBg).SetExpansion(1))
+		SetSelectable(false).SetTextColor(uitheme.TableHeaderFg()).SetBackgroundColor(uitheme.TableHeaderBg()).SetExpansion(1))
 
 	password := "not set"
 	if cfg.MPDPasswordSet {
@@ -269,9 +269,9 @@ func (s *settingsView) refreshCatalogTable() {
 
 	s.catalogTable.Clear()
 	s.catalogTable.SetCell(0, 0, tview.NewTableCell("ID").
-		SetSelectable(false).SetTextColor(queueHeaderFg).SetBackgroundColor(queueHeaderBg))
+		SetSelectable(false).SetTextColor(uitheme.TableHeaderFg()).SetBackgroundColor(uitheme.TableHeaderBg()))
 	s.catalogTable.SetCell(0, 1, tview.NewTableCell("Name").
-		SetSelectable(false).SetTextColor(queueHeaderFg).SetBackgroundColor(queueHeaderBg).SetExpansion(1))
+		SetSelectable(false).SetTextColor(uitheme.TableHeaderFg()).SetBackgroundColor(uitheme.TableHeaderBg()).SetExpansion(1))
 	for i, row := range rows {
 		r := i + 1
 		s.catalogTable.SetCell(r, 0, tview.NewTableCell(fmt.Sprintf("%d", row.id)))

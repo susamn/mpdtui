@@ -33,8 +33,6 @@ func deriveColors() {
 	locateFlashFg = uitheme.Contrast(locateFlashBg)
 
 	queueTitleColor = uitheme.Hex(p.Green)
-	queueHeaderBg = uitheme.Hex(p.BrightForeground)
-	queueHeaderFg = uitheme.Hex(p.DarkerBackground)
 	queueRatingColor = uitheme.Hex(p.Yellow)
 	queueStarTopColor = queueRatingColor
 	queueStarHighColor = uitheme.RecedeFrom(queueStarTopColor, queueStarMinRatio)

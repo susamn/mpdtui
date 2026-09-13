@@ -218,15 +218,6 @@ const (
 // the actual mapping from palette to every color in this block.
 var queueTitleColor tcell.Color
 
-// queueHeaderBg/Fg give the header row an inverted look (filled
-// background, contrasting text) to set it apart from the data rows
-// below. Both theme-derived (deriveColors) rather than a fixed white-
-// on-black -- see theme.go.
-var (
-	queueHeaderBg tcell.Color
-	queueHeaderFg tcell.Color
-)
-
 // queueColumns holds the Queue table's column indices for one header/
 // render pass. Lyr only exists as a column when the lyrics feature is
 // actually active. Playcount/Mark/Rating exist when metadata is active.
@@ -335,8 +326,8 @@ func setQueueHeader(t *tview.Table, cols queueColumns) {
 	set := func(col int, text string, align int) {
 		t.SetCell(0, col, tview.NewTableCell(text).
 			SetAlign(align).
-			SetTextColor(queueHeaderFg).
-			SetBackgroundColor(queueHeaderBg).
+			SetTextColor(uitheme.TableHeaderFg()).
+			SetBackgroundColor(uitheme.TableHeaderBg()).
 			SetSelectable(false))
 	}
 	set(0, "", tview.AlignLeft)

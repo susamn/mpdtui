@@ -79,6 +79,8 @@ var (
 	inactiveBorder = tcell.ColorDefault
 	selectedBg     tcell.Color
 	selectedFg     tcell.Color
+	tableHeaderBg  tcell.Color
+	tableHeaderFg  tcell.Color
 )
 
 func init() {
@@ -365,6 +367,17 @@ func SelectedStyle() tcell.Style {
 	return tcell.StyleDefault.Background(selectedBg).Foreground(selectedFg)
 }
 
+// TableHeaderBg and TableHeaderFg give a table's header row an inverted
+// look -- a filled bar in the theme's brightest foreground with the
+// text knocked out of it -- so the header reads as a label rather than
+// as a row of data. Shared by every table in the app (the Queue, the
+// Playlists panel, both Settings tables); it is a property of "this is
+// a table header", not of any one panel.
+func TableHeaderBg() tcell.Color { return tableHeaderBg }
+
+// TableHeaderFg is the knocked-out text color -- see TableHeaderBg.
+func TableHeaderFg() tcell.Color { return tableHeaderFg }
+
 // deriveColors recomputes this package's own colors from palette.
 // Callers with their own palette-derived colors (internal/ui has many,
 // one per panel concept) re-derive theirs after calling Reload.
@@ -372,4 +385,6 @@ func deriveColors() {
 	activeBorder = Hex(palette.Accent)
 	selectedBg = Hex(palette.Selection)
 	selectedFg = Contrast(selectedBg)
+	tableHeaderBg = Hex(palette.BrightForeground)
+	tableHeaderFg = Hex(palette.DarkerBackground)
 }
