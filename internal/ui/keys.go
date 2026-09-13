@@ -66,13 +66,22 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			return event
 		}
 		// Tab expands/collapses the track info card's summarised
-		// sections (currently just its playlist list). Claimed here
-		// rather than left to fall through, since Tab's normal meaning
-		// is cycling panels, which is exactly what must not happen while
-		// an overlay owns the screen.
-		if event.Key() == tcell.KeyTab && a.tv.GetFocus() == a.trackInfo {
-			a.trackInfo.toggleExpanded()
-			return nil
+		// sections (currently just its playlist list). Up/Down or j/k
+		// navigate the Queue tracks to inspect different songs while the
+		// card stays open.
+		if a.tv.GetFocus() == a.trackInfo {
+			if event.Key() == tcell.KeyTab {
+				a.trackInfo.toggleExpanded()
+				return nil
+			}
+			if event.Key() == tcell.KeyDown {
+				a.trackInfo.handleNav(1)
+				return nil
+			}
+			if event.Key() == tcell.KeyUp {
+				a.trackInfo.handleNav(-1)
+				return nil
+			}
 		}
 		// noTextInputOverlays: none of these three have anything to type
 		// (a track-info/lyrics display, or a plain selection list), so
@@ -102,6 +111,16 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 				}
 				if event.Rune() == 'q' {
 					a.tv.Stop()
+					return nil
+				}
+			}
+			if a.tv.GetFocus() == a.trackInfo {
+				switch event.Rune() {
+				case 'j':
+					a.trackInfo.handleNav(1)
+					return nil
+				case 'k':
+					a.trackInfo.handleNav(-1)
 					return nil
 				}
 			}

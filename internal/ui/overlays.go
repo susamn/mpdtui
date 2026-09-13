@@ -28,9 +28,11 @@ func (a *App) showOverlay(name string, root, focus tview.Primitive) {
 		if a.beforeOverlayFocus != nil {
 			a.tv.SetFocus(a.beforeOverlayFocus)
 		}
+		a.updateHintBar()
 	}
 	a.pages.AddPage(name, root, true, true)
 	a.tv.SetFocus(focus)
+	a.updateHintBar()
 }
 
 // openInput shows a single-line text input overlay. onSubmit is called

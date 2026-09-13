@@ -782,6 +782,15 @@ func (a *App) updateHintBar() {
 		if a.metaDB != nil {
 			panelHints = append(panelHints, hint{"1-5", "rate"}, hint{"m", "mark"})
 		}
+	case a.trackInfo:
+		// j/k means two different things on this card depending on
+		// whether it is expanded (scroll the overflowing sections) or
+		// collapsed (walk the Queue), so the hint has to say which.
+		if a.trackInfo.expanded {
+			panelHints = []hint{{"j/k", "scroll"}, {"Tab", "collapse"}, {"i/Esc", "close"}}
+		} else {
+			panelHints = []hint{{"j/k", "navigate"}, {"Tab", "expand"}, {"i/Esc", "close"}}
+		}
 	}
 
 	text := formatHints(panelHints)
