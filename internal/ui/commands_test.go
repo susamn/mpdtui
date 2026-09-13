@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
+	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
 	"mpdtui/internal/theme"
 )
@@ -410,4 +412,28 @@ func paletteWithAccent(accent string) theme.Palette {
 	p := theme.Default()
 	p.Accent = theme.Color(accent)
 	return p
+}
+
+// newFakeAppWithMetaDB is newFakeApp plus a real (temporary)
+// track-metadata database, for the features gated on one.
+func newFakeAppWithMetaDB(t *testing.T, f *fakeMPD) *App {
+	t.Helper()
+	db, err := metadata.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	a := &App{tv: tview.NewApplication(), client: f, metaDB: db, playCountedSongID: -1}
+	a.applyToUI = func(fn func()) { fn() }
+	a.build()
+	a.queue.table.SetRect(0, 0, 150, 40)
+	a.runAsync = func(work func() error, onSuccess func()) {
+		if err := work(); err != nil {
+			a.showError(err)
+			return
+		}
+		onSuccess()
+	}
+	return a
 }
