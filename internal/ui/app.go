@@ -345,10 +345,10 @@ func (a *App) build() {
 // package-level vars read fresh by render/refreshNowPlaying/etc. on
 // every ~500ms refresh tick anyway. Only the handful of widgets below,
 // all built once in build() and never rebuilt, need an explicit push.
-// The panel-focus borders (wireFocusColors) are the trickiest of these:
+// The panel-focus borders (uitheme.WireFocus) are the trickiest of these:
 // their color is normally only set by a real focus/blur event, so this
 // re-derives "should this panel look focused right now" itself via
-// setFocusColor rather than waiting for one.
+// uitheme.SetFocused rather than waiting for one.
 func (a *App) reapplyTheme() {
 	reloadPalette()
 	uitheme.ApplyToTviewStyles()

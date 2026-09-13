@@ -91,7 +91,7 @@ func (a *App) runLocateFlashPhase(seq, i int) {
 // rebuilt from the live colorSelected* vars rather than saved, so a theme
 // reload (SIGUSR1) landing mid-flash leaves the row in the *new* theme's
 // selection color instead of a stale snapshot. A tree node's selected
-// style isn't derived from this package's palette at all -- tview builds
+// style isn't derived from the palette at all -- tview builds
 // it per node at construction from tview.Styles -- so there's nothing to
 // rebuild it from, and the saved original is restored verbatim.
 func (a *App) setLocateFlash(on bool) {

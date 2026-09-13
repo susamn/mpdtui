@@ -13,8 +13,8 @@ import (
 // built-in defaults before any test runs -- without this, the
 // color-literal assertions below (StateGlyphColor, VolumeColor,
 // FlagText) would depend on whatever Omarchy theme happens to be live
-// on the machine running the tests (see internal/ui/theme.go's palette
-// var), rather than being deterministic.
+// on the machine running the tests (see internal/uitheme's palette),
+// rather than being deterministic.
 func TestMain(m *testing.M) {
 	ui.ResetPaletteForTest()
 	os.Exit(m.Run())

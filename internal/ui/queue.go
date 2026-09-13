@@ -674,7 +674,7 @@ const queueGutterStarMin = 4
 // apart by shade rather than by a second glyph and the gutter reads as a
 // condensed version of that column.
 //
-// Both are derived from one palette field (see theme.go's recedeFrom),
+// Both are derived from one palette field (see uitheme.RecedeFrom),
 // deliberately: the first version of this used the theme's "yellow" and
 // "bright_yellow" for the two tiers, and on most real themes those are
 // the same color or near enough that the tiers were indistinguishable.
