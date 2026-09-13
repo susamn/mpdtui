@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"mpdtui/internal/textutil"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -133,8 +134,8 @@ func fuzzyScore(query, candidate string) (score int, ok bool) {
 	if query == "" {
 		return 0, true
 	}
-	q := []rune(foldSearch(query))
-	c := []rune(foldSearch(candidate))
+	q := []rune(textutil.FoldSearch(query))
+	c := []rune(textutil.FoldSearch(candidate))
 
 	qi := 0
 	first, last := -1, -1

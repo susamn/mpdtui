@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode"
+	"mpdtui/internal/textutil"
 
 	_ "modernc.org/sqlite"
 )
@@ -267,13 +267,7 @@ func normalizePath(file string) string {
 
 // normalizeSegment folds s to just its letters and digits, lowercased.
 func normalizeSegment(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			b.WriteRune(unicode.ToLower(r))
-		}
-	}
-	return b.String()
+	return textutil.NormalizeSegment(s)
 }
 
 // upsertTrack inserts a bare row for file if one doesn't already exist

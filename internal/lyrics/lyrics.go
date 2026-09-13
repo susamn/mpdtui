@@ -19,8 +19,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"mpdtui/internal/textutil"
 	"time"
-	"unicode"
 )
 
 // Dir returns the local directory that would contain file's lyrics, or
@@ -278,11 +278,5 @@ func CurrentLineIndex(lines []LyricLine, elapsed time.Duration) int {
 // its lyrics sidecar still match despite differing punctuation, spacing,
 // or case.
 func Normalize(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			b.WriteRune(unicode.ToLower(r))
-		}
-	}
-	return b.String()
+	return textutil.NormalizeSegment(s)
 }
