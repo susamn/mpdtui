@@ -88,16 +88,16 @@ type App struct {
 	playlists *playlistsPanel
 	queue     *queuePanel
 
-	nowPlaying   *tview.TextView
-	hintBar      *tview.TextView
-	albumArt     *albumArtPanel
-	trackInfo    *trackInfoCard
+	nowPlaying     *tview.TextView
+	hintBar        *tview.TextView
+	albumArt       *albumArtPanel
+	trackInfo      *trackInfoCard
 	lyricsViewer   *lyricsViewer
 	markPicker     *catalogPicker
 	tagPicker      *catalogPicker
 	bookmarkPicker *bookmarkPicker
 	settings       *settingsView
-	visualizer   *visualizerPanel
+	visualizer     *visualizerPanel
 
 	// currentSong is refreshNowPlaying's own last-fetched CurrentSong,
 	// kept around so openLyricsViewer can show it without a redundant
