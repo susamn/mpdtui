@@ -128,6 +128,7 @@ func main() {
 			DBFilePath:           config.DBFile(),
 			LyricsIndexPath:      config.LyricsIndexFile(),
 			ThemeFile:            config.LoadThemeFile(),
+			VisualizerFIFO:       config.LoadVisualizerFIFO(),
 		}
 		err = ui.Run(client, config.LoadMusicDir(), metaDB, summary)
 	}

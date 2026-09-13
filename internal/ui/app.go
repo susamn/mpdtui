@@ -281,7 +281,7 @@ func (a *App) build() {
 	a.tagPicker = newCatalogPicker(a, tagCatalog{})
 	a.bookmarkPicker = newBookmarkPicker(a)
 	a.settings = newSettingsView(a)
-	a.visualizer = visualizer.New()
+	a.visualizer = visualizer.New(a.cfg.VisualizerFIFO)
 
 	a.hintBar = tview.NewTextView().SetDynamicColors(true)
 

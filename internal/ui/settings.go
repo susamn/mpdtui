@@ -34,6 +34,14 @@ type ConfigSummary struct {
 	// misconfigured override (a typo'd path, e.g.) is visible without
 	// needing to know that theme_file is a settings key at all.
 	ThemeFile string
+
+	// VisualizerFIFO is visualizer_fifo's resolved value (see
+	// internal/config.LoadVisualizerFIFO) -- the named pipe the
+	// visualizer reads live audio from, "" meaning the feature is
+	// switched off and the visualizations run on playback state alone.
+	// Passed through for the same reason as ThemeFile: internal/ui
+	// takes settled values, never internal/config itself.
+	VisualizerFIFO string
 }
 
 const (

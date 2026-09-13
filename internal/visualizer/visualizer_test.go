@@ -167,7 +167,7 @@ func TestNamesReportsRegistryOrder(t *testing.T) {
 // the registry has to fail this test rather than quietly change what
 // users see.
 func TestNewStartsOnBalance(t *testing.T) {
-	p := New()
+	p := New("")
 	defer p.Close()
 
 	if got := p.CurrentName(); got != "Balance" {

@@ -7,7 +7,6 @@ import (
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/audio"
-	"mpdtui/internal/config"
 	"mpdtui/internal/mpdclient"
 )
 
@@ -82,11 +81,17 @@ type Panel struct {
 	spectrum *audio.Spectrum
 }
 
-func New() *Panel {
+// New builds the panel over fifoPath, the named pipe MPD's "fifo" audio
+// output writes decoded PCM to (see internal/audio). It is passed in
+// already resolved rather than read from internal/config here: the UI
+// layer takes plain settled values, and cmd/mpdtui owns config (see
+// DEPENDENCY.md). "" means no live audio -- every visualization falls
+// back to playback state alone, which it must handle regardless.
+func New(fifoPath string) *Panel {
 	v := tview.NewTextView().SetDynamicColors(true)
 	v.SetBorder(true).SetTitleAlign(tview.AlignRight)
 
-	spectrum := audio.NewSpectrum(config.LoadVisualizerFIFO())
+	spectrum := audio.NewSpectrum(fifoPath)
 	spectrum.Start()
 
 	p := &Panel{
