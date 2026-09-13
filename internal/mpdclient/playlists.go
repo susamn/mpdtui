@@ -3,7 +3,6 @@ package mpdclient
 import (
 	"errors"
 	"sort"
-	"time"
 
 	"github.com/fhs/gompd/v2/mpd"
 )
@@ -20,18 +19,11 @@ func (c *Client) Playlists() ([]Playlist, error) {
 	}
 	pls := make([]Playlist, len(list))
 	for i, a := range list {
-		pls[i] = Playlist{Name: a["playlist"], LastModified: parsePlaylistLastModified(a)}
+		pls[i] = Playlist{Name: a["playlist"], LastModified: ParseLastModified(a)}
 	}
 	return pls, nil
 }
 
-// parsePlaylistLastModified reads listplaylists' "Last-Modified" field
-// (capitalized, unlike lsinfo's lowercased "last-modified" -- see
-// parseDirEntries in directory.go for that one; gompd is inconsistent
-// about casing between commands).
-func parsePlaylistLastModified(a mpd.Attrs) time.Time {
-	return parseTimestamp(a, "Last-Modified")
-}
 
 // PlaylistTracks returns the tracks stored in playlist name.
 func (c *Client) PlaylistTracks(name string) ([]Song, error) {

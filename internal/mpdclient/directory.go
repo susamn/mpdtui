@@ -53,11 +53,11 @@ func parseDirEntries(attrs []mpd.Attrs) []DirEntry {
 	for _, a := range attrs {
 		switch {
 		case a["directory"] != "":
-			entries = append(entries, DirEntry{Type: EntryDirectory, Path: a["directory"], LastModified: parseLibraryLastModified(a)})
+			entries = append(entries, DirEntry{Type: EntryDirectory, Path: a["directory"], LastModified: ParseLastModified(a)})
 		case a["playlist"] != "":
-			entries = append(entries, DirEntry{Type: EntryPlaylist, Path: a["playlist"], LastModified: parseLibraryLastModified(a)})
+			entries = append(entries, DirEntry{Type: EntryPlaylist, Path: a["playlist"], LastModified: ParseLastModified(a)})
 		case a["file"] != "":
-			entries = append(entries, DirEntry{Type: EntryFile, Path: a["file"], Song: parseLibrarySong(a), LastModified: parseLibraryLastModified(a)})
+			entries = append(entries, DirEntry{Type: EntryFile, Path: a["file"], Song: parseLibrarySong(a), LastModified: ParseLastModified(a)})
 		}
 	}
 	return entries
@@ -79,13 +79,6 @@ func parseLibrarySong(a mpd.Attrs) Song {
 	}
 }
 
-// parseLibraryLastModified reads lsinfo's lowercased "last-modified" field
-// (gompd's ListInfo lowercases every key -- unlike ListPlaylists, which
-// preserves "Last-Modified" capitalized; see parsePlaylistLastModified in
-// playlists.go).
-func parseLibraryLastModified(a mpd.Attrs) time.Time {
-	return parseTimestamp(a, "last-modified")
-}
 
 func parseLibraryDuration(a mpd.Attrs) time.Duration {
 	if v, ok := a["duration"]; ok {

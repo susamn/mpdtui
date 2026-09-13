@@ -156,3 +156,12 @@ func parseSongs(list []mpd.Attrs) []Song {
 	}
 	return songs
 }
+
+// ParseLastModified reads "last-modified" (or "Last-Modified") from a.
+// Upstream gompd is inconsistent: ListInfo lowercases keys, ListPlaylists preserves them.
+func ParseLastModified(a mpd.Attrs) time.Time {
+	if _, ok := a["Last-Modified"]; ok {
+		return parseTimestamp(a, "Last-Modified")
+	}
+	return parseTimestamp(a, "last-modified")
+}
