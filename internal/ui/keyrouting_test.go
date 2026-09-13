@@ -1,10 +1,12 @@
 package ui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
 )
@@ -291,3 +293,140 @@ func TestClearAllSearchesKey(t *testing.T) {
 		t.Errorf("hint bar = %q, want it to report there was nothing to clear", got)
 	}
 }
+
+// TestEveryGlobalKeyIsDispatched presses each remaining global binding
+// through globalInputCapture, which is the only path that proves the
+// key is actually wired to its handler rather than the handler merely
+// working when called directly.
+func TestEveryGlobalKeyIsDispatched(t *testing.T) {
+	cases := []struct {
+		key    rune
+		focus  func(*App) tview.Primitive
+		expect func(*testing.T, *App, *fakeMPD)
+	}{
+		{
+			key:   '/',
+			focus: func(a *App) tview.Primitive { return a.playlists.table },
+			expect: func(t *testing.T, a *App, _ *fakeMPD) {
+				if a.mode != modeOverlay {
+					t.Error("'/' did not open a search")
+				}
+			},
+		},
+		{
+			key:   'i',
+			focus: func(a *App) tview.Primitive { return a.queue.table },
+			expect: func(t *testing.T, a *App, _ *fakeMPD) {
+				if a.tv.GetFocus() != a.trackInfo {
+					t.Errorf("'i' focused %T, want the Track Info card", a.tv.GetFocus())
+				}
+			},
+		},
+		{
+			key:   'y',
+			focus: func(a *App) tview.Primitive { return a.queue.table },
+			expect: func(t *testing.T, a *App, _ *fakeMPD) {
+				if a.tv.GetFocus() != a.lyricsViewer {
+					t.Errorf("'y' focused %T, want the lyrics viewer", a.tv.GetFocus())
+				}
+			},
+		},
+		{
+			key:   'm',
+			focus: func(a *App) tview.Primitive { return a.queue.table },
+			expect: func(t *testing.T, a *App, _ *fakeMPD) {
+				// No metadata database here, so it explains itself.
+				if got := a.hintBar.GetText(true); !strings.Contains(got, "track metadata") {
+					t.Errorf("hint bar = %q, want the metadata explanation", got)
+				}
+			},
+		},
+		{
+			key:   'D',
+			focus: func(a *App) tview.Primitive { return a.queue.table },
+			expect: func(t *testing.T, a *App, _ *fakeMPD) {
+				if a.pages.GetPage("confirm") == nil {
+					t.Error("'D' did not ask before clearing the queue")
+				}
+			},
+		},
+		{
+			key:   'S',
+			focus: func(a *App) tview.Primitive { return a.playlists.table },
+			expect: func(t *testing.T, a *App, _ *fakeMPD) {
+				if a.mode != modeOverlay {
+					t.Error("'S' did not open the save prompt")
+				}
+			},
+		},
+		{
+			key:   'd',
+			focus: func(a *App) tview.Primitive { return a.queue.table },
+			expect: func(t *testing.T, a *App, f *fakeMPD) {
+				if !f.did("remove:10") {
+					t.Errorf("did %v, want 'd' to remove the selected track", f.commands())
+				}
+			},
+		},
+		{
+			key:   'K',
+			focus: func(a *App) tview.Primitive { return a.queue.table },
+			expect: func(t *testing.T, a *App, f *fakeMPD) {
+				// Row 0 is already at the top, so this is a no-op that
+				// still proves the key routed to handleQueueMove.
+				if got := f.commands(); len(got) != 0 {
+					t.Errorf("did %v moving the top track up, want nothing", got)
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(string(tc.key), func(t *testing.T) {
+			f := &fakeMPD{}
+			a := newFakeApp(t, f)
+			setPlaylistsForTest(a.playlists, []string{"Road Trip"})
+			seedQueue(a, f,
+				mpdclient.Song{ID: 10, Pos: 0, Title: "One", File: "a/1.mp3"},
+				mpdclient.Song{ID: 11, Pos: 1, Title: "Two", File: "a/2.mp3"},
+			)
+			a.tv.SetFocus(tc.focus(a))
+			a.queue.table.Select(queueHeaderRows, 0)
+			a.playlists.table.Select(1, 0)
+
+			if got := a.globalInputCapture(runeKey(tc.key)); got != nil {
+				t.Fatalf("%q was not consumed", tc.key)
+			}
+			tc.expect(t, a, f)
+		})
+	}
+}
+
+// TestPlaybackOptionFailuresSurface covers the error arm each of the
+// four option toggles shares: they read the status first, then set the
+// opposite, and either step can fail.
+func TestPlaybackOptionFailuresSurface(t *testing.T) {
+	for _, key := range []rune{'z', 'x', 'c', 'Z'} {
+		t.Run(string(key), func(t *testing.T) {
+			// Status succeeds, the set fails.
+			a := newFakeAppWith(t, &failAfterStatus{})
+
+			a.handleTransportKey(key)
+
+			if got := a.hintBar.GetText(true); !strings.Contains(got, "set failed") {
+				t.Errorf("hint bar = %q, want the failed set reported", got)
+			}
+		})
+	}
+}
+
+// failAfterStatus answers Status but fails every option write, which is
+// the arm a plain failing fake cannot reach (it fails Status first).
+type failAfterStatus struct{ fakeMPD }
+
+func (f *failAfterStatus) SetRandom(bool) error  { return errOptionSet }
+func (f *failAfterStatus) SetRepeat(bool) error  { return errOptionSet }
+func (f *failAfterStatus) SetSingle(bool) error  { return errOptionSet }
+func (f *failAfterStatus) SetConsume(bool) error { return errOptionSet }
+
+var errOptionSet = errors.New("set failed")

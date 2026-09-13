@@ -20,6 +20,14 @@ import (
 // without the destructive ones acting on real playback.
 func newFakeApp(t *testing.T, f *fakeMPD) *App {
 	t.Helper()
+	return newFakeAppWith(t, f)
+}
+
+// newFakeAppWith is newFakeApp for a stand-in other than *fakeMPD --
+// used where a test needs to fail one specific command rather than all
+// of them.
+func newFakeAppWith(t *testing.T, f mpdConn) *App {
+	t.Helper()
 	a := &App{tv: tview.NewApplication(), client: f, playCountedSongID: -1}
 	// Apply background results on the calling goroutine: nothing drains
 	// a tview application's update queue unless Run() is going. Set
