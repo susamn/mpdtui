@@ -23,13 +23,14 @@ cmd/mpdtui  -> config lyricsline metadata mini mpdclient picker trackinfo ui ver
 
   ENTRY POINTS (one per mode, siblings, none imports another)
     ui         -> albumart lyrics lyricsindex metadata mpdclient
-                  textutil uitheme version visualizer
+                  settingsview textutil uitheme version visualizer
     mini       -> metadata mpdclient theme
     picker     -> mpdclient theme
 
-  UI COMPONENTS (own a panel, used only by ui)
-    albumart   -> mpdclient
-    visualizer -> audio mpdclient
+  UI COMPONENTS (own a panel or overlay, used only by ui)
+    albumart     -> mpdclient
+    visualizer   -> audio mpdclient
+    settingsview -> metadata uitheme
 
   RENDERING
     uitheme    -> theme        (palette -> tcell colors, for tview front ends)
@@ -130,6 +131,11 @@ signal to move it down to a leaf (rule 3) instead.
   two entry points need is a leaf.
 - A panel pulled out of `ui` takes its colors from `uitheme`, not from
   constructor arguments -- they change under it on a theme reload.
+- Everything else it needs is a `Deps` struct of plain values and
+  callbacks, never the `App`. `settingsview.Deps` is the worked example:
+  six fields, each documented with why the view needs it. If a panel
+  cannot name what it needs, that is the finding, not a reason to pass
+  the `App`.
 - Take dependencies as constructor arguments. A package that reads its
   own config or opens its own database cannot be tested without one.
 - Check the graph still has no cycles, and that rule 1 still holds:
