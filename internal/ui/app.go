@@ -88,16 +88,16 @@ type App struct {
 	playlists *playlistsPanel
 	queue     *queuePanel
 
-	nowPlaying   *tview.TextView
-	hintBar      *tview.TextView
-	albumArt     *albumArtPanel
-	trackInfo    *trackInfoCard
+	nowPlaying     *tview.TextView
+	hintBar        *tview.TextView
+	albumArt       *albumArtPanel
+	trackInfo      *trackInfoCard
 	lyricsViewer   *lyricsViewer
 	markPicker     *catalogPicker
 	tagPicker      *catalogPicker
 	bookmarkPicker *bookmarkPicker
 	settings       *settingsView
-	visualizer   *visualizerPanel
+	visualizer     *visualizerPanel
 
 	// currentSong is refreshNowPlaying's own last-fetched CurrentSong,
 	// kept around so openLyricsViewer can show it without a redundant
@@ -261,7 +261,12 @@ func (a *App) build() {
 	wireFocusColors(a.queue.table)
 	wireFocusColors(a.queue.search)
 
-	a.nowPlaying = tview.NewTextView().SetDynamicColors(true)
+	// Wrap off: the panel gets exactly 2 inner rows (see the row
+	// height below) and renders exactly 2 lines, so a long title must
+	// be truncated to the panel's width (renderNowPlaying does that)
+	// rather than wrapped -- a wrapped line 1 pushed line 2 out of
+	// view entirely on narrow terminals.
+	a.nowPlaying = tview.NewTextView().SetDynamicColors(true).SetWrap(false)
 	a.nowPlaying.SetBorder(true).SetTitle(" Now Playing ").SetTitleColor(nowPlayingBorderColor)
 	a.nowPlaying.SetBorderColor(nowPlayingBorderColor)
 
@@ -776,6 +781,15 @@ func (a *App) updateHintBar() {
 		panelHints = []hint{{"Enter", "play"}, {"d", "remove"}, {"J/K", "move"}}
 		if a.metaDB != nil {
 			panelHints = append(panelHints, hint{"1-5", "rate"}, hint{"m", "mark"})
+		}
+	case a.trackInfo:
+		// j/k means two different things on this card depending on
+		// whether it is expanded (scroll the overflowing sections) or
+		// collapsed (walk the Queue), so the hint has to say which.
+		if a.trackInfo.expanded {
+			panelHints = []hint{{"j/k", "scroll"}, {"Tab", "collapse"}, {"i/Esc", "close"}}
+		} else {
+			panelHints = []hint{{"j/k", "navigate"}, {"Tab", "expand"}, {"i/Esc", "close"}}
 		}
 	}
 

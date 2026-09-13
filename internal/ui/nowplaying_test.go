@@ -158,3 +158,141 @@ func TestRenderNowPlayingSyncsExternalPlayCountChangeToQueue(t *testing.T) {
 		t.Errorf("queue playcount cell after external increment = %q, want %q", got, "1")
 	}
 }
+
+// TestNowPlayingLine1LayoutUnknownWidth covers the not-yet-drawn case
+// (GetInnerRect returns 0): full bar, no truncation budget.
+func TestNowPlayingLine1LayoutUnknownWidth(t *testing.T) {
+	bar, track := nowPlayingLine1Layout(0, 9)
+	if bar != nowPlayingBarWidth || track != 0 {
+		t.Errorf("layout(0, 9) = (%d, %d), want (%d, 0)", bar, track, nowPlayingBarWidth)
+	}
+}
+
+func TestNowPlayingLine1LayoutFitsItsWidth(t *testing.T) {
+	const times = 9 // "1:23/4:56"
+	for _, width := range []int{20, 30, 45, 60, 80, 120} {
+		bar, track := nowPlayingLine1Layout(width, times)
+		if bar < nowPlayingBarMinWidth || bar > nowPlayingBarWidth {
+			t.Errorf("width %d: bar = %d, want within [%d, %d]", width, bar, nowPlayingBarMinWidth, nowPlayingBarWidth)
+		}
+		if track < 1 {
+			t.Errorf("width %d: track budget = %d, want at least 1", width, track)
+		}
+		// The line must never be wider than the panel unless even the
+		// two minimums cannot fit (the clipped, last-resort case).
+		total := nowPlayingLine1Fixed + times + bar + track
+		if total > width && bar != nowPlayingBarMinWidth {
+			t.Errorf("width %d: line needs %d cells, want it to fit", width, total)
+		}
+	}
+}
+
+// TestNowPlayingLine1LayoutShrinksBarBeforeTrack: the bar is what gives
+// first, and only down to its minimum.
+func TestNowPlayingLine1LayoutShrinksBarBeforeTrack(t *testing.T) {
+	wide, _ := nowPlayingLine1Layout(120, 9)
+	if wide != nowPlayingBarWidth {
+		t.Errorf("wide terminal: bar = %d, want the full %d", wide, nowPlayingBarWidth)
+	}
+	narrow, track := nowPlayingLine1Layout(40, 9)
+	if narrow >= nowPlayingBarWidth {
+		t.Errorf("narrow terminal: bar = %d, want it shrunk below %d", narrow, nowPlayingBarWidth)
+	}
+	if narrow < nowPlayingBarMinWidth {
+		t.Errorf("narrow terminal: bar = %d, want at least %d", narrow, nowPlayingBarMinWidth)
+	}
+	if track < nowPlayingTrackMinWidth {
+		t.Errorf("narrow terminal: track budget = %d, want the bar to pay down to %d first", track, nowPlayingTrackMinWidth)
+	}
+}
+
+// TestNowPlayingTrackTextWidthTruncatesWithinBudget checks the visible
+// text (tags stripped, as tview renders it) stays within the budget.
+func TestNowPlayingTrackTextWidthTruncatesWithinBudget(t *testing.T) {
+	song := mpdclient.Song{
+		Title:  "A Very Long Track Title That Will Not Fit Anywhere",
+		Artist: "An Equally Long Artist Name Indeed",
+	}
+	for _, max := range []int{8, 12, 20, 30, 40} {
+		got := nowPlayingTrackTextWidth(song, max)
+		plain := stripStyleTags(got)
+		if n := len([]rune(plain)); n > max {
+			t.Errorf("max %d: visible text %q is %d cells, want at most %d", max, plain, n, max)
+		}
+	}
+}
+
+// TestNowPlayingTrackTextWidthKeepsTagsValid: truncation happens on the
+// plain text, so no style tag is ever cut in half.
+func TestNowPlayingTrackTextWidthKeepsTagsValid(t *testing.T) {
+	got := nowPlayingTrackTextWidth(mpdclient.Song{Title: "Some Long Title Here", Artist: "Some Long Artist"}, 20)
+	if strings.Count(got, "[") != strings.Count(got, "]") {
+		t.Errorf("%q has unbalanced style-tag brackets", got)
+	}
+	if !strings.HasSuffix(got, "[-:-:-]") {
+		t.Errorf("%q, want it to still end with a closing style tag", got)
+	}
+}
+
+// TestNowPlayingTrackTextWidthDropsArtistWhenVeryNarrow: below the
+// track minimum there is no room for both halves, so only the title
+// (truncated) survives -- no " - " with two stubs around it.
+func TestNowPlayingTrackTextWidthDropsArtistWhenVeryNarrow(t *testing.T) {
+	got := nowPlayingTrackTextWidth(mpdclient.Song{Title: "Vaat Disu De", Artist: "Ajay-Atul"}, 8)
+	if strings.Contains(got, "Ajay") {
+		t.Errorf("%q, want the artist dropped at a budget below %d", got, nowPlayingTrackMinWidth)
+	}
+	if plain := stripStyleTags(got); len([]rune(plain)) > 8 {
+		t.Errorf("visible text %q, want at most 8 cells", plain)
+	}
+}
+
+// TestNowPlayingTrackTextWidthGivesSlackToTheLongerHalf: a short title
+// must not leave its share of the budget unused while the artist is
+// truncated.
+func TestNowPlayingTrackTextWidthGivesSlackToTheLongerHalf(t *testing.T) {
+	got := stripStyleTags(nowPlayingTrackTextWidth(mpdclient.Song{Title: "Om", Artist: "A Rather Long Artist Name"}, 23))
+	if !strings.HasPrefix(got, "Om - ") {
+		t.Errorf("got %q, want the short title kept whole", got)
+	}
+	if len([]rune(got)) > 23 {
+		t.Errorf("got %q (%d cells), want at most 23", got, len([]rune(got)))
+	}
+	// 23 - 3 (" - ") - 2 ("Om") == 18 cells for the artist, well past
+	// its own 3/5 share of 12.
+	if !strings.HasPrefix(got, "Om - A Rather Long") {
+		t.Errorf("got %q, want the title's unused share handed to the artist", got)
+	}
+}
+
+// TestNowPlayingTrackTextWidthUnboundedMatchesUntruncated pins the
+// max <= 0 case to the original, untruncated rendering.
+func TestNowPlayingTrackTextWidthUnboundedMatchesUntruncated(t *testing.T) {
+	song := mpdclient.Song{Title: "Vaat Disu De", Artist: "Ajay-Atul"}
+	if got, want := nowPlayingTrackTextWidth(song, 0), nowPlayingTrackText(song); got != want {
+		t.Errorf("width 0 = %q, want %q", got, want)
+	}
+}
+
+// stripStyleTags removes tview style tags ("[green::b]", "[-:-:-]")
+// from s, turning an escaped "[[" back into a literal "[" -- what the
+// terminal actually shows, which is what the width budgets are about.
+func stripStyleTags(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] == '[' {
+			if i+1 < len(s) && s[i+1] == '[' {
+				b.WriteByte('[')
+				i += 2
+				continue
+			}
+			if j := strings.IndexByte(s[i:], ']'); j >= 0 {
+				i += j + 1
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
+}

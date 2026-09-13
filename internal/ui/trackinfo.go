@@ -27,7 +27,8 @@ import (
 // for the Kitty image, which is what makes this track a terminal resize
 // without any extra wiring.
 type trackInfoCard struct {
-	*tview.Flex
+	*tview.Box
+	flex     *tview.Flex
 	identity *tview.TextView
 	// marks, tags, and bookmarks list the track's marks, tags, and bookmarks.
 	// Lists rather than rows in the metadata table, because a track can
@@ -67,6 +68,13 @@ type trackInfoCard struct {
 	bookmarkRows int
 	playlistRows int
 
+	// inspectSong is the track currently being inspected while the card is
+	// open, navigated via j/k. When nil, renderTrackInfo falls back to
+	// targetSong (playing track or selection).
+	inspectSong *mpdclient.Song
+
+	scrollOffset int
+
 	app *App
 }
 
@@ -75,7 +83,7 @@ func newTrackInfoCard(app *App) *trackInfoCard {
 	identity.SetBorderPadding(1, 0, 1, 0)
 
 	flex := tview.NewFlex().SetDirection(tview.FlexRow)
-	flex.SetBorder(true).SetTitle(" Track Info ")
+	box := tview.NewBox().SetBorder(true).SetTitle(" Track Info ")
 
 	marks := tview.NewTextView().SetDynamicColors(true)
 	marks.SetBorderPadding(1, 0, 1, 0)
@@ -91,7 +99,7 @@ func newTrackInfoCard(app *App) *trackInfoCard {
 	bookmarks := tview.NewTextView().SetDynamicColors(true)
 	bookmarks.SetBorderPadding(1, 0, 1, 0)
 
-	c := &trackInfoCard{Flex: flex, identity: identity, marks: marks, tags: tags, bookmarks: bookmarks, playlists: playlists, app: app}
+	c := &trackInfoCard{Box: box, flex: flex, identity: identity, marks: marks, tags: tags, bookmarks: bookmarks, playlists: playlists, app: app}
 
 	// Fixed row counts, not proportions: every section here has a known
 	// maximum number of lines, so stretching them to fill the card just
@@ -117,24 +125,19 @@ func newTrackInfoCard(app *App) *trackInfoCard {
 	return c
 }
 
-// height is the card's natural height: its border plus whichever
-// sections it actually has, at their current sizes. Computed rather than
-// fixed because the metadata table is only present when track_metadata
-// is active (a card sized for it regardless would sit with a hole in the
-// middle for everyone who has not turned that on), and because the
-// playlist section grows when the card is expanded.
+// height is the card's on-screen height: its border plus every section
+// at its *collapsed* size. Deliberately constant for a given
+// configuration -- expanding with Tab does not resize the card, it
+// overflows inside it and scrolls (see contentHeight and Draw), so the
+// card never jumps around under the cursor as sections grow.
+//
+// Still computed rather than a literal because the metadata table (and
+// the marks/tags/bookmarks sections that come with it) only exists when
+// track_metadata is active: a card sized for it regardless would sit
+// with a hole in the middle for everyone who has not turned that on.
+//
+// Only a Queue panel too short to hold this clamps it (see cardRect).
 func (c *trackInfoCard) height() int {
-	h := trackInfoCardBorderLines + trackInfoIdentityLines + c.playlistRows
-	if c.meta != nil {
-		h += trackInfoMetaLines + c.markRows + c.tagRows + c.bookmarkRows
-	}
-	return h
-}
-
-// fixedHeight is the card's height with every section at its collapsed
-// size -- what the card occupies before Tab is ever pressed, and the
-// baseline expandableRows measures spare quadrant space against.
-func (c *trackInfoCard) fixedHeight() int {
 	h := trackInfoCardBorderLines + trackInfoIdentityLines + trackInfoPlaylistSectionLines
 	if c.meta != nil {
 		h += trackInfoMetaLines + trackInfoMarkSectionLines + trackInfoTagSectionLines + trackInfoBookmarkSectionLines
@@ -147,25 +150,47 @@ func (c *trackInfoCard) fixedHeight() int {
 // the card resizes to match.
 func (c *trackInfoCard) toggleExpanded() {
 	c.expanded = !c.expanded
+	if !c.expanded {
+		c.scrollOffset = 0
+	}
 	c.app.renderTrackInfo()
+	// j/k changes meaning with this flag -- see updateHintBar.
+	c.app.updateHintBar()
 }
 
-// expandableRows is how many extra rows a section may grow into when
-// expanded: whatever the Queue panel has spare beyond the card's
-// collapsed size, since an expanded card may grow upwards into the rest
-// of the panel (see cardRect).
-//
-// Expanding is bounded rather than unbounded because the card is clamped
-// to the panel -- growing past it would not show more, it would silently
-// clip the bottom of the list, which is a worse answer than saying how
-// many were left out.
-func (c *trackInfoCard) expandableRows() int {
-	_, _, _, ph := c.app.queue.table.GetRect()
-	spare := ph - c.fixedHeight()
-	if spare < 0 {
-		return 0
+// contentHeight is how many rows the sections currently want, excluding
+// the border -- the counterpart to height(), which is what they are
+// actually given. Collapsed the two roughly agree; expanded this grows
+// past the card and the difference is exactly what Draw scrolls through.
+func (c *trackInfoCard) contentHeight() int {
+	h := trackInfoIdentityLines + c.playlistRows
+	if c.meta != nil {
+		h += trackInfoMetaLines + c.markRows + c.tagRows + c.bookmarkRows
 	}
-	return spare
+	return h
+}
+
+// maxScroll is the furthest scrollOffset that still shows content: the
+// overflow past innerH rows, or 0 when everything already fits.
+func (c *trackInfoCard) maxScroll(innerH int) int {
+	if over := c.contentHeight() - innerH; over > 0 {
+		return over
+	}
+	return 0
+}
+
+// clampScroll pins scrollOffset into [0, maxScroll]. Called both from
+// Draw (which knows the real inner height) and from handleNav, so the
+// field never holds a nonsense value between a keypress and the next
+// frame -- j held down at the bottom of the list would otherwise run
+// scrollOffset up without bound until Draw pulled it back.
+func (c *trackInfoCard) clampScroll(innerH int) {
+	if max := c.maxScroll(innerH); c.scrollOffset > max {
+		c.scrollOffset = max
+	}
+	if c.scrollOffset < 0 {
+		c.scrollOffset = 0
+	}
 }
 
 // quadrantRect returns the bottom-right quarter of the rect (x, y, w, h):
@@ -176,25 +201,21 @@ func quadrantRect(x, y, w, h int) (int, int, int, int) {
 	return x + w - qw, y + h - qh, qw, qh
 }
 
-// trackInfoCardWidth/trackInfoCardHeight are the floating card's fixed
-// footprint: just enough to comfortably fit its own content (up to 8
-// identity lines including the top padding row, 4 metadata rows, 2
-// border rows = 14, plus a little slack) without clipping, regardless of
-// how big the Queue panel happens to be -- explicit correction after an
+// trackInfoCardWidth is the floating card's fixed width: just enough to
+// comfortably fit its own content without clipping, regardless of how
+// big the Queue panel happens to be -- explicit correction after an
 // earlier version sized the card as a fraction of the Queue panel's own
 // quadrant, which made it balloon to dominate most of the screen on a
 // normal-sized terminal. A fixed, compact size reads as "a small card
 // floating in the corner" the way it originally did, rather than scaling
-// up with the window.
-//
-// The card grew taller when the playlist section was added. That does
-// not move it: cardRect anchors the card at the quadrant's top-left
-// corner, so extra height extends downwards, and the clamp there keeps
-// it inside the quadrant -- which ends exactly where the Queue panel
-// does. The card's position on screen is unchanged; only its bottom edge
-// moved. Its height is no longer a constant either, since it depends on
-// which sections are present -- see trackInfoCard.height.
+// up with the window. Its height is the same idea, but depends on which
+// sections are present -- see trackInfoCard.height.
 const (
+	// trackInfoPageName is the card's page name on App.pages. Named
+	// rather than repeated as a literal because inspectedSong asks
+	// whether that page is up to decide whether the card is still open.
+	trackInfoPageName = "track-info"
+
 	trackInfoCardWidth = 46
 
 	// Section heights, in rows. identity is its one padding row plus up
@@ -227,26 +248,30 @@ const (
 // cardRect returns where the floating card sits over the Queue panel
 // (px, py, pw, ph) for a card wanting want rows.
 //
-// Up to the bottom-right quadrant's own height the card sits at that
-// quadrant's top-left corner, which is what keeps its position fixed as
-// sections are added: the extra rows extend downwards towards the
-// panel's bottom edge.
+// Horizontally it takes the panel's right half (quadrantRect's x), which
+// is what keeps it in the same corner whatever its height. Vertically it
+// is anchored 40% down the panel -- pulled up from the old bottom
+// quadrant, which no longer had room once metadata and playlists were
+// added -- and slides back up towards the panel's top only as far as it
+// must to fit.
 //
-// Past that height -- only reachable by expanding a section with Tab --
-// the quadrant has no more room below, so the card keeps its bottom edge
-// where it is and grows upwards instead, bounded by the panel's own top.
-// Clamping it to the quadrant instead would make expanding almost
-// pointless: on an ordinary terminal the collapsed card already nearly
-// fills the quadrant, so Tab would buy a row or two. Growing upwards
-// keeps the card in the same corner, covering more of the Queue it
-// already floats over.
+// px/py/pw/ph are the panel's *inner* rect (see positionOverQueue), so
+// every clamp here keeps the card off the panel's own border rather than
+// flush against it. want is clamped to ph, so on a panel too short for
+// the card the card is what gives, never the panel.
 func cardRect(px, py, pw, ph, want int) (int, int, int, int) {
-	qx, qy, qw, qh := quadrantRect(px, py, pw, ph)
+	// Only the right half matters here; the quadrant's own y/height are
+	// what the 40% anchor below replaced.
+	qx, _, qw, _ := quadrantRect(px, py, pw, ph)
 
 	cw := trackInfoCardWidth
 	if cw > qw {
 		cw = qw
 	}
+	if cw < 0 {
+		cw = 0
+	}
+
 	ch := want
 	if ch > ph {
 		ch = ph
@@ -255,30 +280,84 @@ func cardRect(px, py, pw, ph, want int) (int, int, int, int) {
 		ch = 0
 	}
 
-	cy := qy
-	if ch > qh {
-		cy = qy + qh - ch
-		if cy < py {
-			cy = py
-		}
+	cy := py + ph*40/100
+	// Spilling past the panel's bottom: slide the anchor up into the
+	// space above rather than overflowing (or being cut off).
+	if cy+ch > py+ph {
+		cy = py + ph - ch
+	}
+	if cy < py {
+		cy = py
 	}
 	return qx, cy, cw, ch
 }
 
-// positionOverQueue sets the card's own rect to float inside the
-// bottom-right quadrant of the Queue table's current rect. Split out from
-// Draw so the positioning math is testable without a real tcell.Screen.
+// positionOverQueue sets the card's own rect to float inside the Queue
+// table's current rect. Split out from Draw so the positioning math is
+// testable without a real tcell.Screen.
+//
+// GetInnerRect, not GetRect: the outer rect includes the Queue panel's
+// own border rows and columns, so clamping against it let the card's
+// last row land exactly on the panel's bottom border and paint over it
+// (and, on a narrow panel, its right border too). The inner rect is the
+// panel's interior, which is the region the card is actually meant to
+// float within. Valid before the first draw as well -- Box.GetInnerRect
+// falls back to the border-derived rect until the Queue's own
+// SetDrawFunc has run, and both agree here.
 func (c *trackInfoCard) positionOverQueue() {
-	x, y, w, h := c.app.queue.table.GetRect()
+	x, y, w, h := c.app.queue.table.GetInnerRect()
 	c.SetRect(cardRect(x, y, w, h, c.height()))
 }
 
-// Draw positions the card over the bottom-right quadrant of the Queue
-// table's current rect, then delegates to the embedded Flex to actually
-// paint it (identity text and, when active, the metadata table).
+// clipScreen restricts SetContent calls to a rectangular boundary,
+// preventing child primitives inside a Flex from overflowing their
+// container -- which is exactly what the card's content does when
+// expanded, since the card itself never grows (see height).
+//
+// SetContent is the only method that needs intercepting: it is the sole
+// route tview takes to the screen when drawing these primitives. Of the
+// alternatives, Fill and the deprecated SetCell are used nowhere in
+// tview at all, and ShowCursor only by TextArea, which this card has
+// none of. If a text-input widget is ever added to the card, ShowCursor
+// needs clipping here too.
+type clipScreen struct {
+	tcell.Screen
+	minX, minY, maxX, maxY int
+}
+
+func (s *clipScreen) SetContent(x, y int, mainc rune, comb []rune, style tcell.Style) {
+	if x < s.minX || x > s.maxX || y < s.minY || y > s.maxY {
+		return
+	}
+	s.Screen.SetContent(x, y, mainc, comb, style)
+}
+
+// Draw positions the card over the right side of the Queue table's
+// current rect, anchored at the top, then delegates to the embedded Flex to
+// actually paint it (identity text and, when active, the metadata table).
+// Output is clipped to the card's rect so children never spill into the
+// panels below.
 func (c *trackInfoCard) Draw(screen tcell.Screen) {
 	c.positionOverQueue()
-	c.Flex.Draw(screen)
+	c.Box.DrawForSubclass(screen, c)
+
+	_, _, w, h := c.GetRect()
+	innerX, innerY, innerW, innerH := c.GetInnerRect()
+	if w <= 0 || h <= 0 || innerW <= 0 || innerH <= 0 {
+		return
+	}
+
+	c.clampScroll(innerH)
+	c.flex.SetRect(innerX, innerY-c.scrollOffset, innerW, c.contentHeight())
+
+	cs := &clipScreen{
+		Screen: screen,
+		minX:   innerX,
+		minY:   innerY,
+		maxX:   innerX + innerW - 1,
+		maxY:   innerY + innerH - 1,
+	}
+	c.flex.Draw(cs)
 }
 
 // renderTrackInfo re-renders the 'i' card for whichever track
@@ -286,6 +365,8 @@ func (c *trackInfoCard) Draw(screen tcell.Screen) {
 // when nothing is playing, so the card is still useful (and still shows
 // local rating/plays/mark) for a track you have merely scrolled to with
 // playback stopped, instead of the bare "Nothing playing" it used to be.
+// Which track that is comes from inspectedSong, so j/k navigation wins
+// over the playing track while the card is open.
 //
 // The live status is only passed through when it actually describes that
 // track: bitrate and sample format are properties of the running decoder,
@@ -297,7 +378,7 @@ func (c *trackInfoCard) Draw(screen tcell.Screen) {
 // open, same as before -- resolving the target is an in-memory table
 // lookup, no MPD round-trip of its own.
 func (a *App) renderTrackInfo() {
-	song, ok := a.targetSong()
+	song, ok := a.inspectedSong()
 	if !ok {
 		a.trackInfo.render(mpdclient.Song{}, mpdclient.Status{})
 		return
@@ -329,13 +410,13 @@ func (c *trackInfoCard) render(song mpdclient.Song, st mpdclient.Status) {
 			c.meta.Clear()
 			c.markRows = trackInfoMarkSectionLines
 			c.marks.SetText("")
-			c.ResizeItem(c.marks, trackInfoMarkSectionLines, 0)
+			c.flex.ResizeItem(c.marks, trackInfoMarkSectionLines, 0)
 			c.tagRows = trackInfoTagSectionLines
 			c.tags.SetText("")
-			c.ResizeItem(c.tags, trackInfoTagSectionLines, 0)
+			c.flex.ResizeItem(c.tags, trackInfoTagSectionLines, 0)
 			c.bookmarkRows = trackInfoBookmarkSectionLines
 			c.bookmarks.SetText("")
-			c.ResizeItem(c.bookmarks, trackInfoBookmarkSectionLines, 0)
+			c.flex.ResizeItem(c.bookmarks, trackInfoBookmarkSectionLines, 0)
 		}
 		return
 	}
@@ -379,33 +460,31 @@ func (c *trackInfoCard) render(song mpdclient.Song, st mpdclient.Status) {
 func (c *trackInfoCard) renderSections(file string, track metadata.Track) {
 	markMax, tagMax, bookmarkMax, playlistMax := trackInfoMarkLines, trackInfoTagLines, trackInfoBookmarkLines, trackInfoPlaylistLines
 	if c.expanded {
-		extra := shareGrowth([]int{
-			len(track.Marks) - markMax,
-			len(track.Tags) - tagMax,
-			len(track.Bookmarks) - bookmarkMax,
-			len(c.app.playlistMembership[file]) - playlistMax,
-		}, c.expandableRows())
-		markMax += extra[0]
-		tagMax += extra[1]
-		bookmarkMax += extra[2]
-		playlistMax += extra[3]
+		markMax = len(track.Marks)
+		tagMax = len(track.Tags)
+		bookmarkMax = len(track.Bookmarks)
+		if membership := c.app.playlistMembership[file]; membership != nil {
+			playlistMax = len(membership)
+		} else {
+			playlistMax = 0
+		}
 	}
 
 	if c.meta != nil {
 		text, rows := marksSection(track.Marks, markMax)
 		c.markRows = rows
 		c.marks.SetText(text)
-		c.ResizeItem(c.marks, rows, 0)
+		c.flex.ResizeItem(c.marks, rows, 0)
 
 		text, rows = tagsSection(track.Tags, tagMax)
 		c.tagRows = rows
 		c.tags.SetText(text)
-		c.ResizeItem(c.tags, rows, 0)
+		c.flex.ResizeItem(c.tags, rows, 0)
 
 		text, rows = bookmarksSection(track.Bookmarks, bookmarkMax)
 		c.bookmarkRows = rows
 		c.bookmarks.SetText(text)
-		c.ResizeItem(c.bookmarks, rows, 0)
+		c.flex.ResizeItem(c.bookmarks, rows, 0)
 	}
 	text, rows := playlistsSection(c.app.playlistMembership, file, playlistMax)
 	c.setPlaylistSection(text, rows)
@@ -417,37 +496,7 @@ func (c *trackInfoCard) renderSections(file string, track metadata.Track) {
 func (c *trackInfoCard) setPlaylistSection(text string, rows int) {
 	c.playlistRows = rows
 	c.playlists.SetText(text)
-	c.ResizeItem(c.playlists, rows, 0)
-}
-
-// shareGrowth splits spare rows between sections asking for extra ones.
-// Everyone gets what they ask for when it all fits; otherwise the rows
-// go round one at a time to whoever still wants more, so no section is
-// starved by a longer neighbour and none is handed rows it cannot use.
-func shareGrowth(want []int, spare int) []int {
-	got := make([]int, len(want))
-	for i, w := range want {
-		if w < 0 {
-			want[i] = 0
-		}
-	}
-	for spare > 0 {
-		progressed := false
-		for i := range want {
-			if spare == 0 {
-				break
-			}
-			if got[i] < want[i] {
-				got[i]++
-				spare--
-				progressed = true
-			}
-		}
-		if !progressed {
-			break
-		}
-	}
-	return got
+	c.flex.ResizeItem(c.playlists, rows, 0)
 }
 
 // listSectionText renders one of the card's list sections: a heading,
@@ -624,5 +673,86 @@ func (c *trackInfoCard) renderMeta(track metadata.Track) {
 // panel was focused before 'i' was first pressed, same as every other
 // overlay.
 func (a *App) openTrackInfo() {
-	a.showOverlay("track-info", a.trackInfo, a.trackInfo)
+	a.trackInfo.expanded = false
+	a.trackInfo.scrollOffset = 0
+	// inspectSong stays nil until j/k actually moves. Until then the
+	// card follows targetSong live, exactly as it did before navigation
+	// existed: a track change while the card is open still updates it,
+	// and merely pressing 'i' does not drag the Queue cursor off
+	// whatever row the user was browsing.
+	a.trackInfo.inspectSong = nil
+	a.showOverlay(trackInfoPageName, a.trackInfo, a.trackInfo)
+	a.renderTrackInfo()
+}
+
+// inspectedSong is the track the card shows: whichever j/k last landed
+// on, or -- before the first keypress, and any time the card is closed
+// -- targetSong's own answer (the playing track, else the Queue cursor).
+//
+// The open check is what keeps a stale inspectSong from outliving the
+// card. renderTrackInfo runs on every refresh tick whether or not the
+// card is open, so a leftover pointer would otherwise pin the card to a
+// track the user stopped looking at minutes ago. Gating on the page
+// rather than clearing the field on close means no close path can
+// forget to do it.
+func (a *App) inspectedSong() (mpdclient.Song, bool) {
+	if a.trackInfo.inspectSong != nil && a.pages.HasPage(trackInfoPageName) {
+		return *a.trackInfo.inspectSong, true
+	}
+	return a.targetSong()
+}
+
+// handleNav is j/k (and Up/Down) while the card is open: it scrolls the
+// overflowing content when the card is expanded, and walks the Queue --
+// re-pointing the card at each track in turn -- when it is collapsed.
+func (c *trackInfoCard) handleNav(delta int) {
+	if !c.expanded {
+		c.app.navigateTrackInfo(delta)
+		return
+	}
+	_, _, _, innerH := c.GetInnerRect()
+	c.scrollOffset += delta
+	c.clampScroll(innerH)
+}
+
+// navigateTrackInfo moves the Queue selection by delta and points the
+// card at the newly selected track, leaving it open.
+func (a *App) navigateTrackInfo(delta int) {
+	n := len(a.queue.songs)
+	if n == 0 {
+		return
+	}
+	idx := a.inspectedQueueIndex() + delta
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= n {
+		idx = n - 1
+	}
+	a.queue.table.Select(idx+queueHeaderRows, 0)
+	song := a.queue.songs[idx]
+	a.trackInfo.inspectSong = &song
+	a.trackInfo.scrollOffset = 0
+	a.renderTrackInfo()
+}
+
+// inspectedQueueIndex is where in the Queue the track the card is
+// currently showing sits, so the first j/k steps away from *that* track
+// rather than from wherever the Queue cursor happens to be -- which,
+// while something is playing, is not necessarily the same row.
+//
+// Falls back to the Queue cursor when the shown track is not in the
+// queue at all (it can be a Library selection), and to the top of the
+// queue when even that is out of range.
+func (a *App) inspectedQueueIndex() int {
+	if song, ok := a.inspectedSong(); ok {
+		if i := a.queue.indexOf(song); i >= 0 {
+			return i
+		}
+	}
+	row, _ := a.queue.table.GetSelection()
+	if idx := row - queueHeaderRows; idx >= 0 && idx < len(a.queue.songs) {
+		return idx
+	}
+	return 0
 }
