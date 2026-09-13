@@ -4,6 +4,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 
 	"mpdtui/internal/config"
@@ -18,19 +19,28 @@ import (
 )
 
 func main() {
-	opts, err := parseFlags(flag.CommandLine, os.Args[1:], os.Stderr)
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// run is main's body with the process boundary pulled out: it takes the
+// arguments and streams rather than reaching for os.Args and os.Stdout,
+// and returns an exit code rather than calling os.Exit. That makes every
+// mode reachable from a test, which main itself never was.
+func run(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("mpdtui", flag.ContinueOnError)
+	opts, err := parseFlags(fs, args, stderr)
 	if err != nil {
-		os.Exit(2) // flag package has already reported it
+		return 2 // the flag package has already reported it
 	}
 
 	if opts.showVersion {
-		fmt.Println(version.String)
-		return
+		fmt.Fprintln(stdout, version.String)
+		return 0
 	}
 
 	if err := opts.validate(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		fmt.Fprintln(stderr, err)
+		return 1
 	}
 
 	// Mandatory on every run, every mode -- mirrors internal/metadata.
@@ -41,14 +51,14 @@ func main() {
 	// track_metadata unresolvable from a config file that was never
 	// written, same as before this existed.
 	if err := config.EnsureConfigFiles(); err != nil {
-		fmt.Fprintf(os.Stderr, "mpdtui: %v -- continuing without it\n", err)
+		fmt.Fprintf(stderr, "mpdtui: %v -- continuing without it\n", err)
 	}
 
 	cfg := config.Load()
 	client, err := mpdclient.Dial(cfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "mpdtui: connect to MPD at %s: %v\n", cfg.Addr(), err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "mpdtui: connect to MPD at %s: %v\n", cfg.Addr(), err)
+		return 1
 	}
 	defer client.Close()
 
@@ -59,14 +69,14 @@ func main() {
 		metaDB, err = metadata.Open(config.DBFile())
 		if err != nil {
 			if opts.trackInfoUpdate {
-				fmt.Fprintf(os.Stderr, "mpdtui: track metadata database (%s): %v\n", config.DBFile(), err)
-				os.Exit(1)
+				fmt.Fprintf(stderr, "mpdtui: track metadata database (%s): %v\n", config.DBFile(), err)
+				return 1
 			}
 			// Non-fatal, unlike the MPD connection above: this is an
 			// opt-in local bookkeeping feature, not something the rest of
 			// the app depends on -- a broken local database shouldn't
 			// stop the music from playing.
-			fmt.Fprintf(os.Stderr, "mpdtui: track metadata database (%s): %v -- continuing without it\n", config.DBFile(), err)
+			fmt.Fprintf(stderr, "mpdtui: track metadata database (%s): %v -- continuing without it\n", config.DBFile(), err)
 			metaDB = nil
 		} else {
 			defer metaDB.Close()
@@ -81,18 +91,19 @@ func main() {
 	case opts.miniMode:
 		err = mini.Run(client, metaDB, config.LoadThemeFile())
 	case opts.lyricsLine:
-		err = lyricsline.Print(client, config.LoadMusicDir(), os.Stdout)
+		err = lyricsline.Print(client, config.LoadMusicDir(), stdout)
 	case opts.trackInfo:
-		err = trackinfo.PrintInfo(client, config.LoadMusicDir(), metaDB, os.Stdout)
+		err = trackinfo.PrintInfo(client, config.LoadMusicDir(), metaDB, stdout)
 	case opts.trackInfoUpdate:
-		err = trackinfo.UpdateRating(client, metaDB, opts.rating, os.Stdout)
+		err = trackinfo.UpdateRating(client, metaDB, opts.rating, stdout)
 	default:
 		err = ui.Run(client, config.LoadMusicDir(), metaDB, summaryFrom(cfg))
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "mpdtui: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "mpdtui: %v\n", err)
+		return 1
 	}
+	return 0
 }
 
 // summaryFrom builds the read-only settings snapshot the full UI shows

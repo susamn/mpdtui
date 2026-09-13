@@ -1,10 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
+	"strings"
 	"testing"
+
+	"mpdtui/internal/config"
+	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/version"
 )
 
 func parse(t *testing.T, args ...string) options {
@@ -139,5 +146,157 @@ func TestFullUIOnlyWhenNoModeChosen(t *testing.T) {
 		if parse(t, arg).fullUI() {
 			t.Errorf("%s should not leave the full UI selected", arg)
 		}
+	}
+}
+
+// --- run ----------------------------------------------------------------
+//
+// run is main's body with the process boundary pulled out, so these
+// exercise the real dispatch: flag handling, the MPD connection, and
+// each mode that prints and exits. The modes that take over the
+// terminal (-mini, -p, -t, and the default panel UI) are not driven
+// here -- they need a tty.
+
+// mpdReachable reports whether the modes that need a server can run.
+func mpdReachable(t *testing.T) bool {
+	t.Helper()
+	c, err := mpdclient.Dial(config.Load())
+	if err != nil {
+		return false
+	}
+	c.Close()
+	return true
+}
+
+func TestRunVersion(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := run([]string{"-v"}, &out, &errOut); code != 0 {
+		t.Errorf("exit code = %d, want 0", code)
+	}
+	if got := strings.TrimSpace(out.String()); got != strings.TrimSpace(version.String) {
+		t.Errorf("printed %q, want the version %q", got, version.String)
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("wrote %q to stderr, want nothing", errOut.String())
+	}
+}
+
+func TestRunRejectsBadFlagCombinations(t *testing.T) {
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"-i", "-mini"}, "mutually exclusive"},
+		{[]string{"-r", "3"}, "-r must be used with -iu"},
+		{[]string{"-iu"}, "-iu requires an update flag"},
+		{[]string{"-iu", "-r", "9"}, "between 1 and 5"},
+	}
+	for _, tc := range cases {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			if code := run(tc.args, &out, &errOut); code != 1 {
+				t.Errorf("exit code = %d, want 1", code)
+			}
+			if !strings.Contains(errOut.String(), tc.want) {
+				t.Errorf("stderr = %q, want it to mention %q", errOut.String(), tc.want)
+			}
+		})
+	}
+}
+
+func TestRunRejectsAnUnknownFlag(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := run([]string{"-nope"}, &out, &errOut); code != 2 {
+		t.Errorf("exit code = %d, want 2 (the flag package's own)", code)
+	}
+}
+
+// TestRunReportsAnUnreachableServer covers the connection failure path,
+// pointed at a port nothing listens on.
+func TestRunReportsAnUnreachableServer(t *testing.T) {
+	t.Setenv("MPD_HOST", "127.0.0.1")
+	t.Setenv("MPD_PORT", "1")
+
+	var out, errOut bytes.Buffer
+	if code := run([]string{"-i"}, &out, &errOut); code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(errOut.String(), "connect to MPD") {
+		t.Errorf("stderr = %q, want it to report the connection failure", errOut.String())
+	}
+}
+
+// TestRunTrackInfoNeedsLiveMPD covers -i end to end: connect, read the
+// current track, print it. Read-only.
+func TestRunTrackInfoNeedsLiveMPD(t *testing.T) {
+	if !mpdReachable(t) {
+		t.Skip("no MPD server reachable")
+	}
+
+	var out, errOut bytes.Buffer
+	if code := run([]string{"-i"}, &out, &errOut); code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	if out.Len() == 0 {
+		t.Error("-i printed nothing")
+	}
+}
+
+// TestRunLyricsLineNeedsLiveMPD covers -lyrics-line, the mode external
+// tools poll. Read-only, and it must always print its whole window.
+func TestRunLyricsLineNeedsLiveMPD(t *testing.T) {
+	if !mpdReachable(t) {
+		t.Skip("no MPD server reachable")
+	}
+
+	var out, errOut bytes.Buffer
+	if code := run([]string{"-lyrics-line"}, &out, &errOut); code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	if n := strings.Count(out.String(), "\n"); n != 4 {
+		t.Errorf("-lyrics-line printed %d lines, want the fixed 4-line window", n)
+	}
+}
+
+// TestRunTrackInfoUpdateRejectsWithoutMetadata covers -iu reaching the
+// dispatch and failing cleanly when the feature is off. Pointed at an
+// empty config directory so track_metadata is unset, which also keeps
+// it from touching the real database.
+func TestRunTrackInfoUpdateRejectsWithoutMetadata(t *testing.T) {
+	if !mpdReachable(t) {
+		t.Skip("no MPD server reachable")
+	}
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	var out, errOut bytes.Buffer
+	if code := run([]string{"-iu", "-r", "3"}, &out, &errOut); code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(errOut.String(), "track metadata") {
+		t.Errorf("stderr = %q, want it to explain the feature is off", errOut.String())
+	}
+}
+
+func TestSummaryFromCarriesEveryResolvedSetting(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	s := summaryFrom(config.Config{Host: "localhost", Port: "6600", Password: "secret"})
+
+	if s.MPDHost != "localhost" || s.MPDPort != "6600" {
+		t.Errorf("host/port = %q/%q, want the dialled values", s.MPDHost, s.MPDPort)
+	}
+	if !s.MPDPasswordSet {
+		t.Error("MPDPasswordSet = false with a password configured")
+	}
+	// The password's own value must never reach the summary -- a
+	// settings view has no business displaying a credential.
+	if strings.Contains(fmt.Sprintf("%+v", s), "secret") {
+		t.Error("the summary carries the password itself")
+	}
+	if s.ConfigFilePath == "" || s.DBFilePath == "" || s.LyricsIndexPath == "" {
+		t.Errorf("summary has unresolved paths: %+v", s)
+	}
+	if s.VisualizerFIFO == "" {
+		t.Error("VisualizerFIFO is empty, want the resolved default")
 	}
 }
