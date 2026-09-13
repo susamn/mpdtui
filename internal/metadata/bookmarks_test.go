@@ -1,4 +1,4 @@
-package tests
+package metadata_test
 
 import (
 	"database/sql"

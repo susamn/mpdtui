@@ -1,4 +1,4 @@
-package tests
+package picker_test
 
 import (
 	"testing"

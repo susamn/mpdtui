@@ -1,4 +1,4 @@
-package tests
+package lyricsindex_test
 
 import (
 	"context"

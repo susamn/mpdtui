@@ -1,6 +1,6 @@
 // Integration tests against a real MPD server. Skipped automatically if
 // one isn't reachable at MPD_HOST/MPD_PORT (default localhost:6600).
-package tests
+package mpdclient_test
 
 import (
 	"errors"
