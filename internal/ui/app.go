@@ -16,6 +16,7 @@ import (
 	"mpdtui/internal/albumart"
 	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/settingsview"
 	"mpdtui/internal/uitheme"
 	"mpdtui/internal/visualizer"
 )
@@ -100,7 +101,7 @@ type App struct {
 	markPicker     *catalogPicker
 	tagPicker      *catalogPicker
 	bookmarkPicker *bookmarkPicker
-	settings       *settingsView
+	settings       *settingsview.View
 	visualizer     *visualizer.Panel
 
 	// currentSong is refreshNowPlaying's own last-fetched CurrentSong,
@@ -281,7 +282,14 @@ func (a *App) build() {
 	a.markPicker = newCatalogPicker(a, markCatalog{})
 	a.tagPicker = newCatalogPicker(a, tagCatalog{})
 	a.bookmarkPicker = newBookmarkPicker(a)
-	a.settings = newSettingsView(a)
+	a.settings = settingsview.New(settingsview.Deps{
+		App:         a.tv,
+		MetaDB:      a.metaDB,
+		Config:      configRows(a.cfg),
+		ShowError:   a.showError,
+		ShowMessage: a.showMessage,
+		RunAsync:    func(work func() error, onSuccess func()) { a.runAsync(work, onSuccess) },
+	})
 	a.visualizer = visualizer.New(a.cfg.VisualizerFIFO)
 
 	a.hintBar = tview.NewTextView().SetDynamicColors(true)
@@ -377,7 +385,7 @@ func (a *App) reapplyTheme() {
 	// node needs re-styling rather than one call on the widget.
 	a.library.restyleNodes()
 	a.playlists.table.SetSelectedStyle(selectedStyle)
-	a.settings.catalogTable.SetSelectedStyle(selectedStyle)
+	a.settings.ReapplyTheme()
 	a.markPicker.SetSelectedTextColor(uitheme.SelectedFg())
 	a.markPicker.SetSelectedBackgroundColor(uitheme.SelectedBg())
 	a.tagPicker.SetSelectedTextColor(uitheme.SelectedFg())
