@@ -8,6 +8,7 @@ import (
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/uitheme"
 )
 
 // seedSearchResults puts the Library panel into search mode with the
@@ -48,8 +49,8 @@ func testGroups() []*albumGroup {
 
 // TestTreeSelectedStyleIsVisible is a regression test for a cursor that
 // was invisible in the Library panel. treeSelectedStyle used to be built
-// in its own package-level declaration, from colorSelectedFg/
-// colorSelectedBg -- but variable initializers all run before any init
+// in its own package-level declaration, from uitheme.SelectedFg()/
+// uitheme.SelectedBg() -- but variable initializers all run before any init
 // function, so it captured those colors while they were still the zero
 // Color and every node ended up styled default-on-default.
 func TestTreeSelectedStyleIsVisible(t *testing.T) {
@@ -60,7 +61,7 @@ func TestTreeSelectedStyleIsVisible(t *testing.T) {
 	if fg == bg {
 		t.Errorf("treeSelectedStyle foreground and background are both %v: the selected row would be unreadable", fg)
 	}
-	if got := colorSelectedBg; bg != got {
+	if got := uitheme.SelectedBg(); bg != got {
 		t.Errorf("treeSelectedStyle background = %v, want the theme's selection color %v", bg, got)
 	}
 }

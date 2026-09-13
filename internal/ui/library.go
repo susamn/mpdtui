@@ -19,7 +19,7 @@ import (
 //
 // Assigned by deriveColors, never in this declaration: package-level
 // variable initializers all run before any init function, so a value
-// built here would capture colorSelectedFg/colorSelectedBg while they
+// built here would capture uitheme.SelectedFg()/uitheme.SelectedBg() while they
 // are still the zero Color -- leaving every node styled
 // default-on-default, which is exactly the invisible highlight the
 // explicit style exists to avoid. It's re-derived on theme reload too,

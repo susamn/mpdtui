@@ -15,7 +15,7 @@ import (
 // cellFg reports the foreground color tview will actually draw for cell,
 // mirroring tview's own resolution: SetTextColor writes to the legacy
 // Color field if Style was still the zero value at call time, or into
-// Style otherwise -- which one depends on whether applyTheme() has
+// Style otherwise -- which one depends on whether uitheme.ApplyToTviewStyles() has
 // already mutated the global tview.Styles in this test binary, since
 // NewTableCell seeds Style from those globals. Checking only one side
 // makes the test's outcome depend on execution order across the whole

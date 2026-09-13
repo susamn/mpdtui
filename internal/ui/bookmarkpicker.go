@@ -10,6 +10,7 @@ import (
 
 	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/uitheme"
 )
 
 // Modes for the bookmark picker sub-views.
@@ -59,7 +60,7 @@ func newBookmarkPicker(app *App) *bookmarkPicker {
 	p.table = tview.NewTable()
 	p.table.SetBorder(true)
 	p.table.SetSelectable(true, false)
-	p.table.SetSelectedStyle(tcell.StyleDefault.Background(colorSelectedBg).Foreground(colorSelectedFg))
+	p.table.SetSelectedStyle(uitheme.SelectedStyle())
 	p.table.SetSelectedFunc(func(row, _ int) {
 		if row >= 0 && row < len(p.bookmarks) {
 			p.jumpTo(p.bookmarks[row])

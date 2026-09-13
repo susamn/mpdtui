@@ -8,6 +8,7 @@ import (
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/uitheme"
 )
 
 // maxAddToPlaylistHints caps how many fuzzy playlist matches the popup
@@ -112,8 +113,8 @@ func (a *App) openAddToPlaylistPicker() {
 	list := tview.NewList()
 	list.ShowSecondaryText(false)
 	list.SetHighlightFullLine(true)
-	list.SetSelectedTextColor(colorSelectedFg)
-	list.SetSelectedBackgroundColor(colorSelectedBg)
+	list.SetSelectedTextColor(uitheme.SelectedFg())
+	list.SetSelectedBackgroundColor(uitheme.SelectedBg())
 	list.SetBorder(true)
 
 	hints := &playlistPickerHints{}

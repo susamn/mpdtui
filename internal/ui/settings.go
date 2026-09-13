@@ -6,6 +6,8 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+
+	"mpdtui/internal/uitheme"
 )
 
 const (
@@ -117,7 +119,7 @@ func (s *settingsView) buildDatabaseTab() tview.Primitive {
 	s.catalogTable.SetBorder(true)
 	s.catalogTable.SetSelectable(true, false)
 	s.catalogTable.SetFixed(1, 0)
-	s.catalogTable.SetSelectedStyle(tcell.StyleDefault.Background(colorSelectedBg).Foreground(colorSelectedFg))
+	s.catalogTable.SetSelectedStyle(uitheme.SelectedStyle())
 
 	s.addInput = tview.NewInputField()
 	s.addInput.SetBorder(true).SetTitle(" New entry (Enter to add, Esc to close Settings) ")
@@ -172,7 +174,7 @@ func populateConfigTable(table *tview.Table, cfg ConfigSummary) {
 	}
 	themeFile := orPlaceholder(cfg.ThemeFile)
 	themeStatus := "not found -- built-in default colors in use"
-	if themeFound {
+	if uitheme.Found() {
 		themeStatus = "found -- active"
 	}
 
@@ -388,7 +390,7 @@ func (s *settingsView) confirmDeleteNow() {
 }
 
 // renderTabBar highlights whichever top-level tab is currently active,
-// in colorActiveBorder's own green (the same color a focused panel's
+// in uitheme.ActiveBorder()'s own green (the same color a focused panel's
 // border/title uses) -- "green" by W3C name here since tview's dynamic-
 // color tags accept names directly, no need for the hex form.
 func (s *settingsView) renderTabBar() {

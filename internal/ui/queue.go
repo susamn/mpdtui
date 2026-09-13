@@ -10,6 +10,7 @@ import (
 	"mpdtui/internal/lyrics"
 	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/uitheme"
 	"mpdtui/internal/version"
 )
 
@@ -70,7 +71,7 @@ func newQueuePanel(app *App) *queuePanel {
 	t.SetBorder(true).SetTitle(" Queue ")
 	t.SetSelectable(true, false)
 	t.SetFixed(queueHeaderRows, 0)
-	t.SetSelectedStyle(tcell.StyleDefault.Background(colorSelectedBg).Foreground(colorSelectedFg))
+	t.SetSelectedStyle(uitheme.SelectedStyle())
 	t.SetSelectedFunc(func(row, _ int) {
 		i := row - queueHeaderRows
 		if i < 0 || i >= len(q.songs) {

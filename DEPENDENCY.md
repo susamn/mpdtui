@@ -23,13 +23,16 @@ cmd/mpdtui  -> config lyricsline metadata mini mpdclient picker trackinfo ui ver
 
   ENTRY POINTS (one per mode, siblings, none imports another)
     ui         -> albumart lyrics lyricsindex metadata mpdclient
-                  textutil theme version visualizer
+                  textutil uitheme version visualizer
     mini       -> metadata mpdclient theme
     picker     -> mpdclient theme
 
   UI COMPONENTS (own a panel, used only by ui)
     albumart   -> mpdclient
     visualizer -> audio mpdclient
+
+  RENDERING
+    uitheme    -> theme        (palette -> tcell colors, for tview front ends)
 
   DOMAIN
     lyricsindex -> lyrics textutil
@@ -89,10 +92,17 @@ When two of the siblings need the same thing, it moves down into a
 package all of them may import -- `theme` for the palette, `textutil`
 for normalization -- never across from one sibling to another.
 
-`theme` is the worked example: `ui`, `mini` and `picker` each derive
-their own colors from it independently, in their own color space
-(`tcell.Color`, ANSI escapes, `tcell.Color`), because they render
-through different machinery. They share the palette, not the rendering.
+`theme` is the worked example: it holds the palette as data, and each
+sibling turns it into whatever its own renderer needs.
+
+`uitheme` is the second, one level up: it is the palette rendered into
+`tcell.Color`, which is what a tview front end needs. `ui` uses it, and
+so may any panel extracted out of `ui` -- that is the point of it being
+a package rather than unexported state inside `ui`. `mini` must stay
+clear of it, because it imports tcell and mini's whole reason for
+existing is rendering without tcell; `mini` goes to `theme` directly.
+`picker` is tview-based and could adopt it, which would retire the
+`hexColor`/`contrastColor` duplication in rule 4's table.
 
 ### 4. Small duplication beats a new edge
 
@@ -107,7 +117,8 @@ general licence to copy.
 | `formatDuration`, `progressBar` | `mini/format.go` | `ui` |
 | fuzzy subsequence matcher | `ui/globalsearch.go` | `picker` |
 | path normalization | `metadata/metadata.go` | `lyrics` |
-| palette -> color derivation | `mini`, `picker`, `ui` | each other |
+| palette -> ANSI escapes | `mini` | `uitheme` (it is tcell-based) |
+| `hexColor`, `contrastColor` | `picker` | `uitheme` |
 
 If one of these grows or starts drifting in behavior, that is the
 signal to move it down to a leaf (rule 3) instead.
@@ -117,6 +128,8 @@ signal to move it down to a leaf (rule 3) instead.
 - Does it belong under an entry point, or below all of them? Something
   only `ui` uses (`albumart`, `visualizer`) sits under `ui`. Something
   two entry points need is a leaf.
+- A panel pulled out of `ui` takes its colors from `uitheme`, not from
+  constructor arguments -- they change under it on a theme reload.
 - Take dependencies as constructor arguments. A package that reads its
   own config or opens its own database cannot be tested without one.
 - Check the graph still has no cycles, and that rule 1 still holds:

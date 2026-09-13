@@ -2,15 +2,15 @@ package ui
 
 import (
 	"fmt"
-	"mpdtui/internal/textutil"
-	"sort"
-	"strings"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-
 	"mpdtui/internal/lyricsindex"
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/textutil"
+	"mpdtui/internal/uitheme"
+	"sort"
+	"strings"
 )
 
 // globalSearchKind is which section of the app a global ('f') search
@@ -427,7 +427,7 @@ func (a *App) openGlobalSearch() {
 
 	table := tview.NewTable()
 	table.SetSelectable(true, false)
-	table.SetSelectedStyle(tcell.StyleDefault.Background(colorSelectedBg).Foreground(colorSelectedFg))
+	table.SetSelectedStyle(uitheme.SelectedStyle())
 	table.SetBorder(true)
 
 	var trackSongs []mpdclient.Song

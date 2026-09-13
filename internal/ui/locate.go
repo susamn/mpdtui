@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+
+	"mpdtui/internal/uitheme"
 )
 
 // locateFlashBg/Fg are the colors of the brief flash after 'L' -- of the
@@ -93,7 +95,7 @@ func (a *App) runLocateFlashPhase(seq, i int) {
 // it per node at construction from tview.Styles -- so there's nothing to
 // rebuild it from, and the saved original is restored verbatim.
 func (a *App) setLocateFlash(on bool) {
-	bg, fg := colorSelectedBg, colorSelectedFg
+	bg, fg := uitheme.SelectedBg(), uitheme.SelectedFg()
 	if on {
 		bg, fg = locateFlashBg, locateFlashFg
 	}

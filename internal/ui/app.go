@@ -16,6 +16,7 @@ import (
 	"mpdtui/internal/albumart"
 	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/uitheme"
 	"mpdtui/internal/visualizer"
 )
 
@@ -253,17 +254,17 @@ func (a *App) runAsyncDefault(work func() error, onSuccess func()) {
 }
 
 func (a *App) build() {
-	applyTheme()
+	uitheme.ApplyToTviewStyles()
 	a.runAsync = a.runAsyncDefault
 
 	a.library = newLibraryPanel(a)
 	a.playlists = newPlaylistsPanel(a)
 	a.queue = newQueuePanel(a)
 
-	wireFocusColors(a.library.tree)
-	wireFocusColors(a.playlists.table)
-	wireFocusColors(a.queue.table)
-	wireFocusColors(a.queue.search)
+	uitheme.WireFocus(a.library.tree)
+	uitheme.WireFocus(a.playlists.table)
+	uitheme.WireFocus(a.queue.table)
+	uitheme.WireFocus(a.queue.search)
 
 	// Wrap off: the panel gets exactly 2 inner rows (see the row
 	// height below) and renders exactly 2 lines, so a long title must
@@ -350,13 +351,13 @@ func (a *App) build() {
 // setFocusColor rather than waiting for one.
 func (a *App) reapplyTheme() {
 	reloadPalette()
-	applyTheme()
+	uitheme.ApplyToTviewStyles()
 
 	focused := a.tv.GetFocus()
-	setFocusColor(a.library.tree, focused == a.library.tree)
-	setFocusColor(a.playlists.table, focused == a.playlists.table)
-	setFocusColor(a.queue.table, focused == a.queue.table)
-	setFocusColor(a.queue.search, focused == a.queue.search)
+	uitheme.SetFocused(a.library.tree, focused == a.library.tree)
+	uitheme.SetFocused(a.playlists.table, focused == a.playlists.table)
+	uitheme.SetFocused(a.queue.table, focused == a.queue.table)
+	uitheme.SetFocused(a.queue.search, focused == a.queue.search)
 
 	a.nowPlaying.SetBorderColor(nowPlayingBorderColor).SetTitleColor(nowPlayingBorderColor)
 	a.lyricsViewer.SetBorderColor(lyricsColor).SetTitleColor(lyricsColor)
@@ -365,11 +366,11 @@ func (a *App) reapplyTheme() {
 	// table cells below, but for the selected-row highlight specifically:
 	// newQueuePanel/newPlaylistsPanel/newSettingsView each called
 	// SetSelectedStyle once, up front, with a tcell.Style *value* built
-	// from colorSelectedBg/colorSelectedFg at that moment -- reassigning
+	// from uitheme.SelectedBg()/uitheme.SelectedFg() at that moment -- reassigning
 	// those vars afterward doesn't reach back into an already-built
 	// Style. markPicker (a *tview.List, not a Table) has the same issue
 	// via SetSelectedTextColor/SetSelectedBackgroundColor instead.
-	selectedStyle := tcell.StyleDefault.Background(colorSelectedBg).Foreground(colorSelectedFg)
+	selectedStyle := uitheme.SelectedStyle()
 	a.queue.table.SetSelectedStyle(selectedStyle)
 	// The Library tree has the same problem one level down: the style is
 	// baked into each TreeNode, not read off the tree, so every existing
@@ -377,10 +378,10 @@ func (a *App) reapplyTheme() {
 	a.library.restyleNodes()
 	a.playlists.table.SetSelectedStyle(selectedStyle)
 	a.settings.catalogTable.SetSelectedStyle(selectedStyle)
-	a.markPicker.SetSelectedTextColor(colorSelectedFg)
-	a.markPicker.SetSelectedBackgroundColor(colorSelectedBg)
-	a.tagPicker.SetSelectedTextColor(colorSelectedFg)
-	a.tagPicker.SetSelectedBackgroundColor(colorSelectedBg)
+	a.markPicker.SetSelectedTextColor(uitheme.SelectedFg())
+	a.markPicker.SetSelectedBackgroundColor(uitheme.SelectedBg())
+	a.tagPicker.SetSelectedTextColor(uitheme.SelectedFg())
+	a.tagPicker.SetSelectedBackgroundColor(uitheme.SelectedBg())
 
 	// Everything above is a widget whose border/title color tview reads
 	// live off a Box field on every Draw. Table cells are different:

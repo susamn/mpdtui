@@ -13,6 +13,7 @@ import (
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/uitheme"
 )
 
 func TestLyricsViewerRectSpansYearThroughTypeColumns(t *testing.T) {
@@ -695,11 +696,11 @@ func TestMaybeUpdateLyricsHighlightOnlyWhenOpen(t *testing.T) {
 // for "title matches too".
 func TestNewLyricsViewerBorderMatchesFocusedPanelColor(t *testing.T) {
 	a := newTestApp()
-	if got := a.lyricsViewer.GetBorderColor(); got != colorActiveBorder {
-		t.Errorf("lyrics viewer border color = %v, want colorActiveBorder (%v), matching a focused panel's own border", got, colorActiveBorder)
+	if got := a.lyricsViewer.GetBorderColor(); got != uitheme.ActiveBorder() {
+		t.Errorf("lyrics viewer border color = %v, want uitheme.ActiveBorder() (%v), matching a focused panel's own border", got, uitheme.ActiveBorder())
 	}
-	if lyricsColor != colorActiveBorder {
-		t.Errorf("lyricsColor = %v, want colorActiveBorder (%v)", lyricsColor, colorActiveBorder)
+	if lyricsColor != uitheme.ActiveBorder() {
+		t.Errorf("lyricsColor = %v, want uitheme.ActiveBorder() (%v)", lyricsColor, uitheme.ActiveBorder())
 	}
 }
 

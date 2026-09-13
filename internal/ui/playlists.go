@@ -6,10 +6,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/uitheme"
 )
 
 // playlistIcon prefixes every playlist's display name, in both this panel
@@ -123,7 +123,7 @@ func newPlaylistsPanel(app *App) *playlistsPanel {
 	t.SetBorder(true).SetTitle(" Playlists ")
 	t.SetSelectable(true, false)
 	t.SetFixed(playlistsHeaderRows, 0)
-	t.SetSelectedStyle(tcell.StyleDefault.Background(colorSelectedBg).Foreground(colorSelectedFg))
+	t.SetSelectedStyle(uitheme.SelectedStyle())
 	t.SetSelectedFunc(func(row, _ int) {
 		i := row - playlistsHeaderRows
 		if i < 0 || i >= len(p.shown) {

@@ -3,13 +3,12 @@ package ui
 import (
 	"testing"
 
-	"math"
-
 	"github.com/gdamore/tcell/v2"
 
 	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
 	"mpdtui/internal/theme"
+	"mpdtui/internal/uitheme"
 )
 
 func seedQueueForGutter(q *queuePanel) {
@@ -102,8 +101,8 @@ func TestGutterStarColorsComeFromTheTheme(t *testing.T) {
 // theme happens to be loaded, and this pins that down against the
 // palettes that broke it.
 func TestGutterStarTiersSeparateOnEveryPalette(t *testing.T) {
-	original := palette
-	t.Cleanup(func() { palette = original; deriveColors() })
+	original := uitheme.Palette()
+	t.Cleanup(func() { uitheme.SetPaletteForTest(original); deriveColors() })
 
 	cases := []struct {
 		name       string
@@ -120,10 +119,10 @@ func TestGutterStarTiersSeparateOnEveryPalette(t *testing.T) {
 		{"no background in palette", "#ffd700", "#ffff00", ""},
 	}
 	for _, tc := range cases {
-		palette = theme.Palette{Yellow: tc.yellow, BrightYellow: tc.bright, Background: tc.background}
+		uitheme.SetPaletteForTest(theme.Palette{Yellow: tc.yellow, BrightYellow: tc.bright, Background: tc.background})
 		deriveColors()
 
-		ratio := luminanceRatio(relativeLuminance(queueStarTopColor), relativeLuminance(queueStarHighColor))
+		ratio := uitheme.Separation(queueStarTopColor, queueStarHighColor)
 		if ratio < 1.5 {
 			t.Errorf("%s: tiers only %.2fx apart (top=%v high=%v) -- indistinguishable at one glyph",
 				tc.name, ratio, queueStarTopColor, queueStarHighColor)
@@ -131,45 +130,6 @@ func TestGutterStarTiersSeparateOnEveryPalette(t *testing.T) {
 		if queueStarTopColor == queueStarHighColor {
 			t.Errorf("%s: both tiers are %v", tc.name, queueStarTopColor)
 		}
-	}
-}
-
-func TestRecedeFromLeavesUnresolvableColorsAlone(t *testing.T) {
-	// A terminal-default color has no RGB to weaken, and guessing what
-	// the terminal will paint is not possible -- so it comes back
-	// unchanged rather than becoming some invented shade.
-	if got := recedeFrom(tcell.ColorDefault, 1.8); got != tcell.ColorDefault {
-		t.Errorf("recedeFrom(default) = %v, want it left alone", got)
-	}
-}
-
-func TestRelativeLuminanceMatchesKnownValues(t *testing.T) {
-	cases := []struct {
-		color tcell.Color
-		want  float64
-	}{
-		{tcell.NewRGBColor(0, 0, 0), 0},
-		{tcell.NewRGBColor(255, 255, 255), 1},
-		{tcell.NewRGBColor(255, 0, 0), 0.2126},
-		{tcell.NewRGBColor(0, 255, 0), 0.7152},
-		{tcell.NewRGBColor(0, 0, 255), 0.0722},
-	}
-	for _, tc := range cases {
-		if got := relativeLuminance(tc.color); math.Abs(got-tc.want) > 1e-4 {
-			t.Errorf("relativeLuminance(%v) = %g, want %g", tc.color, got, tc.want)
-		}
-	}
-	if got := relativeLuminance(tcell.ColorDefault); got >= 0 {
-		t.Errorf("relativeLuminance(default) = %g, want a negative sentinel", got)
-	}
-}
-
-func TestLuminanceRatioIsSymmetric(t *testing.T) {
-	if a, b := luminanceRatio(0.8, 0.1), luminanceRatio(0.1, 0.8); a != b {
-		t.Errorf("luminanceRatio is not symmetric: %g vs %g", a, b)
-	}
-	if got := luminanceRatio(0.5, 0.5); got != 1 {
-		t.Errorf("luminanceRatio of equal luminances = %g, want 1", got)
 	}
 }
 
