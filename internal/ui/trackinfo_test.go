@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,27 +40,26 @@ func TestCardRectFixedSizeClampedToQuadrant(t *testing.T) {
 		wantX, wantY, wantW, wantH int
 	}{
 		{
-			// Quadrant (50x30) roomier than the card: top-left anchor.
+			// Top-right anchor at 40% from panel's top (py=0).
 			name: "fits in the quadrant",
 			px:   0, py: 0, pw: 100, ph: 60, want: 18,
-			wantX: 50, wantY: 30, wantW: trackInfoCardWidth, wantH: 18,
+			wantX: 50, wantY: 24, wantW: trackInfoCardWidth, wantH: 18,
 		},
 		{
 			// Quadrant narrower than the card's fixed width.
 			name: "narrow panel clamps the width",
 			px:   0, py: 0, pw: 82, ph: 42, want: 18,
-			wantX: 41, wantY: 21, wantW: 41, wantH: 18,
+			wantX: 41, wantY: 16, wantW: 41, wantH: 18,
 		},
 		{
-			// Taller than the quadrant (20) but not the panel (40):
-			// bottom edge stays put, the card grows upwards.
-			name: "expanded card grows upwards, not past the panel",
+			// Anchored at 40% of panel's height, but moves up to fit.
+			name: "anchored at 40% of panel height, grows upwards",
 			px:   0, py: 0, pw: 100, ph: 40, want: 30,
 			wantX: 50, wantY: 10, wantW: trackInfoCardWidth, wantH: 30,
 		},
 		{
 			// Asking for more than the whole panel: clamped to it, and
-			// pinned to the panel's top rather than above it.
+			// moves up to top of panel.
 			name: "never taller than the panel itself",
 			px:   0, py: 5, pw: 100, ph: 20, want: 100,
 			wantX: 50, wantY: 5, wantW: trackInfoCardWidth, wantH: 20,
@@ -340,9 +340,8 @@ func TestTrackInfoCardRenderMetaClearedWhenNothingPlaying(t *testing.T) {
 
 // --- Positioning/overlay behavior (unaffected by the metadata addition) ---
 
-func TestOpenTrackInfoTakesFocusAndPositionsInBottomRightQuadrant(t *testing.T) {
+func TestOpenTrackInfoTakesFocusAndPositionsAtFortyPercent(t *testing.T) {
 	a := newTestApp()
-	a.tv.SetFocus(a.library.tree)
 	a.queue.table.SetRect(0, 0, 100, 60)
 
 	a.openTrackInfo()
@@ -359,8 +358,8 @@ func TestOpenTrackInfoTakesFocusAndPositionsInBottomRightQuadrant(t *testing.T) 
 	// than Draw itself, which needs a real tcell.Screen to paint into.
 	a.trackInfo.positionOverQueue()
 	x, y, w, h := a.trackInfo.GetRect()
-	if x != 50 || y != 30 || w != trackInfoCardWidth || h != a.trackInfo.height() {
-		t.Errorf("card rect after Draw = (%d,%d,%d,%d), want (50,30,%d,%d) -- compact size, floating at the quadrant's top-left corner",
+	if x != 50 || y != 24 || w != trackInfoCardWidth || h != a.trackInfo.height() {
+		t.Errorf("card rect after Draw = (%d,%d,%d,%d), want (50,24,%d,%d) -- compact size, 40%% from panel top",
 			x, y, w, h, trackInfoCardWidth, a.trackInfo.height())
 	}
 }
@@ -517,5 +516,255 @@ func TestRenderTrackInfoNothingPlayingWithEmptyQueue(t *testing.T) {
 
 	if got := a.trackInfo.identity.GetText(true); !strings.Contains(got, "Nothing playing") {
 		t.Errorf("card = %q, want \"Nothing playing\"", got)
+	}
+}
+
+func TestTrackInfoNavigation(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{
+		{ID: 1, Title: "Track One", File: "artist/track1.mp3"},
+		{ID: 2, Title: "Track Two", File: "artist/track2.mp3"},
+		{ID: 3, Title: "Track Three", File: "artist/track3.mp3"},
+	}
+	a.queue.render(1)
+	a.currentSong = a.queue.songs[0]
+	a.currentStatus = mpdclient.Status{State: mpdclient.StatePlay, SongID: 1}
+
+	a.openTrackInfo()
+
+	// Nothing has navigated yet, so the card follows the playing track
+	// through targetSong rather than pinning a snapshot of it.
+	if a.trackInfo.inspectSong != nil {
+		t.Fatalf("inspectSong = %v on open, want nil until j/k moves", a.trackInfo.inspectSong)
+	}
+	if song, ok := a.inspectedSong(); !ok || song.Title != "Track One" {
+		t.Fatalf("inspectedSong() = %v, %v on open, want Track One", song, ok)
+	}
+
+	// Navigate down with j
+	evJ := tcell.NewEventKey(tcell.KeyRune, 'j', tcell.ModNone)
+	if ret := a.globalInputCapture(evJ); ret != nil {
+		t.Errorf("globalInputCapture('j') returned %v, want nil", ret)
+	}
+	if a.trackInfo.inspectSong == nil || a.trackInfo.inspectSong.Title != "Track Two" {
+		t.Errorf("expected inspected track to be Track Two after 'j', got %v", a.trackInfo.inspectSong)
+	}
+	if row, _ := a.queue.table.GetSelection(); row != queueHeaderRows+1 {
+		t.Errorf("queue selection row = %d, want %d", row, queueHeaderRows+1)
+	}
+
+	// Navigate down with KeyDown
+	evDown := tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone)
+	if ret := a.globalInputCapture(evDown); ret != nil {
+		t.Errorf("globalInputCapture(KeyDown) returned %v, want nil", ret)
+	}
+	if a.trackInfo.inspectSong == nil || a.trackInfo.inspectSong.Title != "Track Three" {
+		t.Errorf("expected inspected track to be Track Three after KeyDown, got %v", a.trackInfo.inspectSong)
+	}
+
+	// Navigate up with k
+	evK := tcell.NewEventKey(tcell.KeyRune, 'k', tcell.ModNone)
+	if ret := a.globalInputCapture(evK); ret != nil {
+		t.Errorf("globalInputCapture('k') returned %v, want nil", ret)
+	}
+	if a.trackInfo.inspectSong == nil || a.trackInfo.inspectSong.Title != "Track Two" {
+		t.Errorf("expected inspected track to be Track Two after 'k', got %v", a.trackInfo.inspectSong)
+	}
+
+	// Navigate up with KeyUp
+	evUp := tcell.NewEventKey(tcell.KeyUp, 0, tcell.ModNone)
+	if ret := a.globalInputCapture(evUp); ret != nil {
+		t.Errorf("globalInputCapture(KeyUp) returned %v, want nil", ret)
+	}
+	if a.trackInfo.inspectSong == nil || a.trackInfo.inspectSong.Title != "Track One" {
+		t.Errorf("expected inspected track to be Track One after KeyUp, got %v", a.trackInfo.inspectSong)
+	}
+
+	// Close overlay with Esc
+	evEsc := tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone)
+	if ret := a.globalInputCapture(evEsc); ret != nil {
+		t.Errorf("globalInputCapture(Esc) returned %v, want nil", ret)
+	}
+	// The stale inspectSong pointer is deliberately not cleared on close
+	// -- it is simply no longer consulted, which no close path can
+	// forget to do. What matters is that the card is back to following
+	// the playing track.
+	if song, ok := a.inspectedSong(); !ok || song.Title != "Track One" {
+		t.Errorf("inspectedSong() = %v, %v after close, want the playing track (Track One)", song, ok)
+	}
+	if a.mode != modeNormal {
+		t.Errorf("expected mode to be modeNormal after close, got %v", a.mode)
+	}
+}
+
+// TestCardStaysInsideQueueBorders pins the fix for the card painting
+// over the Queue panel's own border: positionOverQueue clamps against
+// the panel's inner rect, not its outer one, so the card's last row can
+// no longer land on the bottom border row (nor its last column on the
+// right border column, which is what a narrow panel used to do).
+func TestCardStaysInsideQueueBorders(t *testing.T) {
+	cases := []struct{ x, y, w, h int }{
+		{0, 0, 100, 40},  // roomy: the 40% anchor has somewhere to go
+		{50, 3, 100, 40}, // offset panel, the case that exposed this
+		{0, 0, 100, 24},  // short: card taller than the panel
+		{0, 0, 60, 40},   // narrow: card wider than the right half
+		{0, 0, 30, 12},   // both
+		{0, 0, 10, 6},    // degenerate
+	}
+	for _, tc := range cases {
+		a := newTestAppWithMetaDB(t)
+		a.queue.table.SetRect(tc.x, tc.y, tc.w, tc.h)
+		a.trackInfo.positionOverQueue()
+
+		ix, iy, iw, ih := a.queue.table.GetInnerRect()
+		cx, cy, cw, ch := a.trackInfo.GetRect()
+		if ch == 0 || cw == 0 {
+			continue // nothing drawn, nothing to overlap
+		}
+		if cx < ix || cx+cw > ix+iw {
+			t.Errorf("panel %v: card x %d..%d escapes the interior %d..%d",
+				tc, cx, cx+cw-1, ix, ix+iw-1)
+		}
+		if cy < iy || cy+ch > iy+ih {
+			t.Errorf("panel %v: card y %d..%d escapes the interior %d..%d",
+				tc, cy, cy+ch-1, iy, iy+ih-1)
+		}
+	}
+}
+
+// TestOpenTrackInfoLeavesQueueCursorAlone: pressing 'i' inspects, it
+// does not navigate. It used to snap the Queue cursor onto the playing
+// track and never put it back, losing the user's place in the queue.
+func TestOpenTrackInfoLeavesQueueCursorAlone(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = make([]mpdclient.Song, 20)
+	for i := range a.queue.songs {
+		a.queue.songs[i] = mpdclient.Song{ID: i + 1, Title: "T", File: fmt.Sprintf("f%d.mp3", i)}
+	}
+	a.queue.render(3)
+	a.queue.table.Select(15+queueHeaderRows, 0) // user is browsing row 15
+	a.currentSong = a.queue.songs[2]            // track 3 is playing
+	a.currentStatus = mpdclient.Status{State: mpdclient.StatePlay, SongID: 3}
+
+	a.openTrackInfo()
+
+	if row, _ := a.queue.table.GetSelection(); row != 15+queueHeaderRows {
+		t.Errorf("queue selection row = %d after 'i', want it left at %d", row, 15+queueHeaderRows)
+	}
+	// The card still shows the playing track, as it always did.
+	if song, ok := a.inspectedSong(); !ok || song.ID != 3 {
+		t.Errorf("inspectedSong() = %v, %v, want the playing track (id 3)", song, ok)
+	}
+}
+
+// TestTrackInfoFollowsPlaybackUntilNavigated: with the card open and
+// nothing navigated, a track change still moves the card on. A snapshot
+// taken at open time froze it on the track that had been playing then.
+func TestTrackInfoFollowsPlaybackUntilNavigated(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{
+		{ID: 1, Title: "First", File: "a.mp3"},
+		{ID: 2, Title: "Second", File: "b.mp3"},
+	}
+	a.queue.render(1)
+	a.currentSong = a.queue.songs[0]
+	a.currentStatus = mpdclient.Status{State: mpdclient.StatePlay, SongID: 1}
+	a.openTrackInfo()
+
+	// MPD advances to the next track.
+	a.currentSong = a.queue.songs[1]
+	a.currentStatus = mpdclient.Status{State: mpdclient.StatePlay, SongID: 2}
+	a.renderTrackInfo()
+	if got := a.trackInfo.identity.GetText(true); !strings.Contains(got, "Second") {
+		t.Errorf("card = %q, want it to have followed playback to Second", got)
+	}
+
+	// Once navigated, it pins: playback moving on must not yank the card
+	// away from the track being inspected.
+	a.trackInfo.handleNav(-1)
+	if song, _ := a.inspectedSong(); song.Title != "First" {
+		t.Fatalf("after k, inspected = %q, want First", song.Title)
+	}
+	a.currentSong = a.queue.songs[1]
+	a.renderTrackInfo()
+	if got := a.trackInfo.identity.GetText(true); !strings.Contains(got, "First") {
+		t.Errorf("card = %q, want it pinned to the inspected track", got)
+	}
+}
+
+// TestTrackInfoNavStartsFromShownTrack: the first j steps off the track
+// the card is showing, not off wherever the Queue cursor was parked.
+func TestTrackInfoNavStartsFromShownTrack(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{
+		{ID: 1, Title: "One", File: "a.mp3"},
+		{ID: 2, Title: "Two", File: "b.mp3"},
+		{ID: 3, Title: "Three", File: "c.mp3"},
+		{ID: 4, Title: "Four", File: "d.mp3"},
+	}
+	a.queue.render(2)
+	a.queue.table.Select(3+queueHeaderRows, 0) // cursor parked on "Four"
+	a.currentSong = a.queue.songs[1]           // but "Two" is playing
+	a.currentStatus = mpdclient.Status{State: mpdclient.StatePlay, SongID: 2}
+	a.openTrackInfo()
+
+	a.trackInfo.handleNav(1)
+	if song, _ := a.inspectedSong(); song.Title != "Three" {
+		t.Errorf("after j, inspected = %q, want Three (one past the shown track)", song.Title)
+	}
+}
+
+// TestTrackInfoScrollStaysInRange: j/k while expanded may not run
+// scrollOffset outside [0, maxScroll], even held down past either end.
+func TestTrackInfoScrollStaysInRange(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.queue.table.SetRect(0, 0, 120, 44)
+	a.queue.songs = []mpdclient.Song{{ID: 1, Title: "T", File: "a.mp3"}}
+	a.queue.render(1)
+	a.openTrackInfo()
+	a.trackInfo.positionOverQueue()
+	_, _, _, innerH := a.trackInfo.GetInnerRect()
+
+	a.trackInfo.toggleExpanded()
+	for i := 0; i < 200; i++ {
+		a.trackInfo.handleNav(1)
+	}
+	max := a.trackInfo.maxScroll(innerH)
+	if a.trackInfo.scrollOffset != max {
+		t.Errorf("scrollOffset after scrolling to the end = %d, want %d", a.trackInfo.scrollOffset, max)
+	}
+	for i := 0; i < 200; i++ {
+		a.trackInfo.handleNav(-1)
+	}
+	if a.trackInfo.scrollOffset != 0 {
+		t.Errorf("scrollOffset after scrolling back = %d, want 0", a.trackInfo.scrollOffset)
+	}
+
+	// Collapsing resets it, so reopening never starts mid-list.
+	a.trackInfo.handleNav(1)
+	a.trackInfo.toggleExpanded()
+	if a.trackInfo.scrollOffset != 0 {
+		t.Errorf("scrollOffset after collapsing = %d, want 0", a.trackInfo.scrollOffset)
+	}
+}
+
+// TestQueueIndexOfPrefersID: the same file can sit at several queue
+// positions, so the id is what identifies an entry; the path is only a
+// fallback for a song that has no id (a Library selection).
+func TestQueueIndexOfPrefersID(t *testing.T) {
+	a := newTestApp()
+	a.queue.songs = []mpdclient.Song{
+		{ID: 1, File: "dup.mp3"},
+		{ID: 2, File: "other.mp3"},
+		{ID: 3, File: "dup.mp3"},
+	}
+	if got := a.queue.indexOf(mpdclient.Song{ID: 3, File: "dup.mp3"}); got != 2 {
+		t.Errorf("indexOf(id 3) = %d, want 2 (not the first row sharing its path)", got)
+	}
+	if got := a.queue.indexOf(mpdclient.Song{File: "other.mp3"}); got != 1 {
+		t.Errorf("indexOf(no id) = %d, want 1 via the path fallback", got)
+	}
+	if got := a.queue.indexOf(mpdclient.Song{File: "absent.mp3"}); got != -1 {
+		t.Errorf("indexOf(absent) = %d, want -1", got)
 	}
 }

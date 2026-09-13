@@ -1001,6 +1001,33 @@ func (q *queuePanel) jumpToMatch(query string) bool {
 	return false
 }
 
+// indexOf locates song in the queue, returning -1 if it is not there.
+//
+// Matches on MPD's song id first, which is unique per queue entry, and
+// only falls back to the file path for a song that carries no id (one
+// resolved from the Library rather than the queue). The fallback cannot
+// be the primary: the same file may legitimately sit at several
+// positions in a queue, and the first of them is not necessarily the one
+// being asked about.
+func (q *queuePanel) indexOf(song mpdclient.Song) int {
+	if song.ID > 0 {
+		for i, s := range q.songs {
+			if s.ID == song.ID {
+				return i
+			}
+		}
+	}
+	if song.File == "" {
+		return -1
+	}
+	for i, s := range q.songs {
+		if s.File == song.File {
+			return i
+		}
+	}
+	return -1
+}
+
 func (q *queuePanel) selectedSong() (mpdclient.Song, bool) {
 	row, _ := q.table.GetSelection()
 	i := row - queueHeaderRows

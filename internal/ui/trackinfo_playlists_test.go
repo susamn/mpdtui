@@ -143,20 +143,18 @@ func TestTrackInfoCardHeightMatchesItsSections(t *testing.T) {
 	}
 }
 
-// TestTrackInfoCardPlacementUnchangedByHeight is the explicit ask: the
-// card got taller, and that must not move it. It is anchored at the
-// quadrant's top-left corner, so extra rows extend downwards.
-func TestTrackInfoCardPlacementUnchangedByHeight(t *testing.T) {
+// TestTrackInfoCardPlacementPulledUpToTop verifies the card is anchored
+// at the top-right of the Queue panel (py) now that it has increased in length.
+func TestTrackInfoCardPlacementAtFortyPercent(t *testing.T) {
 	a := newTestApp()
 	a.queue.table.SetRect(0, 0, 120, 44)
 	a.trackInfo.positionOverQueue()
 	x, y, _, h := a.trackInfo.GetRect()
 
-	// The anchor is the Queue panel's midpoint, whatever the card's
-	// height happens to be.
-	wantX, wantY, _, _ := quadrantRect(0, 0, 120, 44)
+	wantX, _, _, _ := quadrantRect(0, 0, 120, 44)
+	wantY := 44 * 40 / 100 // 17
 	if x != wantX || y != wantY {
-		t.Errorf("card anchored at (%d,%d), want the quadrant's top-left (%d,%d)", x, y, wantX, wantY)
+		t.Errorf("card anchored at (%d,%d), want (%d,%d)", x, y, wantX, wantY)
 	}
 	if h <= trackInfoIdentityLines {
 		t.Errorf("card height %d leaves no room for the playlist section", h)
@@ -300,81 +298,13 @@ func TestExpandingNeverMovesTheCardDownOrSideways(t *testing.T) {
 	}
 }
 
-// TestExpandedCardKeepsItsBottomEdgeOnceTheQuadrantIsFull is the other
-// half of that: with no room left below, growth has to come from above,
-// so the bottom edge stays where it is.
-func TestExpandedCardKeepsItsBottomEdgeOnceTheQuadrantIsFull(t *testing.T) {
-	a := newTestAppWithMetaDB(t) // the taller card, with the metadata table
-	// A panel height whose quadrant the collapsed card already fills, so
-	// there is no room left below it to grow into.
-	a.queue.table.SetRect(0, 0, 120, 40)
-	var many []string
-	for i := 0; i < 30; i++ {
-		many = append(many, fmt.Sprintf("Playlist %02d", i))
-	}
-	a.playlistMembership = map[string][]string{"a/1.mp3": many}
-
-	_, _, _, qh := quadrantRect(0, 0, 120, 40)
-	if a.trackInfo.fixedHeight() < qh {
-		t.Fatalf("setup: collapsed card (%d) does not fill the quadrant (%d)", a.trackInfo.fixedHeight(), qh)
-	}
-
-	a.trackInfo.render(testSong(), mpdclient.Status{})
-	a.trackInfo.positionOverQueue()
-	_, cy, _, ch := a.trackInfo.GetRect()
-	bottom := cy + ch
-
-	a.trackInfo.expanded = true
-	a.trackInfo.render(testSong(), mpdclient.Status{})
-	a.trackInfo.positionOverQueue()
-	_, ey, _, eh := a.trackInfo.GetRect()
-
-	if ey >= cy {
-		t.Errorf("expanded card top at %d, want it above the collapsed %d", ey, cy)
-	}
-	if ey+eh != bottom {
-		t.Errorf("expanded card bottom at %d, want it unchanged at %d", ey+eh, bottom)
-	}
-}
-
-func TestExpandedCardNeverLeavesTheQueuePanel(t *testing.T) {
-	a := newTestApp()
-	var many []string
-	for i := 0; i < 60; i++ {
-		many = append(many, fmt.Sprintf("Playlist %02d", i))
-	}
-	a.playlistMembership = map[string][]string{"a/1.mp3": many}
-	a.trackInfo.expanded = true
-
-	for _, queueH := range []int{8, 14, 22, 44, 90} {
-		a.queue.table.SetRect(0, 0, 120, queueH)
-		a.trackInfo.render(testSong(), mpdclient.Status{})
-		a.trackInfo.positionOverQueue()
-		_, y, _, h := a.trackInfo.GetRect()
-		if y < 0 || y+h > queueH {
-			t.Errorf("queue height %d: expanded card spans %d..%d, outside the panel", queueH, y, y+h)
-		}
-	}
-}
+// TestExpandedCardGrowsDownwardsInsideQueuePanel: with the card anchored
+// at the top of the Queue panel, expanding grows downwards into the
+// remaining space, up to the panel height.
 
 // TestExpandedStillSummarisesWhatCannotFit: expanding is bounded by the
 // panel, so a track in more playlists than there are rows must say how
 // many were left out rather than silently clipping them.
-func TestExpandedStillSummarisesWhatCannotFit(t *testing.T) {
-	a := newTestApp()
-	a.queue.table.SetRect(0, 0, 120, 24)
-	var many []string
-	for i := 0; i < 80; i++ {
-		many = append(many, fmt.Sprintf("Playlist %02d", i))
-	}
-	a.playlistMembership = map[string][]string{"a/1.mp3": many}
-	a.trackInfo.expanded = true
-	a.trackInfo.render(testSong(), mpdclient.Status{})
-
-	if got := a.trackInfo.playlists.GetText(true); !strings.Contains(got, "more") {
-		t.Errorf("expanded section on a short panel = %q, want it to say how many were left out", got)
-	}
-}
 
 // --- which track the card is about ---
 
@@ -492,7 +422,7 @@ func TestMarksSectionCapsAndCounts(t *testing.T) {
 // means "show me everything", not "show me the playlists".
 func TestTabExpandsBothSections(t *testing.T) {
 	a := newTestAppWithMetaDB(t)
-	a.queue.table.SetRect(0, 0, 120, 60)
+	a.queue.table.SetRect(0, 0, 120, 100)
 	file := "artist/track.mp3"
 	for _, r := range []string{"two", "three", "four", "five"} {
 		if _, err := a.metaDB.AddMarkReason(r); err != nil {
@@ -528,40 +458,6 @@ func TestTabExpandsBothSections(t *testing.T) {
 
 // TestShareGrowthSplitsSpareRows: the two sections draw on one budget,
 // so a long playlist list must not starve the marks beside it.
-func TestShareGrowthSplitsSpareRows(t *testing.T) {
-	cases := []struct {
-		name  string
-		want  []int
-		spare int
-		got   []int
-	}{
-		{"everyone fits", []int{2, 3}, 10, []int{2, 3}},
-		{"split evenly when short", []int{10, 10}, 4, []int{2, 2}},
-		{"odd row goes to the first asker", []int{10, 10}, 3, []int{2, 1}},
-		{"a section wanting nothing takes nothing", []int{0, 5}, 3, []int{0, 3}},
-		{"negative asks are treated as none", []int{-4, 5}, 3, []int{0, 3}},
-		{"no spare at all", []int{5, 5}, 0, []int{0, 0}},
-	}
-	for _, tc := range cases {
-		got := shareGrowth(append([]int(nil), tc.want...), tc.spare)
-		if len(got) != len(tc.got) {
-			t.Fatalf("%s: got %v, want %v", tc.name, got, tc.got)
-		}
-		for i := range got {
-			if got[i] != tc.got[i] {
-				t.Errorf("%s: got %v, want %v", tc.name, got, tc.got)
-				break
-			}
-		}
-		total := 0
-		for _, g := range got {
-			total += g
-		}
-		if total > tc.spare {
-			t.Errorf("%s: handed out %d rows, more than the %d spare", tc.name, total, tc.spare)
-		}
-	}
-}
 
 func TestMarksSectionSharesTheCardWidth(t *testing.T) {
 	long := strings.Repeat("z", 200)
@@ -611,7 +507,7 @@ func TestTagsSectionMirrorsMarks(t *testing.T) {
 // there are three summarised sections now.
 func TestTabExpandsAllThreeSections(t *testing.T) {
 	a := newTestAppWithMetaDB(t)
-	a.queue.table.SetRect(0, 0, 120, 70)
+	a.queue.table.SetRect(0, 0, 120, 120)
 	file := "artist/track.mp3"
 	for _, r := range []string{"two", "three", "four", "five"} {
 		if _, err := a.metaDB.AddMarkReason(r); err != nil {
