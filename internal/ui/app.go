@@ -426,11 +426,23 @@ func (a *App) eventLoop() {
 			if !ok {
 				return
 			}
-			// The idle connection is dead. This is a personal single-user
-			// tool; rather than reconnect-looping forever, surface it and
-			// let ticker-driven polling keep the Now Playing bar alive.
-			a.tv.QueueUpdateDraw(func() { a.showError(fmt.Errorf("lost MPD event connection")) })
-			return
+			a.tv.QueueUpdateDraw(func() { a.showError(fmt.Errorf("lost MPD event connection, reconnecting...")) })
+			
+			a.watcher = nil // Nil watcher channels block forever in select, preventing CPU spin while reconnecting
+			
+			go func() {
+				for {
+					w, err := a.client.Watch("player", "mixer", "options", "playlist", "stored_playlist", "database")
+					if err == nil {
+						a.tv.QueueUpdateDraw(func() {
+							a.watcher = w
+						})
+						break
+					}
+					time.Sleep(2 * time.Second)
+				}
+			}()
+
 		case <-ticker.C:
 			a.tv.QueueUpdateDraw(func() { a.refreshNowPlaying() })
 		case <-animTicker.C:
