@@ -3,9 +3,8 @@ package ui
 import (
 	"strings"
 
-
-	"mpdtui/internal/textutil"
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/textutil"
 )
 
 // containsFold reports whether haystack contains needle, ignoring case and

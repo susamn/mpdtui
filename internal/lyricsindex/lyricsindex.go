@@ -23,14 +23,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"mpdtui/internal/textutil"
 	"time"
 	"unicode/utf8"
-
 
 	_ "modernc.org/sqlite"
 
 	"mpdtui/internal/lyrics"
+	"mpdtui/internal/textutil"
 )
 
 // schemaVersion is bumped only on an incompatible change to the entries

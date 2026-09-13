@@ -2,9 +2,9 @@ package ui
 
 import (
 	"fmt"
+	"mpdtui/internal/textutil"
 	"sort"
 	"strings"
-	"mpdtui/internal/textutil"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"

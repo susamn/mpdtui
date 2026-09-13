@@ -19,9 +19,10 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"mpdtui/internal/textutil"
 
 	_ "modernc.org/sqlite"
+
+	"mpdtui/internal/textutil"
 )
 
 // DB is a handle to the local track-metadata database.
@@ -762,4 +763,3 @@ func parseTimestamp(val any) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("unexpected timestamp type: %T", val)
 	}
 }
-

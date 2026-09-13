@@ -79,7 +79,6 @@ func parseLibrarySong(a mpd.Attrs) Song {
 	}
 }
 
-
 func parseLibraryDuration(a mpd.Attrs) time.Duration {
 	if v, ok := a["duration"]; ok {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {

@@ -24,7 +24,6 @@ func (c *Client) Playlists() ([]Playlist, error) {
 	return pls, nil
 }
 
-
 // PlaylistTracks returns the tracks stored in playlist name.
 func (c *Client) PlaylistTracks(name string) ([]Song, error) {
 	list, err := call(c, func(conn *mpd.Client) ([]mpd.Attrs, error) { return conn.PlaylistContents(name) })

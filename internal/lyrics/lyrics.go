@@ -19,8 +19,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"mpdtui/internal/textutil"
 	"time"
+
+	"mpdtui/internal/textutil"
 )
 
 // Dir returns the local directory that would contain file's lyrics, or

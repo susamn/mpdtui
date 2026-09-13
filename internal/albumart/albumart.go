@@ -15,6 +15,7 @@ import (
 
 	"github.com/nfnt/resize"
 	"github.com/rivo/tview"
+
 	"mpdtui/internal/mpdclient"
 )
 

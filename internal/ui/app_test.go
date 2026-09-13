@@ -243,7 +243,6 @@ func TestLKeyWithNothingPlayingFlashesMessageWithoutChangingFocus(t *testing.T) 
 	}
 }
 
-
 var stripColorRe = regexp.MustCompile(`\[[a-zA-Z0-9#:-]+\]`)
 
 func stripColorTags(s string) string {
