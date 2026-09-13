@@ -696,9 +696,19 @@ func (a *App) openGlobalSearch() {
 		}
 		switch hints.kind {
 		case globalSearchTrack, globalSearchLyrics:
-			file, name := trackSongs[idx].File, trackSongs[idx].DisplayName()
+			// idx indexes whichever kind's own slices produced the
+			// match, so pick the slice first and index once. Reading
+			// trackSongs[idx] up front and only then overwriting it for
+			// the lyrics kind panicked whenever the track kind had not
+			// been loaded in this popup session -- which is the normal
+			// case for a lyrics search, since each kind is fetched
+			// lazily on first use and searching lyrics first never
+			// touches loadTracks.
+			var file, name string
 			if hints.kind == globalSearchLyrics {
 				file, name = lyricsFiles[idx], lyricsLabels[idx]
+			} else {
+				file, name = trackSongs[idx].File, trackSongs[idx].DisplayName()
 			}
 			if err := a.client.QueueAdd(file); err != nil {
 				a.showError(err)
