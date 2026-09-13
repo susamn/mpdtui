@@ -153,8 +153,23 @@ func readKeys(out chan<- byte) {
 	}
 }
 
+// controller is everything this package asks of the MPD client.
+// Narrowed to an interface so the keypress handling and the render pass
+// can be tested against a stand-in rather than needing a live server --
+// and, for the transport keys especially, without a test having to
+// actually stop or skip the user's music to prove a key is wired up.
+type controller interface {
+	Status() (mpdclient.Status, error)
+	CurrentSong() (mpdclient.Song, error)
+	TogglePlayPause() error
+	Stop() error
+	Next() error
+	Previous() error
+	ChangeVolume(delta int) error
+}
+
 // handleKey applies a keypress and reports whether it should quit.
-func handleKey(client *mpdclient.Client, metaDB *metadata.DB, b byte) bool {
+func handleKey(client controller, metaDB *metadata.DB, b byte) bool {
 	switch b {
 	case ' ':
 		client.TogglePlayPause()
@@ -186,7 +201,7 @@ func handleKey(client *mpdclient.Client, metaDB *metadata.DB, b byte) bool {
 // swallowed rather than surfaced, same "keep the display line, don't
 // interrupt playback for a bookkeeping write" spirit as the rest of this
 // package's error handling.
-func rateCurrentTrack(client *mpdclient.Client, metaDB *metadata.DB, rating int) {
+func rateCurrentTrack(client controller, metaDB *metadata.DB, rating int) {
 	if metaDB == nil {
 		return
 	}
@@ -285,7 +300,7 @@ func contentWidthFor(lines [][]segment) int {
 	return w
 }
 
-func render(out *block, client *mpdclient.Client, metaDB *metadata.DB, playlistCount int, playCountedSongID *int) {
+func render(out *block, client controller, metaDB *metadata.DB, playlistCount int, playCountedSongID *int) {
 	st, err := client.Status()
 	if err != nil {
 		out.print([]string{"mpdtui: " + err.Error()})
