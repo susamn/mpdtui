@@ -3,6 +3,7 @@ package ui
 
 import (
 	"fmt"
+	"context"
 	"os"
 	"os/signal"
 	"strings"
@@ -153,6 +154,7 @@ type App struct {
 	locateFlashNode      *tview.TreeNode
 	locateFlashNodeStyle tcell.Style
 
+	playlistRefreshCancel context.CancelFunc
 	done chan struct{}
 }
 
@@ -473,9 +475,24 @@ func (a *App) eventLoop() {
 // flash: an automatic background refresh shouldn't announce itself, but a
 // deliberate keypress should.
 func (a *App) refreshTrackCounts(silent bool) {
+	if a.playlistRefreshCancel != nil {
+		a.playlistRefreshCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	a.playlistRefreshCancel = cancel
+
 	go func() {
 		idx, err := a.client.PlaylistIndex()
+		
+		// If cancelled while the fetch was in flight, discard the result entirely
+		if ctx.Err() != nil {
+			return
+		}
+
 		a.tv.QueueUpdateDraw(func() {
+			if ctx.Err() != nil {
+				return
+			}
 			if err != nil {
 				a.showError(err)
 				return
