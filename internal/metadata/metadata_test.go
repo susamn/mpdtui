@@ -393,3 +393,128 @@ func TestDeleteTagClearsReferencingTrackTags(t *testing.T) {
 		}
 	}
 }
+
+// --- Error paths --------------------------------------------------------
+//
+// Every write below shares the same shape: do the work, return the first
+// error. A closed database is the cheapest way to make each of those
+// errors actually happen, which is what these cover -- the arms are
+// otherwise unreachable and would hide a swallowed error.
+
+func closedDB(t *testing.T) *metadata.DB {
+	t.Helper()
+	db, err := metadata.Open(filepath.Join(t.TempDir(), "closed.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	return db
+}
+
+func TestWritesReportErrorsOnAClosedDatabase(t *testing.T) {
+	db := closedDB(t)
+
+	cases := []struct {
+		name string
+		call func() error
+	}{
+		{"SetMarks", func() error { return db.SetMarks("a.mp3", []int64{1}) }},
+		{"ToggleMark", func() error { _, err := db.ToggleMark("a.mp3", 1); return err }},
+		{"SetTags", func() error { return db.SetTags("a.mp3", []int64{1}) }},
+		{"ToggleTag", func() error { _, err := db.ToggleTag("a.mp3", 1); return err }},
+		{"DeleteMarkReason", func() error { return db.DeleteMarkReason(1) }},
+		{"DeleteTag", func() error { return db.DeleteTag(1) }},
+		{"AddMarkReason", func() error { _, err := db.AddMarkReason("x"); return err }},
+		{"AddTag", func() error { _, err := db.AddTag("x"); return err }},
+		{"Rate", func() error { return db.Rate("a.mp3", 3) }},
+		{"CreateBookmark", func() error { _, err := db.CreateBookmark("a.mp3", 0, "n"); return err }},
+		{"UpdateBookmark", func() error { return db.UpdateBookmark(1, "n") }},
+		{"DeleteBookmark", func() error { return db.DeleteBookmark(1) }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.call(); err == nil {
+				t.Error("no error from a closed database")
+			}
+		})
+	}
+}
+
+func TestReadsReportErrorsOnAClosedDatabase(t *testing.T) {
+	db := closedDB(t)
+
+	cases := []struct {
+		name string
+		call func() error
+	}{
+		{"Get", func() error { _, err := db.Get("a.mp3"); return err }},
+		{"ListMarkReasons", func() error { _, err := db.ListMarkReasons(); return err }},
+		{"ListTags", func() error { _, err := db.ListTags(); return err }},
+		{"BookmarksForTrack", func() error { _, err := db.BookmarksForTrack("a.mp3"); return err }},
+		{"GetBookmark", func() error { _, err := db.GetBookmark(1); return err }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.call(); err == nil {
+				t.Error("no error from a closed database")
+			}
+		})
+	}
+}
+
+// TestOpenRejectsAnUnusablePath covers Open's own failure arm: a path
+// that cannot be created must come back as an error rather than a DB
+// that fails later on first use.
+func TestOpenRejectsAnUnusablePath(t *testing.T) {
+	// A directory where a file is expected.
+	dir := t.TempDir()
+	if _, err := metadata.Open(dir); err == nil {
+		t.Error("Open succeeded on a directory path, want an error")
+	}
+}
+
+// TestOpenIsIdempotentAcrossReopens covers the schema and seed
+// statements running a second time against a database that already has
+// them -- the normal case on every launch after the first.
+func TestOpenIsIdempotentAcrossReopens(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reopen.db")
+
+	first, err := metadata.Open(path)
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	if _, err := first.AddMarkReason("keep me"); err != nil {
+		t.Fatalf("AddMarkReason: %v", err)
+	}
+	reasonsBefore, err := first.ListMarkReasons()
+	if err != nil {
+		t.Fatalf("ListMarkReasons: %v", err)
+	}
+	first.Close()
+
+	second, err := metadata.Open(path)
+	if err != nil {
+		t.Fatalf("reopening: %v", err)
+	}
+	t.Cleanup(func() { second.Close() })
+
+	reasonsAfter, err := second.ListMarkReasons()
+	if err != nil {
+		t.Fatalf("ListMarkReasons after reopen: %v", err)
+	}
+	if len(reasonsAfter) != len(reasonsBefore) {
+		t.Errorf("reopening changed the catalog: %d reasons before, %d after",
+			len(reasonsBefore), len(reasonsAfter))
+	}
+	var found bool
+	for _, r := range reasonsAfter {
+		if r.Reason == "keep me" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("a row added before the reopen is gone afterwards")
+	}
+}

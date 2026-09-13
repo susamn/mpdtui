@@ -535,3 +535,85 @@ func TestPlaylistIndexMembershipIsSortedAndDeduped(t *testing.T) {
 		}
 	}
 }
+
+// TestSearchReadsOnly covers the free-text search paths against a real
+// server. These are queries only -- nothing here changes playback, the
+// queue, or any stored playlist, unlike most of this package's
+// remaining uncovered surface.
+func TestSearchReadsOnly(t *testing.T) {
+	c := dialOrSkip(t)
+
+	songs, err := c.Search("a")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	for _, s := range songs {
+		if s.File == "" {
+			t.Error("a search result has no file path")
+			break
+		}
+	}
+
+	// A query nothing can match comes back empty rather than erroring.
+	none, err := c.Search("zzzz-no-such-track-zzzz")
+	if err != nil {
+		t.Fatalf("Search with no matches: %v", err)
+	}
+	if len(none) != 0 {
+		t.Errorf("Search for a nonsense query returned %d results, want none", len(none))
+	}
+
+	if _, err := c.SearchAlbums("a"); err != nil {
+		t.Fatalf("SearchAlbums: %v", err)
+	}
+}
+
+// TestArtistAndAlbumTracksReadOnly covers the per-artist and per-album
+// listings, again queries only.
+func TestArtistAndAlbumTracksReadOnly(t *testing.T) {
+	c := dialOrSkip(t)
+
+	artists, err := c.Artists()
+	if err != nil {
+		t.Fatalf("Artists: %v", err)
+	}
+	if len(artists) == 0 {
+		t.Skip("library has no artists to list tracks for")
+	}
+
+	tracks, err := c.ArtistTracks(artists[0])
+	if err != nil {
+		t.Fatalf("ArtistTracks(%q): %v", artists[0], err)
+	}
+	for _, s := range tracks {
+		if s.File == "" {
+			t.Errorf("ArtistTracks(%q) returned a track with no file path", artists[0])
+			break
+		}
+	}
+
+	albums, err := c.Albums(artists[0])
+	if err != nil {
+		t.Fatalf("Albums(%q): %v", artists[0], err)
+	}
+	if len(albums) == 0 {
+		return
+	}
+	if _, err := c.Tracks(artists[0], albums[0]); err != nil {
+		t.Fatalf("Tracks(%q, %q): %v", artists[0], albums[0], err)
+	}
+}
+
+// TestArtistTracksForAnUnknownArtist covers the empty-result path
+// without needing anything in the library.
+func TestArtistTracksForAnUnknownArtist(t *testing.T) {
+	c := dialOrSkip(t)
+
+	tracks, err := c.ArtistTracks("zzzz-no-such-artist-zzzz")
+	if err != nil {
+		t.Fatalf("ArtistTracks: %v", err)
+	}
+	if len(tracks) != 0 {
+		t.Errorf("got %d tracks for an artist that does not exist, want none", len(tracks))
+	}
+}
