@@ -1,6 +1,7 @@
 package lyricsindex
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -106,5 +107,217 @@ func TestMetaValueMissingKey(t *testing.T) {
 
 	if got := metaValue(db, "no-such-key"); got != "" {
 		t.Errorf("metaValue of a missing key = %q, want empty", got)
+	}
+}
+
+// TestReindexReportsProgress covers the Progress callback, which the 'I'
+// overlay uses to show a live count. It fires every progressEvery
+// tracks plus once at the end, coarse enough not to swamp a redraw
+// queue on a large library.
+func TestReindexReportsProgress(t *testing.T) {
+	musicDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(musicDir, "a"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	tracks := make([]Track, progressEvery*2+5)
+	for i := range tracks {
+		tracks[i] = Track{File: fmt.Sprintf("a/%04d.mp3", i), Artist: "A", Title: fmt.Sprintf("T%d", i)}
+		// Every track has a sidecar here, so progress fires on the
+		// regular cadence -- see TestReindexProgressOnlyCountsTracksWithLyrics
+		// for what happens when most do not.
+		name := filepath.Join(musicDir, "a", fmt.Sprintf("%04d.txt", i))
+		if err := os.WriteFile(name, []byte("words"), 0o644); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+	}
+
+	path := filepath.Join(t.TempDir(), "lyrics.db")
+	var calls [][2]int
+	p := func(done, total int) { calls = append(calls, [2]int{done, total}) }
+
+	if _, err := Reindex(context.Background(), path, musicDir, tracks, p); err != nil {
+		t.Fatalf("Reindex: %v", err)
+	}
+
+	if len(calls) < 3 {
+		t.Fatalf("Progress fired %d times over %d tracks, want at least 3", len(calls), len(tracks))
+	}
+	last := calls[len(calls)-1]
+	if last[0] != len(tracks) || last[1] != len(tracks) {
+		t.Errorf("final Progress = %v, want (%d, %d)", last, len(tracks), len(tracks))
+	}
+	for _, c := range calls {
+		if c[1] != len(tracks) {
+			t.Errorf("Progress reported a total of %d, want %d", c[1], len(tracks))
+		}
+	}
+
+	// A second pass over the same, unchanged library takes the
+	// "unchanged" branch, which reports progress separately.
+	calls = nil
+	stats, err := Reindex(context.Background(), path, musicDir, tracks, p)
+	if err != nil {
+		t.Fatalf("second Reindex: %v", err)
+	}
+	if stats.Unchanged == 0 {
+		t.Error("a second pass over an unchanged library read everything again")
+	}
+	if len(calls) < 3 {
+		t.Errorf("Progress fired %d times on the unchanged pass, want at least 3", len(calls))
+	}
+}
+
+// TestReindexProgressOnlyCountsTracksWithLyrics pins a limitation of the
+// progress display rather than an intended behavior.
+//
+// A track with no .txt and no .lrc is skipped before the progress
+// callback, so the counter advances per *track that has lyrics*, not per
+// track examined -- while the total it is reported against is the whole
+// library. On a library where few tracks have sidecars, the 'I' overlay
+// therefore sits near "0 / 8198" for the whole scan and then jumps
+// straight to complete, which reads as a hang.
+//
+// Left as it is: moving the callback above the skip is a one-line change
+// but it makes the scan fire progress far more often on exactly the
+// libraries where each step is cheapest, and the throttle in
+// handleReindexLyrics already assumes the current cadence. Worth knowing
+// before anyone reports the overlay as stuck.
+func TestReindexProgressOnlyCountsTracksWithLyrics(t *testing.T) {
+	musicDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(musicDir, "a"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	// One sidecar among many tracks.
+	if err := os.WriteFile(filepath.Join(musicDir, "a", "0000.txt"), []byte("words"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	tracks := make([]Track, progressEvery*2+5)
+	for i := range tracks {
+		tracks[i] = Track{File: fmt.Sprintf("a/%04d.mp3", i)}
+	}
+
+	var calls [][2]int
+	_, err := Reindex(context.Background(), filepath.Join(t.TempDir(), "lyrics.db"),
+		musicDir, tracks, func(done, total int) { calls = append(calls, [2]int{done, total}) })
+	if err != nil {
+		t.Fatalf("Reindex: %v", err)
+	}
+
+	if len(calls) != 1 {
+		t.Errorf("Progress fired %d times over %d tracks with one sidecar, want only the final call",
+			len(calls), len(tracks))
+	}
+}
+
+// TestReindexUpdatesNamesWithoutRereadingLyrics covers the narrow path
+// where a track's sidecar is untouched but its tags changed: the row's
+// artist/title are refreshed without re-reading the file.
+func TestReindexUpdatesNamesWithoutRereadingLyrics(t *testing.T) {
+	musicDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(musicDir, "a"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(musicDir, "a", "1.txt"), []byte("words"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "lyrics.db")
+
+	tracks := []Track{{File: "a/1.mp3", Artist: "Old", Title: "Name"}}
+	if _, err := Reindex(context.Background(), path, musicDir, tracks, nil); err != nil {
+		t.Fatalf("Reindex: %v", err)
+	}
+
+	tracks[0].Artist, tracks[0].Title = "New", "Title"
+	stats, err := Reindex(context.Background(), path, musicDir, tracks, nil)
+	if err != nil {
+		t.Fatalf("second Reindex: %v", err)
+	}
+	if stats.Read != 0 {
+		t.Errorf("Read = %d, want 0 -- the sidecar did not change", stats.Read)
+	}
+
+	entries, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Artist != "New" || entries[0].Title != "Title" {
+		t.Errorf("entry = %+v, want the refreshed tags", entries)
+	}
+}
+
+// TestReindexRemovesVanishedTracks covers the prune pass: a track no
+// longer in the library must not linger in the index and keep turning
+// up in search.
+func TestReindexRemovesVanishedTracks(t *testing.T) {
+	musicDir := t.TempDir()
+	os.MkdirAll(filepath.Join(musicDir, "a"), 0o755)
+	os.WriteFile(filepath.Join(musicDir, "a", "1.txt"), []byte("words"), 0o644)
+	os.WriteFile(filepath.Join(musicDir, "a", "2.txt"), []byte("more words"), 0o644)
+	path := filepath.Join(t.TempDir(), "lyrics.db")
+
+	both := []Track{{File: "a/1.mp3", Title: "One"}, {File: "a/2.mp3", Title: "Two"}}
+	if _, err := Reindex(context.Background(), path, musicDir, both, nil); err != nil {
+		t.Fatalf("Reindex: %v", err)
+	}
+
+	stats, err := Reindex(context.Background(), path, musicDir, both[:1], nil)
+	if err != nil {
+		t.Fatalf("second Reindex: %v", err)
+	}
+	if stats.Removed != 1 {
+		t.Errorf("Removed = %d, want 1", stats.Removed)
+	}
+	entries, _ := Load(path)
+	if len(entries) != 1 {
+		t.Errorf("%d entries after the prune, want 1", len(entries))
+	}
+}
+
+func TestReindexRejectsAnUnusablePath(t *testing.T) {
+	if _, err := Reindex(context.Background(), "", t.TempDir(), nil, nil); err == nil {
+		t.Error("Reindex with no index path succeeded")
+	}
+	if _, err := Reindex(context.Background(), t.TempDir(), t.TempDir(), nil, nil); err == nil {
+		t.Error("Reindex with a directory as its index path succeeded")
+	}
+}
+
+// TestReindexHonoursCancellation covers the ctx check: the 'I' overlay
+// cancels the scan when the user closes it, and a large library must
+// not keep working afterwards.
+func TestReindexHonoursCancellation(t *testing.T) {
+	musicDir := t.TempDir()
+	os.MkdirAll(filepath.Join(musicDir, "a"), 0o755)
+
+	tracks := make([]Track, progressEvery*4)
+	for i := range tracks {
+		tracks[i] = Track{File: fmt.Sprintf("a/%04d.mp3", i)}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled before it starts
+
+	if _, err := Reindex(ctx, filepath.Join(t.TempDir(), "lyrics.db"), musicDir, tracks, nil); err == nil {
+		t.Error("a cancelled Reindex reported success")
+	}
+}
+
+func TestReadInfoWithNoPathOrNoFile(t *testing.T) {
+	info, err := ReadInfo("")
+	if err != nil {
+		t.Fatalf("ReadInfo(\"\"): %v", err)
+	}
+	if info.Exists {
+		t.Error("ReadInfo with no configured path reports an existing index")
+	}
+
+	info, err = ReadInfo(filepath.Join(t.TempDir(), "never-built.db"))
+	if err != nil {
+		t.Fatalf("ReadInfo on a missing file: %v", err)
+	}
+	if info.Exists {
+		t.Error("ReadInfo reports an index that was never built")
 	}
 }
