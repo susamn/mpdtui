@@ -23,7 +23,7 @@ import (
 // below) rather than a single TextView, so the metadata section can be a
 // real table -- Draw overrides so its position is recomputed from the
 // Queue table's live rect on every frame, the same "read another
-// primitive's current rect at draw time" trick albumArtPanel.draw uses
+// primitive's current rect at draw time" trick albumart.Panel.Draw uses
 // for the Kitty image, which is what makes this track a terminal resize
 // without any extra wiring.
 type trackInfoCard struct {
