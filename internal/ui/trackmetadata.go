@@ -91,21 +91,38 @@ func (a *App) maybeTrackPlayCount(st mpdclient.Status, song mpdclient.Song) {
 	if a.metaDB == nil || st.SongID < 0 || song.File == "" {
 		return
 	}
-	if st.SongID == a.playCountedSongID {
+	db := a.metaDB
+	file := song.File
+	songID := st.SongID
+
+	if songID == a.playCountedSongID {
 		if st.Elapsed >= playCountRearmElapsed {
 			return
 		}
 		a.playCountedSongID = -1
+		// Clear the shared marker too, or a repeat play would stay
+		// blocked for every other instance even once this one re-armed.
+		a.runAsync(func() error { return db.RearmPlay(file, songID) }, func() {})
 	}
 	if st.Duration <= 0 || st.Elapsed*2 < st.Duration {
 		return
 	}
-	a.playCountedSongID = st.SongID
-	db := a.metaDB
-	file := song.File
+	a.playCountedSongID = songID
+
+	// counted is written by the background work and read by the
+	// callback runAsync runs afterwards on the UI goroutine, which is
+	// what orders the two. False means another instance recorded this
+	// play first: not an error, and not a repaint either, since
+	// play_count did not change.
+	var counted bool
 	a.runAsync(func() error {
-		return db.IncrementPlayCount(file)
+		var err error
+		counted, err = db.CountPlay(file, songID)
+		return err
 	}, func() {
+		if !counted {
+			return
+		}
 		t := a.queue.metaCache[file]
 		t.PlayCount++
 		a.queue.applyTrackMeta(file, t)

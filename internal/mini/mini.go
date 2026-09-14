@@ -273,12 +273,19 @@ func maybeTrackPlayCount(metaDB *metadata.DB, st mpdclient.Status, song mpdclien
 			return
 		}
 		*playCountedSongID = -1
+		// Clear the shared marker too, or a repeat play stays blocked
+		// for every other instance once this one has re-armed.
+		_ = metaDB.RearmPlay(song.File, st.SongID)
 	}
 	if st.Duration <= 0 || st.Elapsed*2 < st.Duration {
 		return
 	}
 	*playCountedSongID = st.SongID
-	_ = metaDB.IncrementPlayCount(song.File)
+	// CountPlay, not IncrementPlayCount: mini mode and the panel UI can
+	// be watching the same server at once, and both reach this point for
+	// the same play-through. The once-only decision belongs in the
+	// database, where play_count itself lives.
+	_, _ = metaDB.CountPlay(song.File, st.SongID)
 }
 
 // block tracks how many lines were last drawn in place, so the next

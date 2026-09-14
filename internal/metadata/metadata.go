@@ -48,7 +48,16 @@ CREATE TABLE IF NOT EXISTS tracks (
 	real_path       TEXT NOT NULL,
 	play_count      INTEGER NOT NULL DEFAULT 0,
 	rating          INTEGER NOT NULL DEFAULT 0,
-	updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	-- last_counted_song_id is the MPD queue song id whose play-through
+	-- has already been counted into play_count. It is the once-only
+	-- marker for CountPlay, and it lives here rather than in a field on
+	-- the running app precisely because play_count lives here: a guard
+	-- kept in one process's memory cannot stop a second process from
+	-- counting the same play-through again. NULL means "nothing counted
+	-- for this track yet", which is also what RearmPlay resets it to
+	-- when a track restarts.
+	last_counted_song_id INTEGER
 );
 CREATE TABLE IF NOT EXISTS track_tags (
 	track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
@@ -204,7 +213,33 @@ func Open(path string) (*DB, error) {
 		sqlDB.Close()
 		return nil, err
 	}
+	if err := migrateAddPlayCountMarker(sqlDB); err != nil {
+		sqlDB.Close()
+		return nil, err
+	}
 	return db, nil
+}
+
+// migrateAddPlayCountMarker adds tracks.last_counted_song_id to a
+// database created before CountPlay existed.
+//
+// Purely additive, unlike migrateMarksToJoinTable: nothing is moved and
+// nothing is dropped, so there is no data to lose and no verification
+// step to do. Existing rows get NULL, which reads as "nothing counted
+// for this track yet" -- the same state a fresh row starts in. The
+// practical effect on the first launch after upgrading is that the
+// currently playing track may count one more time than it otherwise
+// would have, which is the harmless direction to be wrong in.
+func migrateAddPlayCountMarker(sqlDB *sql.DB) error {
+	has, err := columnExists(sqlDB, "tracks", "last_counted_song_id")
+	if err != nil {
+		return err
+	}
+	if has {
+		return nil
+	}
+	_, err = sqlDB.Exec(`ALTER TABLE tracks ADD COLUMN last_counted_song_id INTEGER`)
+	return err
 }
 
 // Close closes the underlying database connection.
@@ -342,14 +377,81 @@ func (db *DB) Rate(file string, rating int) error {
 	return err
 }
 
-// IncrementPlayCount adds one to file's play count, creating its row if
-// necessary.
+// IncrementPlayCount adds one to file's play count unconditionally,
+// creating its row if necessary.
+//
+// Prefer CountPlay for counting an actual play-through: this one has no
+// idea whether the play it is being asked to record has already been
+// counted, so two processes watching the same MPD both land here and
+// the track gains two plays for one listen. This remains for callers
+// that genuinely mean "add one, no questions asked".
 func (db *DB) IncrementPlayCount(file string) error {
 	id, err := db.upsertTrack(file)
 	if err != nil {
 		return err
 	}
 	_, err = db.sql.Exec(`UPDATE tracks SET play_count = play_count + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, id)
+	return err
+}
+
+// CountPlay records a completed play-through of file for MPD queue song
+// id songID, and reports whether it actually counted one.
+//
+// At most one play is counted per (track, songID), no matter how many
+// mpdtui processes are watching the same server. Every instance sees the
+// same MPD state and independently decides the track has passed its
+// halfway point, so every instance calls this -- the first wins and the
+// rest are no-ops.
+//
+// That guarantee is the WHERE clause, not the caller: the whole decision
+// is one conditional UPDATE, which SQLite executes atomically under a
+// write lock. Two processes issuing it concurrently serialize; the
+// loser's condition no longer holds by the time it runs, so it updates
+// nothing and reports false. A guard kept in the caller cannot do this,
+// because each process has its own copy of it.
+//
+// A repeat play of the same queue entry reuses its songID rather than
+// getting a fresh one, so counting it again needs the marker cleared
+// first -- see RearmPlay.
+func (db *DB) CountPlay(file string, songID int) (counted bool, err error) {
+	id, err := db.upsertTrack(file)
+	if err != nil {
+		return false, err
+	}
+	res, err := db.sql.Exec(`
+		UPDATE tracks
+		SET play_count = play_count + 1,
+		    last_counted_song_id = ?,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+		  AND (last_counted_song_id IS NULL OR last_counted_song_id <> ?)
+	`, songID, id, songID)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// RearmPlay clears file's once-only marker when songID is observed
+// playing from the start again, so the next time it passes its halfway
+// point CountPlay counts it.
+//
+// Needed because MPD reuses a queue entry's song id for a repeat-mode
+// loop or a replay of that same entry, unlike a re-add which gets a
+// fresh one. Conditional on the marker still being songID, so it is
+// idempotent: several processes observing the same restart all clear
+// the same marker and the result is identical. Deliberately leaves
+// updated_at alone -- re-arming is bookkeeping, not a change to the
+// track's metadata, and it must not disturb the listening history.
+func (db *DB) RearmPlay(file string, songID int) error {
+	_, err := db.sql.Exec(`
+		UPDATE tracks SET last_counted_song_id = NULL
+		WHERE normalized_path = ? AND last_counted_song_id = ?
+	`, normalizePath(file), songID)
 	return err
 }
 
@@ -394,7 +496,17 @@ func (db *DB) ToggleMark(file string, reasonID int64) (bool, error) {
 		return false, err
 	}
 
-	res, err := db.sql.Exec(`DELETE FROM track_marks WHERE track_id = ? AND mark_id = ?`, id, reasonID)
+	// One transaction: a toggle is a read-modify-write, and without it
+	// a second process toggling the same mark at the same moment could
+	// interleave between the delete and the insert and leave the pair
+	// both removed or both added. Same reasoning as SetMarks/SetTags.
+	tx, err := db.sql.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec(`DELETE FROM track_marks WHERE track_id = ? AND mark_id = ?`, id, reasonID)
 	if err != nil {
 		return false, err
 	}
@@ -403,11 +515,14 @@ func (db *DB) ToggleMark(file string, reasonID int64) (bool, error) {
 		return false, err
 	}
 	if removed == 0 {
-		if _, err := db.sql.Exec(`INSERT INTO track_marks (track_id, mark_id) VALUES (?, ?)`, id, reasonID); err != nil {
+		if _, err := tx.Exec(`INSERT INTO track_marks (track_id, mark_id) VALUES (?, ?)`, id, reasonID); err != nil {
 			return false, err
 		}
 	}
-	if _, err := db.sql.Exec(`UPDATE tracks SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`, id); err != nil {
+	if _, err := tx.Exec(`UPDATE tracks SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`, id); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
 		return false, err
 	}
 	return removed == 0, nil
@@ -450,7 +565,17 @@ func (db *DB) ToggleTag(file string, tagID int64) (bool, error) {
 		return false, err
 	}
 
-	res, err := db.sql.Exec(`DELETE FROM track_tags WHERE track_id = ? AND tag_id = ?`, id, tagID)
+	// One transaction: a toggle is a read-modify-write, and without it
+	// a second process toggling the same tag at the same moment could
+	// interleave between the delete and the insert and leave the pair
+	// both removed or both added. Same reasoning as SetMarks/SetTags.
+	tx, err := db.sql.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec(`DELETE FROM track_tags WHERE track_id = ? AND tag_id = ?`, id, tagID)
 	if err != nil {
 		return false, err
 	}
@@ -459,11 +584,14 @@ func (db *DB) ToggleTag(file string, tagID int64) (bool, error) {
 		return false, err
 	}
 	if removed == 0 {
-		if _, err := db.sql.Exec(`INSERT INTO track_tags (track_id, tag_id) VALUES (?, ?)`, id, tagID); err != nil {
+		if _, err := tx.Exec(`INSERT INTO track_tags (track_id, tag_id) VALUES (?, ?)`, id, tagID); err != nil {
 			return false, err
 		}
 	}
-	if _, err := db.sql.Exec(`UPDATE tracks SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`, id); err != nil {
+	if _, err := tx.Exec(`UPDATE tracks SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`, id); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
 		return false, err
 	}
 	return removed == 0, nil
