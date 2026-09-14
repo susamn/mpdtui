@@ -2,6 +2,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -12,8 +13,12 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
+	"mpdtui/internal/albumart"
 	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/settingsview"
+	"mpdtui/internal/uitheme"
+	"mpdtui/internal/visualizer"
 )
 
 const (
@@ -38,8 +43,8 @@ const flashDuration = 3 * time.Second
 // App is the full panel-based TUI application.
 type App struct {
 	tv      *tview.Application
-	client  *mpdclient.Client
-	watcher *mpdclient.Watcher
+	client  mpdConn
+	watcher watcher
 
 	// musicDir is the local filesystem path mirroring MPD's own
 	// music_directory (see internal/config.LoadMusicDir), needed by
@@ -81,6 +86,15 @@ type App struct {
 	// otherwise never complete inside a test.
 	runAsync func(work func() error, onSuccess func())
 
+	// applyToUI hands a closure to the UI goroutine to run, followed by
+	// a redraw. Every background result in this package lands through
+	// it -- the playlist-count scan, the lyrics reindex, the locate
+	// flash, runAsyncDefault itself. A field, wired by build() to
+	// tv.QueueUpdateDraw, for the same reason runAsync is one: nothing
+	// drains tv's update queue unless tv.Run() is actually running, so
+	// a test would otherwise never see any of those results.
+	applyToUI func(func())
+
 	pages *tview.Pages
 	root  *tview.Flex
 
@@ -90,14 +104,14 @@ type App struct {
 
 	nowPlaying     *tview.TextView
 	hintBar        *tview.TextView
-	albumArt       *albumArtPanel
+	albumArt       *albumart.Panel
 	trackInfo      *trackInfoCard
 	lyricsViewer   *lyricsViewer
 	markPicker     *catalogPicker
 	tagPicker      *catalogPicker
 	bookmarkPicker *bookmarkPicker
-	settings       *settingsView
-	visualizer     *visualizerPanel
+	settings       *settingsview.View
+	visualizer     *visualizer.Panel
 
 	// currentSong is refreshNowPlaying's own last-fetched CurrentSong,
 	// kept around so openLyricsViewer can show it without a redundant
@@ -153,7 +167,8 @@ type App struct {
 	locateFlashNode      *tview.TreeNode
 	locateFlashNodeStyle tcell.Style
 
-	done chan struct{}
+	playlistRefreshCancel context.CancelFunc
+	done                  chan struct{}
 }
 
 // Run connects a Watcher and runs the full TUI until the user quits or an
@@ -166,6 +181,26 @@ type App struct {
 // same as the MPD client. cfg is a read-only snapshot shown in the
 // Settings overlay's Config tab ('e') -- see ConfigSummary.
 func Run(client *mpdclient.Client, musicDir string, metaDB *metadata.DB, cfg ConfigSummary) error {
+	a, cleanup, err := start(client, musicDir, metaDB, cfg)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	// The only part that needs a terminal. Everything above is
+	// reachable from a test; this is not.
+	return a.tv.Run()
+}
+
+// start builds the App, opens the MPD watch, installs the signal
+// handlers and primes every panel, returning the App and the teardown
+// its caller must defer.
+//
+// Split from Run so all of that is reachable without a terminal: Run's
+// own remainder is a single tv.Run() call, which is the one thing that
+// cannot happen in a test. The caller owns the returned cleanup rather
+// than start deferring it itself, since the App has to outlive start.
+func start(client *mpdclient.Client, musicDir string, metaDB *metadata.DB, cfg ConfigSummary) (*App, func(), error) {
 	SetThemeFile(cfg.ThemeFile)
 
 	a := &App{
@@ -180,18 +215,12 @@ func Run(client *mpdclient.Client, musicDir string, metaDB *metadata.DB, cfg Con
 
 	w, err := client.Watch("player", "mixer", "options", "playlist", "stored_playlist", "database")
 	if err != nil {
-		return fmt.Errorf("watch mpd: %w", err)
+		return nil, nil, fmt.Errorf("watch mpd: %w", err)
 	}
 	a.watcher = w
-	defer func() {
-		close(a.done)
-		w.Close()
-		a.visualizer.close()
-	}()
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigCh)
 	go func() {
 		select {
 		case <-sigCh:
@@ -210,12 +239,11 @@ func Run(client *mpdclient.Client, musicDir string, metaDB *metadata.DB, cfg Con
 	// set ..." up to this.
 	themeCh := make(chan os.Signal, 1)
 	signal.Notify(themeCh, syscall.SIGUSR1)
-	defer signal.Stop(themeCh)
 	go func() {
 		for {
 			select {
 			case <-themeCh:
-				a.tv.QueueUpdateDraw(a.reapplyTheme)
+				a.applyToUI(a.reapplyTheme)
 			case <-a.done:
 				return
 			}
@@ -226,7 +254,14 @@ func Run(client *mpdclient.Client, musicDir string, metaDB *metadata.DB, cfg Con
 	a.refreshAll()
 	go a.eventLoop()
 
-	return a.tv.Run()
+	cleanup := func() {
+		close(a.done)
+		signal.Stop(sigCh)
+		signal.Stop(themeCh)
+		w.Close()
+		a.visualizer.Close()
+	}
+	return a, cleanup, nil
 }
 
 // runAsyncDefault is runAsync's real (production) implementation: work
@@ -238,7 +273,7 @@ func Run(client *mpdclient.Client, musicDir string, metaDB *metadata.DB, cfg Con
 func (a *App) runAsyncDefault(work func() error, onSuccess func()) {
 	go func() {
 		err := work()
-		a.tv.QueueUpdateDraw(func() {
+		a.applyToUI(func() {
 			if err != nil {
 				a.showError(err)
 				return
@@ -249,17 +284,20 @@ func (a *App) runAsyncDefault(work func() error, onSuccess func()) {
 }
 
 func (a *App) build() {
-	applyTheme()
+	if a.applyToUI == nil {
+		a.applyToUI = func(f func()) { a.tv.QueueUpdateDraw(f) }
+	}
+	uitheme.ApplyToTviewStyles()
 	a.runAsync = a.runAsyncDefault
 
 	a.library = newLibraryPanel(a)
 	a.playlists = newPlaylistsPanel(a)
 	a.queue = newQueuePanel(a)
 
-	wireFocusColors(a.library.tree)
-	wireFocusColors(a.playlists.table)
-	wireFocusColors(a.queue.table)
-	wireFocusColors(a.queue.search)
+	uitheme.WireFocus(a.library.tree)
+	uitheme.WireFocus(a.playlists.table)
+	uitheme.WireFocus(a.queue.table)
+	uitheme.WireFocus(a.queue.search)
 
 	// Wrap off: the panel gets exactly 2 inner rows (see the row
 	// height below) and renders exactly 2 lines, so a long title must
@@ -270,19 +308,26 @@ func (a *App) build() {
 	a.nowPlaying.SetBorder(true).SetTitle(" Now Playing ").SetTitleColor(nowPlayingBorderColor)
 	a.nowPlaying.SetBorderColor(nowPlayingBorderColor)
 
-	a.albumArt = newAlbumArtPanel(a)
+	a.albumArt = albumart.New(a.client, a.tv)
 	a.trackInfo = newTrackInfoCard(a)
 	a.lyricsViewer = newLyricsViewer(a)
 	a.markPicker = newCatalogPicker(a, markCatalog{})
 	a.tagPicker = newCatalogPicker(a, tagCatalog{})
 	a.bookmarkPicker = newBookmarkPicker(a)
-	a.settings = newSettingsView(a)
-	a.visualizer = newVisualizerPanel(a)
+	a.settings = settingsview.New(settingsview.Deps{
+		App:         a.tv,
+		MetaDB:      a.metaDB,
+		Config:      configRows(a.cfg),
+		ShowError:   a.showError,
+		ShowMessage: a.showMessage,
+		RunAsync:    func(work func() error, onSuccess func()) { a.runAsync(work, onSuccess) },
+	})
+	a.visualizer = visualizer.New(a.cfg.VisualizerFIFO)
 
 	a.hintBar = tview.NewTextView().SetDynamicColors(true)
 
 	bottomLeft := tview.NewFlex().SetDirection(tview.FlexColumn).
-		AddItem(a.albumArt.view, 0, 1, false).
+		AddItem(a.albumArt.View(), 0, 1, false).
 		AddItem(a.playlists.table, 0, 1, false)
 
 	left := tview.NewFlex().SetDirection(tview.FlexRow).
@@ -306,7 +351,7 @@ func (a *App) build() {
 	// visualizer.go's Visualization doc comment for its sizing contract).
 	nowPlayingRow := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(a.nowPlaying, 0, 1, false).
-		AddItem(a.visualizer.view, 0, 1, false)
+		AddItem(a.visualizer.View(), 0, 1, false)
 
 	a.root = tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(main, 0, 1, true).
@@ -328,7 +373,7 @@ func (a *App) build() {
 	a.focusPanel(queuePanelIdx)
 
 	a.tv.SetAfterDrawFunc(func(tcell.Screen) {
-		a.albumArt.draw()
+		a.albumArt.Draw()
 	})
 }
 
@@ -340,19 +385,19 @@ func (a *App) build() {
 // package-level vars read fresh by render/refreshNowPlaying/etc. on
 // every ~500ms refresh tick anyway. Only the handful of widgets below,
 // all built once in build() and never rebuilt, need an explicit push.
-// The panel-focus borders (wireFocusColors) are the trickiest of these:
+// The panel-focus borders (uitheme.WireFocus) are the trickiest of these:
 // their color is normally only set by a real focus/blur event, so this
 // re-derives "should this panel look focused right now" itself via
-// setFocusColor rather than waiting for one.
+// uitheme.SetFocused rather than waiting for one.
 func (a *App) reapplyTheme() {
 	reloadPalette()
-	applyTheme()
+	uitheme.ApplyToTviewStyles()
 
 	focused := a.tv.GetFocus()
-	setFocusColor(a.library.tree, focused == a.library.tree)
-	setFocusColor(a.playlists.table, focused == a.playlists.table)
-	setFocusColor(a.queue.table, focused == a.queue.table)
-	setFocusColor(a.queue.search, focused == a.queue.search)
+	uitheme.SetFocused(a.library.tree, focused == a.library.tree)
+	uitheme.SetFocused(a.playlists.table, focused == a.playlists.table)
+	uitheme.SetFocused(a.queue.table, focused == a.queue.table)
+	uitheme.SetFocused(a.queue.search, focused == a.queue.search)
 
 	a.nowPlaying.SetBorderColor(nowPlayingBorderColor).SetTitleColor(nowPlayingBorderColor)
 	a.lyricsViewer.SetBorderColor(lyricsColor).SetTitleColor(lyricsColor)
@@ -361,22 +406,22 @@ func (a *App) reapplyTheme() {
 	// table cells below, but for the selected-row highlight specifically:
 	// newQueuePanel/newPlaylistsPanel/newSettingsView each called
 	// SetSelectedStyle once, up front, with a tcell.Style *value* built
-	// from colorSelectedBg/colorSelectedFg at that moment -- reassigning
+	// from uitheme.SelectedBg()/uitheme.SelectedFg() at that moment -- reassigning
 	// those vars afterward doesn't reach back into an already-built
 	// Style. markPicker (a *tview.List, not a Table) has the same issue
 	// via SetSelectedTextColor/SetSelectedBackgroundColor instead.
-	selectedStyle := tcell.StyleDefault.Background(colorSelectedBg).Foreground(colorSelectedFg)
+	selectedStyle := uitheme.SelectedStyle()
 	a.queue.table.SetSelectedStyle(selectedStyle)
 	// The Library tree has the same problem one level down: the style is
 	// baked into each TreeNode, not read off the tree, so every existing
 	// node needs re-styling rather than one call on the widget.
 	a.library.restyleNodes()
 	a.playlists.table.SetSelectedStyle(selectedStyle)
-	a.settings.catalogTable.SetSelectedStyle(selectedStyle)
-	a.markPicker.SetSelectedTextColor(colorSelectedFg)
-	a.markPicker.SetSelectedBackgroundColor(colorSelectedBg)
-	a.tagPicker.SetSelectedTextColor(colorSelectedFg)
-	a.tagPicker.SetSelectedBackgroundColor(colorSelectedBg)
+	a.settings.ReapplyTheme()
+	a.markPicker.SetSelectedTextColor(uitheme.SelectedFg())
+	a.markPicker.SetSelectedBackgroundColor(uitheme.SelectedBg())
+	a.tagPicker.SetSelectedTextColor(uitheme.SelectedFg())
+	a.tagPicker.SetSelectedBackgroundColor(uitheme.SelectedBg())
 
 	// Everything above is a widget whose border/title color tview reads
 	// live off a Box field on every Draw. Table cells are different:
@@ -412,6 +457,17 @@ func (a *App) refreshAll() {
 // this is a plain timer rather than something event-driven.
 const playlistCountRefreshInterval = 10 * time.Minute
 
+// watcherChannels is the current watcher's event and error streams, or
+// a pair of nils when there is no watcher. Reading them through here
+// rather than off a.watcher directly is what makes "no watcher" safe:
+// a nil channel simply never fires.
+func (a *App) watcherChannels() (<-chan string, <-chan error) {
+	if a.watcher == nil {
+		return nil, nil
+	}
+	return a.watcher.Events(), a.watcher.Errors()
+}
+
 func (a *App) eventLoop() {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -421,27 +477,46 @@ func (a *App) eventLoop() {
 	defer countTicker.Stop()
 
 	for {
+		// Recomputed each pass: the watcher is replaced by the
+		// reconnect below, and is nil while one is in flight.
+		events, watchErrs := a.watcherChannels()
+
 		select {
-		case name, ok := <-a.watcher.Events():
+		case name, ok := <-events:
 			if !ok {
 				return
 			}
-			a.tv.QueueUpdateDraw(func() { a.handleSubsystem(name) })
-		case _, ok := <-a.watcher.Errors():
+			a.applyToUI(func() { a.handleSubsystem(name) })
+		case _, ok := <-watchErrs:
 			if !ok {
 				return
 			}
-			// The idle connection is dead. This is a personal single-user
-			// tool; rather than reconnect-looping forever, surface it and
-			// let ticker-driven polling keep the Now Playing bar alive.
-			a.tv.QueueUpdateDraw(func() { a.showError(fmt.Errorf("lost MPD event connection")) })
-			return
+			a.applyToUI(func() { a.showError(fmt.Errorf("lost MPD event connection, reconnecting...")) })
+
+			// No watcher means nil channels, which are never ready in
+			// a select -- the loop parks on its tickers instead of
+			// spinning while the reconnect below runs.
+			a.watcher = nil
+
+			go func() {
+				for {
+					w, err := a.client.Watch("player", "mixer", "options", "playlist", "stored_playlist", "database")
+					if err == nil {
+						a.applyToUI(func() {
+							a.watcher = w
+						})
+						break
+					}
+					time.Sleep(2 * time.Second)
+				}
+			}()
+
 		case <-ticker.C:
-			a.tv.QueueUpdateDraw(func() { a.refreshNowPlaying() })
+			a.applyToUI(func() { a.refreshNowPlaying() })
 		case <-animTicker.C:
-			a.tv.QueueUpdateDraw(func() {
+			a.applyToUI(func() {
 				if a.currentStatus.State == mpdclient.StatePlay {
-					a.visualizer.tick(a.currentStatus)
+					a.visualizer.Tick(a.currentStatus)
 				}
 			})
 		case <-countTicker.C:
@@ -458,7 +533,7 @@ func (a *App) eventLoop() {
 // second even for a few hundred playlists but is still real enough that
 // it must never block the single UI goroutine, whether triggered by
 // countTicker's automatic cadence or the 'R' key (handleRefreshPlaylistCounts).
-// Mirrors albumArtPanel.fetch's own background-MPD-round-trip-then-
+// Mirrors albumart.Panel's own background-MPD-round-trip-then-
 // QueueUpdateDraw pattern; unlike that one, there's no sequence-number
 // guard needed here since every call fetches the same thing (a full
 // snapshot of current counts) rather than a call being superseded by a
@@ -466,9 +541,24 @@ func (a *App) eventLoop() {
 // flash: an automatic background refresh shouldn't announce itself, but a
 // deliberate keypress should.
 func (a *App) refreshTrackCounts(silent bool) {
+	if a.playlistRefreshCancel != nil {
+		a.playlistRefreshCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	a.playlistRefreshCancel = cancel
+
 	go func() {
 		idx, err := a.client.PlaylistIndex()
-		a.tv.QueueUpdateDraw(func() {
+
+		// If cancelled while the fetch was in flight, discard the result entirely
+		if ctx.Err() != nil {
+			return
+		}
+
+		a.applyToUI(func() {
+			if ctx.Err() != nil {
+				return
+			}
 			if err != nil {
 				a.showError(err)
 				return
@@ -543,12 +633,12 @@ func (a *App) refreshNowPlaying() {
 	trackChanged := trackChangedForJump(a.startedUp, a.queue.currentID, st.SongID)
 
 	a.queue.setCurrent(st.SongID)
-	a.albumArt.onTrackChanged(song.File)
+	a.albumArt.OnTrackChanged(song.File)
 	a.renderTrackInfo()
 	a.maybeRefreshLyricsViewer(song, trackChanged)
 	a.maybeUpdateLyricsHighlight(st)
 	a.maybeTrackPlayCount(st, song)
-	a.visualizer.tick(st)
+	a.visualizer.Tick(st)
 
 	a.maybeJumpToCurrentTrack(trackChanged)
 }
@@ -707,7 +797,7 @@ func (a *App) flash(text string) {
 	seq := a.msgSeq
 	a.hintBar.SetText(text)
 	time.AfterFunc(flashDuration, func() {
-		a.tv.QueueUpdateDraw(func() {
+		a.applyToUI(func() {
 			if a.msgSeq == seq {
 				a.updateHintBar()
 			}

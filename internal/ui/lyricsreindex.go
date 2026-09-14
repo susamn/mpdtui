@@ -64,7 +64,7 @@ func (a *App) handleReindexLyrics() {
 	go func() {
 		songs, err := a.client.AllSongs()
 		if err != nil {
-			a.tv.QueueUpdateDraw(func() { setText("[red]failed to list tracks: " + err.Error() + "[-]") })
+			a.applyToUI(func() { setText("[red]failed to list tracks: " + err.Error() + "[-]") })
 			return
 		}
 		tracks := make([]lyricsindex.Track, len(songs))
@@ -81,13 +81,13 @@ func (a *App) handleReindexLyrics() {
 				return
 			}
 			lastPaint = time.Now()
-			a.tv.QueueUpdateDraw(func() {
+			a.applyToUI(func() {
 				setText(fmt.Sprintf("Scanning sidecars...\n\n%d / %d tracks", done, total))
 			})
 		}
 
 		stats, err := lyricsindex.Reindex(ctx, a.cfg.LyricsIndexPath, a.musicDir, tracks, progress)
-		a.tv.QueueUpdateDraw(func() {
+		a.applyToUI(func() {
 			switch {
 			case errors.Is(err, context.Canceled):
 				// Overlay is already gone (Esc triggered the cancel); nothing to show.

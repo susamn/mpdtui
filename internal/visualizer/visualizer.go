@@ -1,0 +1,171 @@
+package visualizer
+
+import (
+	"strings"
+	"time"
+
+	"github.com/rivo/tview"
+
+	"mpdtui/internal/audio"
+	"mpdtui/internal/mpdclient"
+)
+
+// Visualization is a single Now Playing visualization. To add a new one:
+//
+//  1. Create a new file internal/visualizer/viz_<name>.go with a type implementing
+//     this interface (see viz_equalizer.go for a worked example).
+//  2. Register an instance of it in New's vizs slice, below.
+//
+// That's the whole contract -- the container (Panel, in this
+// file) handles sizing, the border/title, cycling, and re-rendering on
+// every playback tick; a visualization only has to turn (width, height,
+// elapsed, status) into `height` lines of text.
+//
+// Dimensions: the visualizer container occupies the right 50% of the Now
+// Playing row (see app.go's build(), where nowPlayingRow splits a.nowPlaying
+// and the visualizer panel's view 50/50). That row is a fixed 4 rows tall including
+// its border, so Render is called with height=2 in the current layout --
+// deliberately compact, per an explicit "keep the current height" call
+// over growing the row taller. width varies with terminal width (it's
+// whatever's left after the 50/50 split minus 2 for the border), so
+// Render must degrade gracefully at any width, including very narrow
+// terminals.
+//
+// Data available: two sources, and a visualization should use both.
+//
+// The first is playback state -- mpdclient.Status (State/Volume/Elapsed/
+// Duration/...) plus real elapsed wall-clock time. This is always
+// available. Note that redraws are driven by app.go's 40ms animTicker
+// while playing (plus the ~500ms status poll and every player/mixer/
+// options event), so there's frame budget for genuinely animated work.
+//
+// The second is real audio: MPD's *client protocol* exposes none, but
+// MPD's "fifo" audio output writes decoded PCM to a named pipe that
+// internal/audio reads and reduces to frequency bands. That feed is
+// optional -- it needs an audio_output block in the user's mpd.conf, and
+// it only exists while something is playing -- so it is reached through
+// the panel's shared *audio.Spectrum, injected into each visualization
+// at construction. Every visualization must therefore handle Bands
+// returning nil (no fifo configured, MPD not running, nothing playing)
+// by falling back to something drawn from playback state alone; see
+// viz_equalizer.go for the pattern.
+type Visualization interface {
+	// Name is shown right-aligned in the visualizer panel's border title
+	// while this visualization is the active one.
+	Name() string
+
+	// Render returns exactly `height` lines of content, each rendered
+	// (dynamic-color tags aside) to at most `width` visible columns --
+	// the container does not clip or pad for you. elapsed is real
+	// wall-clock time since the container was created (not a tick
+	// counter), specifically so time-based effects (e.g. "every 2
+	// seconds") stay accurate regardless of how often Render actually
+	// gets called -- redraws happen not just on the ~500ms ticker but
+	// also on every player/mixer/options event, so call frequency isn't
+	// a reliable clock. st is the current playback status.
+	Render(width, height int, elapsed time.Duration, st mpdclient.Status) []string
+}
+
+// Panel is the container: it owns the bordered TextView, the
+// registry of available visualizations, which one is active, and the
+// clock used for elapsed. It doesn't know how to draw any specific
+// visualization -- that's entirely delegated to Visualization.Render.
+type Panel struct {
+	view    *tview.TextView
+	vizs    []Visualization
+	idx     int
+	started time.Time
+	// spectrum is the shared live-audio feed, owned by the panel and
+	// handed to every visualization that wants it. Always non-nil; it
+	// simply reports itself inactive when there's no fifo to read.
+	spectrum *audio.Spectrum
+}
+
+// New builds the panel over fifoPath, the named pipe MPD's "fifo" audio
+// output writes decoded PCM to (see internal/audio). It is passed in
+// already resolved rather than read from internal/config here: the UI
+// layer takes plain settled values, and cmd/mpdtui owns config (see
+// DEPENDENCY.md). "" means no live audio -- every visualization falls
+// back to playback state alone, which it must handle regardless.
+func New(fifoPath string) *Panel {
+	v := tview.NewTextView().SetDynamicColors(true)
+	v.SetBorder(true).SetTitleAlign(tview.AlignRight)
+
+	spectrum := audio.NewSpectrum(fifoPath)
+	spectrum.Start()
+
+	p := &Panel{
+		view:     v,
+		started:  time.Now(),
+		spectrum: spectrum,
+		// New visualizations are registered here, in the order 'v'
+		// cycles through them. The first is what the panel shows on
+		// startup: Balance, because it is the one that shows something
+		// about the music rather than about its loudness -- on the other
+		// two the largest thing moving is the overall level, which every
+		// band shares (see viz_balance.go).
+		vizs: []Visualization{
+			newBalanceVisualization(spectrum),
+			newEqualizerVisualization(spectrum),
+			newCliampVisualization(spectrum),
+		},
+	}
+	p.view.SetTitle(" " + p.current().Name() + " ")
+	return p
+}
+
+func (p *Panel) current() Visualization {
+	return p.vizs[p.idx]
+}
+
+// Next cycles to the next registered visualization (wrapping around) and
+// updates the border title to match. A single registered visualization
+// makes this a harmless no-op rather than a special case to guard against.
+func (p *Panel) Next(st mpdclient.Status) {
+	p.idx = (p.idx + 1) % len(p.vizs)
+	p.view.SetTitle(" " + p.current().Name() + " ")
+	p.Tick(st)
+}
+
+// Tick redraws the active visualization from the current playback status
+// and elapsed wall-clock time. Called from refreshNowPlaying, so it
+// shares that same ~500ms/event-driven cadence -- no separate ticker.
+func (p *Panel) Tick(st mpdclient.Status) {
+	_, _, w, h := p.view.GetInnerRect()
+	if w <= 0 || h <= 0 {
+		return
+	}
+	lines := p.current().Render(w, h, time.Since(p.started), st)
+	p.view.SetText(strings.Join(lines, "\n"))
+}
+
+// Close releases the panel's audio feed, stopping its reader goroutine.
+// Called from App.Run's shutdown path; safe on a panel built without one
+// (the test helpers do that).
+func (p *Panel) Close() {
+	if p == nil {
+		return
+	}
+	p.spectrum.Close()
+}
+
+func (p *Panel) View() *tview.TextView {
+	return p.view
+}
+
+// CurrentName is the name of the visualization currently on screen --
+// the same string shown in the panel's border title.
+func (p *Panel) CurrentName() string {
+	return p.current().Name()
+}
+
+// Names lists the registered visualizations in the order Next cycles
+// through them, first being what the panel shows on startup. Returns a
+// copy so callers can't reorder the registry through it.
+func (p *Panel) Names() []string {
+	names := make([]string, len(p.vizs))
+	for i, v := range p.vizs {
+		names[i] = v.Name()
+	}
+	return names
+}

@@ -8,6 +8,7 @@ import (
 
 	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/uitheme"
 )
 
 // A track has two many-to-many relations to a hand-edited catalog:
@@ -78,8 +79,8 @@ func newCatalogPicker(app *App, kind catalog) *catalogPicker {
 	l := tview.NewList()
 	l.ShowSecondaryText(false)
 	l.SetHighlightFullLine(true)
-	l.SetSelectedTextColor(colorSelectedFg)
-	l.SetSelectedBackgroundColor(colorSelectedBg)
+	l.SetSelectedTextColor(uitheme.SelectedFg())
+	l.SetSelectedBackgroundColor(uitheme.SelectedBg())
 	l.SetBorder(true)
 	// j/k/g/G: List has no native vim bindings (unlike Table/TreeView --
 	// see the same note on internal/ui/globalsearch.go's list). Reuses

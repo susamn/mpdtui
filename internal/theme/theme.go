@@ -17,9 +17,8 @@
 package theme
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
+	"mpdtui/internal/kvparser"
 	"os"
 	"strings"
 )
@@ -120,7 +119,7 @@ func LoadFrom(path string) (Palette, bool) {
 		return p, false
 	}
 
-	fields := parse(data)
+	fields := kvparser.Parse(data)
 	set := func(dst *Color, key string) {
 		if v, ok := fields[key]; ok && v != "" {
 			*dst = Color(v)
@@ -236,37 +235,3 @@ func Serialize(p Palette) string {
 // "#" inside the quotes is part of the color rather than a comment
 // marker. An unquoted value is cut at the first " #", which keeps a
 // bare `#rrggbb` intact while still dropping a spaced-off comment.
-func parseValue(value string) string {
-	if rest, ok := strings.CutPrefix(value, `"`); ok {
-		if inner, _, ok := strings.Cut(rest, `"`); ok {
-			return strings.TrimSpace(inner)
-		}
-		return strings.TrimSpace(rest)
-	}
-	if before, _, ok := strings.Cut(value, " #"); ok {
-		return strings.TrimSpace(before)
-	}
-	return value
-}
-
-func parse(data []byte) map[string]string {
-	fields := make(map[string]string)
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		key = strings.TrimSpace(key)
-		value = parseValue(strings.TrimSpace(value))
-		if key == "" || value == "" {
-			continue
-		}
-		fields[key] = value
-	}
-	return fields
-}

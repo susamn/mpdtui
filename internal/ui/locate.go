@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+
+	"mpdtui/internal/uitheme"
 )
 
 // locateFlashBg/Fg are the colors of the brief flash after 'L' -- of the
@@ -75,7 +77,7 @@ func (a *App) runLocateFlashPhase(seq, i int) {
 	phase := locateFlashPhases[i]
 	a.setLocateFlash(phase.on)
 	time.AfterFunc(phase.d, func() {
-		a.tv.QueueUpdateDraw(func() {
+		a.applyToUI(func() {
 			a.runLocateFlashPhase(seq, i+1)
 		})
 	})
@@ -89,11 +91,11 @@ func (a *App) runLocateFlashPhase(seq, i int) {
 // rebuilt from the live colorSelected* vars rather than saved, so a theme
 // reload (SIGUSR1) landing mid-flash leaves the row in the *new* theme's
 // selection color instead of a stale snapshot. A tree node's selected
-// style isn't derived from this package's palette at all -- tview builds
+// style isn't derived from the palette at all -- tview builds
 // it per node at construction from tview.Styles -- so there's nothing to
 // rebuild it from, and the saved original is restored verbatim.
 func (a *App) setLocateFlash(on bool) {
-	bg, fg := colorSelectedBg, colorSelectedFg
+	bg, fg := uitheme.SelectedBg(), uitheme.SelectedFg()
 	if on {
 		bg, fg = locateFlashBg, locateFlashFg
 	}

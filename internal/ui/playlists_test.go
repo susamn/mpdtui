@@ -9,6 +9,7 @@ import (
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/uitheme"
 )
 
 func TestHandleRefreshPlaylistCountsInvalidFromOtherPanel(t *testing.T) {
@@ -167,11 +168,11 @@ func TestPlaylistsHeaderRowStyledAndNotSelectable(t *testing.T) {
 	a.playlists.render()
 
 	cell := a.playlists.table.GetCell(0, 0)
-	if got := cellFg(cell); got != queueHeaderFg {
-		t.Errorf("header foreground = %v, want %v (shared with Queue's header)", got, queueHeaderFg)
+	if got := cellFg(cell); got != uitheme.TableHeaderFg() {
+		t.Errorf("header foreground = %v, want %v (shared with Queue's header)", got, uitheme.TableHeaderFg())
 	}
-	if got := cellBg(cell); got != queueHeaderBg {
-		t.Errorf("header background = %v, want %v (shared with Queue's header)", got, queueHeaderBg)
+	if got := cellBg(cell); got != uitheme.TableHeaderBg() {
+		t.Errorf("header background = %v, want %v (shared with Queue's header)", got, uitheme.TableHeaderBg())
 	}
 	if !cell.NotSelectable {
 		t.Error("header cell should not be selectable")

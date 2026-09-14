@@ -10,6 +10,7 @@ import (
 	"mpdtui/internal/lyrics"
 	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/uitheme"
 	"mpdtui/internal/version"
 )
 
@@ -70,7 +71,7 @@ func newQueuePanel(app *App) *queuePanel {
 	t.SetBorder(true).SetTitle(" Queue ")
 	t.SetSelectable(true, false)
 	t.SetFixed(queueHeaderRows, 0)
-	t.SetSelectedStyle(tcell.StyleDefault.Background(colorSelectedBg).Foreground(colorSelectedFg))
+	t.SetSelectedStyle(uitheme.SelectedStyle())
 	t.SetSelectedFunc(func(row, _ int) {
 		i := row - queueHeaderRows
 		if i < 0 || i >= len(q.songs) {
@@ -217,15 +218,6 @@ const (
 // the actual mapping from palette to every color in this block.
 var queueTitleColor tcell.Color
 
-// queueHeaderBg/Fg give the header row an inverted look (filled
-// background, contrasting text) to set it apart from the data rows
-// below. Both theme-derived (deriveColors) rather than a fixed white-
-// on-black -- see theme.go.
-var (
-	queueHeaderBg tcell.Color
-	queueHeaderFg tcell.Color
-)
-
 // queueColumns holds the Queue table's column indices for one header/
 // render pass. Lyr only exists as a column when the lyrics feature is
 // actually active. Playcount/Mark/Rating exist when metadata is active.
@@ -334,8 +326,8 @@ func setQueueHeader(t *tview.Table, cols queueColumns) {
 	set := func(col int, text string, align int) {
 		t.SetCell(0, col, tview.NewTableCell(text).
 			SetAlign(align).
-			SetTextColor(queueHeaderFg).
-			SetBackgroundColor(queueHeaderBg).
+			SetTextColor(uitheme.TableHeaderFg()).
+			SetBackgroundColor(uitheme.TableHeaderBg()).
 			SetSelectable(false))
 	}
 	set(0, "", tview.AlignLeft)
@@ -673,7 +665,7 @@ const queueGutterStarMin = 4
 // apart by shade rather than by a second glyph and the gutter reads as a
 // condensed version of that column.
 //
-// Both are derived from one palette field (see theme.go's recedeFrom),
+// Both are derived from one palette field (see uitheme.RecedeFrom),
 // deliberately: the first version of this used the theme's "yellow" and
 // "bright_yellow" for the two tiers, and on most real themes those are
 // the same color or near enough that the tiers were indistinguishable.

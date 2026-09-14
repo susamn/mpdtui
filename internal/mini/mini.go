@@ -83,28 +83,65 @@ func Run(client *mpdclient.Client, metaDB *metadata.DB, themeFile string) error 
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
 
+	return loop(loopDeps{
+		client:    client,
+		metaDB:    metaDB,
+		themeFile: themeFile,
+		keys:      keys,
+		events:    events,
+		watchErrs: watchErrs,
+		signals:   sigCh,
+		themeSig:  themeCh,
+		tick:      ticker.C,
+	})
+}
+
+// loopDeps is everything the mini-mode loop reacts to. Split out of Run
+// so the loop can be driven from a test: Run itself is all terminal
+// setup -- raw mode, signal handlers, an MPD watch -- and none of that
+// can happen without a real tty, while the loop is pure channel
+// handling and is where the behavior actually lives.
+type loopDeps struct {
+	client    controller
+	metaDB    *metadata.DB
+	themeFile string
+
+	keys      <-chan byte
+	events    <-chan string
+	watchErrs <-chan error
+	signals   <-chan os.Signal
+	themeSig  <-chan os.Signal
+	tick      <-chan time.Time
+}
+
+// loop redraws on every reason the display might have changed and
+// returns when the user quits, the terminal closes, or a signal
+// arrives.
+func loop(d loopDeps) error {
 	out := &block{}
-	playlistCount := fetchPlaylistCount(client)
+	playlistCount := fetchPlaylistCount(d.client)
 	// playCountedSongID mirrors App.playCountedSongID's own -1-means-
 	// none convention (internal/ui/trackmetadata.go): the queue song id
 	// already counted this session, so ticking past the halfway point on
 	// every redraw doesn't inflate the count.
 	playCountedSongID := -1
-	redraw := func() { render(out, client, metaDB, playlistCount, &playCountedSongID) }
+	redraw := func() { render(out, d.client, d.metaDB, playlistCount, &playCountedSongID) }
+
+	events, watchErrs := d.events, d.watchErrs
 
 	redraw()
 	for {
 		select {
-		case <-sigCh:
+		case <-d.signals:
 			return nil
-		case <-themeCh:
-			reloadTheme(themeFile)
+		case <-d.themeSig:
+			reloadTheme(d.themeFile)
 			redraw()
-		case b, ok := <-keys:
+		case b, ok := <-d.keys:
 			if !ok {
 				return nil
 			}
-			if handleKey(client, metaDB, b) {
+			if handleKey(d.client, d.metaDB, b) {
 				return nil
 			}
 			redraw()
@@ -114,7 +151,7 @@ func Run(client *mpdclient.Client, metaDB *metadata.DB, themeFile string) error 
 				continue
 			}
 			if name == "stored_playlist" {
-				playlistCount = fetchPlaylistCount(client)
+				playlistCount = fetchPlaylistCount(d.client)
 			}
 			redraw()
 		case _, ok := <-watchErrs:
@@ -123,13 +160,13 @@ func Run(client *mpdclient.Client, metaDB *metadata.DB, themeFile string) error 
 				continue
 			}
 			events, watchErrs = nil, nil
-		case <-ticker.C:
+		case <-d.tick:
 			redraw()
 		}
 	}
 }
 
-func fetchPlaylistCount(client *mpdclient.Client) int {
+func fetchPlaylistCount(client controller) int {
 	pls, err := client.Playlists()
 	if err != nil {
 		return 0
@@ -153,8 +190,24 @@ func readKeys(out chan<- byte) {
 	}
 }
 
+// controller is everything this package asks of the MPD client.
+// Narrowed to an interface so the keypress handling and the render pass
+// can be tested against a stand-in rather than needing a live server --
+// and, for the transport keys especially, without a test having to
+// actually stop or skip the user's music to prove a key is wired up.
+type controller interface {
+	Status() (mpdclient.Status, error)
+	CurrentSong() (mpdclient.Song, error)
+	TogglePlayPause() error
+	Stop() error
+	Next() error
+	Previous() error
+	ChangeVolume(delta int) error
+	Playlists() ([]mpdclient.Playlist, error)
+}
+
 // handleKey applies a keypress and reports whether it should quit.
-func handleKey(client *mpdclient.Client, metaDB *metadata.DB, b byte) bool {
+func handleKey(client controller, metaDB *metadata.DB, b byte) bool {
 	switch b {
 	case ' ':
 		client.TogglePlayPause()
@@ -186,7 +239,7 @@ func handleKey(client *mpdclient.Client, metaDB *metadata.DB, b byte) bool {
 // swallowed rather than surfaced, same "keep the display line, don't
 // interrupt playback for a bookkeeping write" spirit as the rest of this
 // package's error handling.
-func rateCurrentTrack(client *mpdclient.Client, metaDB *metadata.DB, rating int) {
+func rateCurrentTrack(client controller, metaDB *metadata.DB, rating int) {
 	if metaDB == nil {
 		return
 	}
@@ -285,7 +338,7 @@ func contentWidthFor(lines [][]segment) int {
 	return w
 }
 
-func render(out *block, client *mpdclient.Client, metaDB *metadata.DB, playlistCount int, playCountedSongID *int) {
+func render(out *block, client controller, metaDB *metadata.DB, playlistCount int, playCountedSongID *int) {
 	st, err := client.Status()
 	if err != nil {
 		out.print([]string{"mpdtui: " + err.Error()})

@@ -354,3 +354,183 @@ func TestBandsDBGoesNilWithoutAudio(t *testing.T) {
 		t.Errorf("BandsDB(8) with no audio = %v, want nil", got)
 	}
 }
+
+// --- The fifo reader ----------------------------------------------------
+//
+// These drive run/open/sleep against a real named pipe, which is what
+// MPD's "fifo" output actually is. The reader never reports errors
+// anywhere by design, so the observable behavior is whether bands
+// appear and whether it stops when closed.
+
+func TestSpectrumWithNoPathNeverStarts(t *testing.T) {
+	s := NewSpectrum("")
+	s.Start() // must be a no-op rather than opening ""
+	defer s.Close()
+
+	if s.Bands(8) != nil {
+		t.Error("a Spectrum with no configured path produced bands")
+	}
+}
+
+func TestNilSpectrumIsSafe(t *testing.T) {
+	var s *Spectrum
+	s.Start()
+	s.Close()
+	if s.Bands(8) != nil {
+		t.Error("a nil Spectrum produced bands")
+	}
+}
+
+// TestSpectrumReadsFromAFifo covers the whole reader path: open the
+// pipe, read PCM, turn it into bands.
+func TestSpectrumReadsFromAFifo(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mpd.fifo")
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Skipf("cannot create a fifo here: %v", err)
+	}
+
+	s := NewSpectrum(path)
+	s.Start()
+	defer s.Close()
+
+	// Write enough interleaved stereo PCM for a full analysis window.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		w, err := os.OpenFile(path, os.O_WRONLY, 0)
+		if err != nil {
+			return
+		}
+		defer w.Close()
+		buf := make([]byte, 8192)
+		for i := 0; i+3 < len(buf); i += 4 {
+			// A loud low-frequency tone, as two identical channels.
+			v := int16(20000 * math.Sin(2*math.Pi*float64(i/4)/32))
+			buf[i], buf[i+1] = byte(v), byte(v>>8)
+			buf[i+2], buf[i+3] = byte(v), byte(v>>8)
+		}
+		for n := 0; n < 8; n++ {
+			if _, err := w.Write(buf); err != nil {
+				return
+			}
+		}
+	}()
+
+	deadline := time.Now().Add(3 * time.Second)
+	var bands []float64
+	for time.Now().Before(deadline) {
+		if b := s.Bands(8); len(b) > 0 {
+			bands = b
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	<-done
+
+	if len(bands) == 0 {
+		t.Fatal("no bands after writing PCM to the fifo")
+	}
+	var sum float64
+	for _, v := range bands {
+		sum += v
+	}
+	if sum == 0 {
+		t.Error("every band is zero after a loud tone")
+	}
+}
+
+// TestSpectrumCloseStopsAPendingOpen covers the backoff path: with no
+// fifo at the configured path the reader keeps retrying, and Close has
+// to unblock it rather than leaving the goroutine parked.
+func TestSpectrumCloseStopsAPendingOpen(t *testing.T) {
+	s := NewSpectrum(filepath.Join(t.TempDir(), "never-created.fifo"))
+	s.Start()
+
+	time.Sleep(20 * time.Millisecond) // let it fail an open and back off
+	s.Close()
+	s.Close() // idempotent
+
+	if s.Bands(8) != nil {
+		t.Error("a Spectrum that never opened anything produced bands")
+	}
+}
+
+func TestSpectrumSleepReturnsFalseOnceClosed(t *testing.T) {
+	s := NewSpectrum("irrelevant")
+
+	if !s.sleep(time.Millisecond) {
+		t.Error("sleep returned false before the Spectrum was closed")
+	}
+
+	s.Close()
+	if s.sleep(time.Second) {
+		t.Error("sleep returned true after Close, want it to bail out immediately")
+	}
+}
+
+// TestSpectrumOpenAfterCloseReportsClosed covers open's own race guard:
+// a Close landing while an open is in flight must not leave the file
+// handle owned by a reader that is going away.
+func TestSpectrumOpenAfterCloseReportsClosed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mpd.fifo")
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Skipf("cannot create a fifo here: %v", err)
+	}
+
+	s := NewSpectrum(path)
+	s.Close()
+
+	if _, err := s.open(); err == nil {
+		t.Error("open succeeded on a closed Spectrum, want it to report closed")
+	}
+}
+
+// TestBandDecibelsDegenerateInputs covers the guards: too few bins or a
+// non-positive band count still returns exactly n floor-level bands, so
+// a visualization never has to special-case a nil slice.
+func TestBandDecibelsDegenerateInputs(t *testing.T) {
+	if got := bandDecibels(nil, 8); len(got) != 8 {
+		t.Errorf("nil magnitudes returned %d bands, want 8", len(got))
+	}
+	for _, v := range bandDecibels(nil, 8) {
+		if v != bandFloorDB {
+			t.Errorf("a band from nil magnitudes = %v, want the floor %v", v, bandFloorDB)
+		}
+	}
+	if got := bandDecibels([]float64{1}, 4); len(got) != 4 {
+		t.Errorf("a single magnitude returned %d bands, want 4", len(got))
+	}
+	if got := bandDecibels(make([]float64, 512), 0); len(got) != 0 {
+		t.Errorf("zero bands returned %d, want none", len(got))
+	}
+}
+
+// TestBandDecibelsSkipsDCAndClampsTheTopBin covers the two bin bounds:
+// band 0 must never include bin 0 (DC offset, not audible), and the
+// highest band must not run past the end of the magnitudes.
+func TestBandDecibelsSkipsDCAndClampsTheTopBin(t *testing.T) {
+	mags := make([]float64, 513)
+	mags[0] = 1e6 // a huge DC offset that must be ignored
+	for i := 1; i < len(mags); i++ {
+		mags[i] = 1e-6
+	}
+
+	bands := bandDecibels(mags, 16)
+	if bands[0] > bandFloorDB+40 {
+		t.Errorf("the lowest band = %v, want it near the floor -- the DC bin leaked in", bands[0])
+	}
+
+	// Many narrow bands over few bins forces both the "narrow band
+	// inside one bin" and the top-bin clamp.
+	if got := bandDecibels(mags, 128); len(got) != 128 {
+		t.Fatalf("returned %d bands, want 128", len(got))
+	}
+}
+
+// The smoothing between frames is deliberately not tested here. It runs
+// inline in BandsDB against time.Now(), so its two interesting arms --
+// the dt guard after a stall, and attack moving faster than release --
+// need a clock this package does not expose. Reaching them means either
+// a multi-second sleep in the suite or a time seam on Spectrum; neither
+// is worth it for a smoothing filter whose inputs and outputs are both
+// covered.

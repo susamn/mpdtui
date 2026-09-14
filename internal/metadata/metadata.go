@@ -19,9 +19,10 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode"
 
 	_ "modernc.org/sqlite"
+
+	"mpdtui/internal/textutil"
 )
 
 // DB is a handle to the local track-metadata database.
@@ -175,14 +176,15 @@ INSERT OR IGNORE INTO tags (id, tagname) VALUES (3, 'english');
 // Open opens (creating if necessary) the SQLite database at path,
 // applies the schema, and seeds the catalog tables' starting rows.
 func Open(path string) (*DB, error) {
-	sqlDB, err := sql.Open("sqlite", path)
+	// Enable WAL mode and a 5-second busy timeout to gracefully handle
+	// concurrent access from multiple processes (e.g. mpdtui -lyrics-line
+	// polled rapidly by external scripts) without throwing SQLITE_BUSY.
+	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+	sqlDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
-	// A single connection avoids SQLITE_BUSY from concurrent writers --
-	// unnecessary insurance in practice (every call into this package
-	// from internal/ui already runs on tview's own single-threaded event
-	// loop), but cheap and standard practice for SQLite from Go.
+	// A single connection per process avoids internal connection pool contention.
 	sqlDB.SetMaxOpenConns(1)
 
 	db := &DB{sql: sqlDB}
@@ -267,13 +269,7 @@ func normalizePath(file string) string {
 
 // normalizeSegment folds s to just its letters and digits, lowercased.
 func normalizeSegment(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			b.WriteRune(unicode.ToLower(r))
-		}
-	}
-	return b.String()
+	return textutil.NormalizeSegment(s)
 }
 
 // upsertTrack inserts a bare row for file if one doesn't already exist
@@ -767,4 +763,3 @@ func parseTimestamp(val any) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("unexpected timestamp type: %T", val)
 	}
 }
-

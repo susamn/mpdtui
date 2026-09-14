@@ -2,6 +2,7 @@ package trackinfo
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -391,4 +392,114 @@ func TestUpdateRatingLiveOrSkip(t *testing.T) {
 	if track.Rating != 5 {
 		t.Errorf("db.Get rating = %d, want 5", track.Rating)
 	}
+}
+
+// --- PrintInfo and UpdateRating -----------------------------------------
+
+type fakeSource struct {
+	song    mpdclient.Song
+	status  mpdclient.Status
+	songErr error
+	statErr error
+}
+
+func (f fakeSource) CurrentSong() (mpdclient.Song, error) { return f.song, f.songErr }
+func (f fakeSource) Status() (mpdclient.Status, error)    { return f.status, f.statErr }
+
+func TestPrintInfoWritesTheTrack(t *testing.T) {
+	var b strings.Builder
+	err := PrintInfo(fakeSource{
+		song:   mpdclient.Song{Title: "Ay Hairathe", Artist: "Hariharan", Album: "Guru", File: "a/b.mp3"},
+		status: mpdclient.Status{State: mpdclient.StatePlay, Elapsed: 30 * time.Second, Duration: 200 * time.Second},
+	}, "", nil, &b)
+	if err != nil {
+		t.Fatalf("PrintInfo: %v", err)
+	}
+
+	for _, want := range []string{"Ay Hairathe", "Hariharan", "Guru"} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("output does not contain %q:\n%s", want, b.String())
+		}
+	}
+}
+
+func TestPrintInfoWithNothingPlaying(t *testing.T) {
+	var b strings.Builder
+	if err := PrintInfo(fakeSource{}, "", nil, &b); err != nil {
+		t.Fatalf("PrintInfo: %v", err)
+	}
+	if !strings.Contains(b.String(), "Nothing playing") {
+		t.Errorf("output = %q, want it to say nothing is playing", b.String())
+	}
+}
+
+func TestPrintInfoReportsClientFailures(t *testing.T) {
+	var b strings.Builder
+	if err := PrintInfo(fakeSource{songErr: errors.New("offline")}, "", nil, &b); err == nil {
+		t.Error("a failed CurrentSong was swallowed")
+	}
+	if err := PrintInfo(fakeSource{
+		song:    mpdclient.Song{Title: "T", File: "a.mp3"},
+		statErr: errors.New("offline"),
+	}, "", nil, &b); err == nil {
+		t.Error("a failed Status was swallowed")
+	}
+}
+
+func TestUpdateRatingValidatesAndWrites(t *testing.T) {
+	db := openTrackInfoTestDB(t)
+	client := fakeSource{song: mpdclient.Song{Title: "T", File: "a/b.mp3"}}
+
+	var b strings.Builder
+	if err := UpdateRating(client, db, 4, &b); err != nil {
+		t.Fatalf("UpdateRating: %v", err)
+	}
+	track, err := db.Get("a/b.mp3")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if track.Rating != 4 {
+		t.Errorf("rating = %d, want 4", track.Rating)
+	}
+	if !strings.Contains(b.String(), "T") {
+		t.Errorf("output = %q, want it to name the track", b.String())
+	}
+}
+
+func TestUpdateRatingRejectsBadInput(t *testing.T) {
+	db := openTrackInfoTestDB(t)
+	client := fakeSource{song: mpdclient.Song{Title: "T", File: "a/b.mp3"}}
+	var b strings.Builder
+
+	for _, rating := range []int{0, -1, 6} {
+		if err := UpdateRating(client, db, rating, &b); err == nil {
+			t.Errorf("rating %d was accepted", rating)
+		}
+	}
+
+	// The feature being off is an error rather than a silent no-op --
+	// the user asked for a rating and needs to know it went nowhere.
+	if err := UpdateRating(client, nil, 3, &b); err == nil {
+		t.Error("rating with no database was accepted")
+	}
+
+	// Nothing playing has nothing to rate.
+	if err := UpdateRating(fakeSource{}, db, 3, &b); err == nil {
+		t.Error("rating with nothing playing was accepted")
+	}
+
+	// A failed lookup is reported.
+	if err := UpdateRating(fakeSource{songErr: errors.New("offline")}, db, 3, &b); err == nil {
+		t.Error("a failed CurrentSong was swallowed")
+	}
+}
+
+func openTrackInfoTestDB(t *testing.T) *metadata.DB {
+	t.Helper()
+	db, err := metadata.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
 }

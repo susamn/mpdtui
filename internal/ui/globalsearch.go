@@ -2,14 +2,15 @@ package ui
 
 import (
 	"fmt"
-	"sort"
-	"strings"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-
 	"mpdtui/internal/lyricsindex"
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/textutil"
+	"mpdtui/internal/uitheme"
+	"sort"
+	"strings"
 )
 
 // globalSearchKind is which section of the app a global ('f') search
@@ -133,8 +134,8 @@ func fuzzyScore(query, candidate string) (score int, ok bool) {
 	if query == "" {
 		return 0, true
 	}
-	q := []rune(foldSearch(query))
-	c := []rune(foldSearch(candidate))
+	q := []rune(textutil.FoldSearch(query))
+	c := []rune(textutil.FoldSearch(candidate))
 
 	qi := 0
 	first, last := -1, -1
@@ -426,7 +427,7 @@ func (a *App) openGlobalSearch() {
 
 	table := tview.NewTable()
 	table.SetSelectable(true, false)
-	table.SetSelectedStyle(tcell.StyleDefault.Background(colorSelectedBg).Foreground(colorSelectedFg))
+	table.SetSelectedStyle(uitheme.SelectedStyle())
 	table.SetBorder(true)
 
 	var trackSongs []mpdclient.Song
@@ -695,9 +696,19 @@ func (a *App) openGlobalSearch() {
 		}
 		switch hints.kind {
 		case globalSearchTrack, globalSearchLyrics:
-			file, name := trackSongs[idx].File, trackSongs[idx].DisplayName()
+			// idx indexes whichever kind's own slices produced the
+			// match, so pick the slice first and index once. Reading
+			// trackSongs[idx] up front and only then overwriting it for
+			// the lyrics kind panicked whenever the track kind had not
+			// been loaded in this popup session -- which is the normal
+			// case for a lyrics search, since each kind is fetched
+			// lazily on first use and searching lyrics first never
+			// touches loadTracks.
+			var file, name string
 			if hints.kind == globalSearchLyrics {
 				file, name = lyricsFiles[idx], lyricsLabels[idx]
+			} else {
+				file, name = trackSongs[idx].File, trackSongs[idx].DisplayName()
 			}
 			if err := a.client.QueueAdd(file); err != nil {
 				a.showError(err)

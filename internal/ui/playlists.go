@@ -6,10 +6,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/uitheme"
 )
 
 // playlistIcon prefixes every playlist's display name, in both this panel
@@ -81,15 +81,15 @@ var playlistsHeaderLabels = []struct {
 // setPlaylistsHeader (re)writes the fixed header row. Table.Clear() wipes
 // every cell including row 0, so render() calls this again on every
 // refresh rather than relying on it being set once at construction time.
-// Reuses queueHeaderBg/Fg (queue.go) instead of redefining an identical
-// pair, so both panels' headers are guaranteed to look the same, not just
-// coincidentally similar.
+// Uses uitheme's shared table-header colors instead of a pair of its
+// own, so every table's header in the app is guaranteed to look the
+// same, not just coincidentally similar.
 func setPlaylistsHeader(t *tview.Table) {
 	for col, h := range playlistsHeaderLabels {
 		t.SetCell(0, col, tview.NewTableCell(h.text).
 			SetAlign(h.align).
-			SetTextColor(queueHeaderFg).
-			SetBackgroundColor(queueHeaderBg).
+			SetTextColor(uitheme.TableHeaderFg()).
+			SetBackgroundColor(uitheme.TableHeaderBg()).
 			SetSelectable(false))
 	}
 }
@@ -123,7 +123,7 @@ func newPlaylistsPanel(app *App) *playlistsPanel {
 	t.SetBorder(true).SetTitle(" Playlists ")
 	t.SetSelectable(true, false)
 	t.SetFixed(playlistsHeaderRows, 0)
-	t.SetSelectedStyle(tcell.StyleDefault.Background(colorSelectedBg).Foreground(colorSelectedFg))
+	t.SetSelectedStyle(uitheme.SelectedStyle())
 	t.SetSelectedFunc(func(row, _ int) {
 		i := row - playlistsHeaderRows
 		if i < 0 || i >= len(p.shown) {

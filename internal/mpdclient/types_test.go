@@ -43,3 +43,56 @@ func TestParseStatusBitrateAndAudioFormatMissing(t *testing.T) {
 		t.Errorf("AudioFormat = %q, want empty", st.AudioFormat)
 	}
 }
+
+// DisplayName is what every panel, picker and mini-mode line shows for a
+// track, so its fallbacks decide what an untagged file looks like
+// everywhere at once.
+func TestSongDisplayName(t *testing.T) {
+	cases := []struct {
+		name string
+		song Song
+		want string
+	}{
+		{"artist and title", Song{Artist: "Hariharan", Title: "Ay Hairathe"}, "Hariharan - Ay Hairathe"},
+		{"title only", Song{Title: "Ay Hairathe"}, "Ay Hairathe"},
+		// An artist with no title is not "Artist - ", which would read
+		// as a broken row; it falls back to the filename like any other
+		// untagged track.
+		{"artist only", Song{Artist: "Hariharan", File: "a/b.mp3"}, "a/b.mp3"},
+		{"neither", Song{File: "a-r-rahman/guru/05.mp3"}, "a-r-rahman/guru/05.mp3"},
+		{"nothing at all", Song{}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.song.DisplayName(); got != tc.want {
+				t.Errorf("DisplayName() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestNilWatcherYieldsNilChannels covers the nil guards on Watcher.
+// App.Run carries on without a watcher when MPD refuses the idle
+// connection, and a nil channel in a select blocks forever rather than
+// spinning -- which is exactly the wanted behavior, and would be a nil
+// dereference without these guards.
+func TestNilWatcherYieldsNilChannels(t *testing.T) {
+	var w *Watcher
+
+	if ch := w.Events(); ch != nil {
+		t.Errorf("Events() on a nil watcher = %v, want nil", ch)
+	}
+	if ch := w.Errors(); ch != nil {
+		t.Errorf("Errors() on a nil watcher = %v, want nil", ch)
+	}
+
+	// A nil channel in a select is never ready, which is what lets the
+	// event loop fall through to its tickers instead of spinning.
+	select {
+	case <-w.Events():
+		t.Error("a nil watcher's event channel was ready")
+	case <-w.Errors():
+		t.Error("a nil watcher's error channel was ready")
+	default:
+	}
+}

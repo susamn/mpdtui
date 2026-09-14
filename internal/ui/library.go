@@ -13,19 +13,25 @@ import (
 
 // treeSelectedStyle matches the blue-bg/yellow-fg selection convention
 // List/Table use elsewhere in this app. TreeNode's zero-value default
-// style resolves to invisible (default-on-default) once applyTheme
+// style resolves to invisible (default-on-default) once
+// uitheme.ApplyToTviewStyles
 // flattens PrimitiveBackgroundColor/PrimaryTextColor to the terminal's own
 // colors, so every selectable node needs this set explicitly.
 //
-// Assigned by deriveColors, never in this declaration: package-level
-// variable initializers all run before any init function, so a value
-// built here would capture colorSelectedFg/colorSelectedBg while they
-// are still the zero Color -- leaving every node styled
-// default-on-default, which is exactly the invisible highlight the
-// explicit style exists to avoid. It's re-derived on theme reload too,
-// which is why libraryPanel.restyleNodes has to walk the tree
-// afterwards: nodes bake the style value in at construction (see
-// App.reapplyTheme, which has the same problem with Table cells).
+// Assigned by deriveColors, never in this declaration, because the
+// colors change: a theme reload re-derives this style, and a style
+// baked into the declaration would keep the colors it was built with
+// forever. (It was once a correctness bug rather than a staleness one
+// -- the colors were package-level vars in this package, and variable
+// initializers run before any init function, so a style built here
+// captured them while they were still the zero Color and every node
+// rendered default-on-default. Reading them through uitheme's
+// accessors removes that particular trap, since an imported package is
+// fully initialized first.)
+//
+// Because TreeNodes bake the style value in at construction,
+// libraryPanel.restyleNodes still has to walk the tree after a reload
+// (see App.reapplyTheme, which has the same problem with Table cells).
 var treeSelectedStyle tcell.Style
 
 const (

@@ -8,6 +8,7 @@ import (
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/uitheme"
 )
 
 func TestCenterRowOffset(t *testing.T) {
@@ -214,7 +215,7 @@ func TestFlashLocatedRowLightsUpThenRestoresTheSelection(t *testing.T) {
 	// Without this the rest of the test would pass vacuously: a palette
 	// whose accent equalled its selection color would make the flash
 	// invisible while every assertion below still held.
-	if locateFlashBg == colorSelectedBg {
+	if locateFlashBg == uitheme.SelectedBg() {
 		t.Fatalf("flash background %v equals the normal selection background -- the flash would be invisible", locateFlashBg)
 	}
 	a := newTestApp()
@@ -229,8 +230,8 @@ func TestFlashLocatedRowLightsUpThenRestoresTheSelection(t *testing.T) {
 
 	// Run the sequence out, as the scheduled phases would.
 	a.runLocateFlashPhase(a.locateFlashSeq, len(locateFlashPhases))
-	if got := selectedRowBackground(t, a); got != colorSelectedBg {
-		t.Errorf("selected row background after the flash = %v, want the normal selection %v", got, colorSelectedBg)
+	if got := selectedRowBackground(t, a); got != uitheme.SelectedBg() {
+		t.Errorf("selected row background after the flash = %v, want the normal selection %v", got, uitheme.SelectedBg())
 	}
 }
 
@@ -273,8 +274,8 @@ func TestLocateFlashEndsOnTheNormalSelection(t *testing.T) {
 		a.runLocateFlashPhase(a.locateFlashSeq, i)
 	}
 
-	if got := selectedRowBackground(t, a); got != colorSelectedBg {
-		t.Errorf("selected row background after every phase = %v, want the normal selection %v", got, colorSelectedBg)
+	if got := selectedRowBackground(t, a); got != uitheme.SelectedBg() {
+		t.Errorf("selected row background after every phase = %v, want the normal selection %v", got, uitheme.SelectedBg())
 	}
 }
 

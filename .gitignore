@@ -1,3 +1,4 @@
 /mpdtui
 *.md
 !README.md
+!DEPENDENCY.md

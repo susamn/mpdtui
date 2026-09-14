@@ -14,6 +14,21 @@ import (
 	"mpdtui/internal/theme"
 )
 
+// conn is what the pickers ask of the MPD server. An interface rather
+// than *mpdclient.Client so each picker's "what happens after you press
+// Enter" can be tested without a live server -- and so proving that the
+// track picker queues and plays the chosen track does not require
+// actually interrupting whatever is playing.
+type conn interface {
+	Playlists() ([]mpdclient.Playlist, error)
+	PlaylistLoad(name string) error
+	AllSongs() ([]mpdclient.Song, error)
+	QueueAddID(uri string) (int, error)
+	PlayID(id int) error
+}
+
+var _ conn = (*mpdclient.Client)(nil)
+
 // Colors mirror internal/ui/theme.go's own derivation from the live
 // theme (internal/theme.LoadFrom) -- picker still has no dependency on
 // ui itself (see DEPENDENCY.md), only on the shared internal/theme leaf
@@ -74,7 +89,7 @@ func applyTheme() {
 // (Enter) clears the queue and plays it. Cancelling (Esc/Ctrl-C) does
 // nothing. themeFile is config.LoadThemeFile()'s value -- see
 // initColors.
-func RunPlaylistPicker(client *mpdclient.Client, themeFile string) error {
+func RunPlaylistPicker(client conn, themeFile string) error {
 	initColors(themeFile)
 
 	playlists, err := client.Playlists()
@@ -91,7 +106,7 @@ func RunPlaylistPicker(client *mpdclient.Client, themeFile string) error {
 		labels[i] = p.Name
 	}
 
-	idx, err := pickString("Playlists", labels)
+	idx, err := pick("Playlists", labels)
 	if err != nil {
 		return err
 	}
@@ -105,7 +120,7 @@ func RunPlaylistPicker(client *mpdclient.Client, themeFile string) error {
 // one (Enter) appends it to the queue and plays it. Cancelling
 // (Esc/Ctrl-C) does nothing. themeFile is config.LoadThemeFile()'s
 // value -- see initColors.
-func RunTrackPicker(client *mpdclient.Client, themeFile string) error {
+func RunTrackPicker(client conn, themeFile string) error {
 	initColors(themeFile)
 
 	songs, err := client.AllSongs()
@@ -122,7 +137,7 @@ func RunTrackPicker(client *mpdclient.Client, themeFile string) error {
 		labels[i] = s.DisplayName()
 	}
 
-	idx, err := pickString("Tracks", labels)
+	idx, err := pick("Tracks", labels)
 	if err != nil {
 		return err
 	}
@@ -137,77 +152,126 @@ func RunTrackPicker(client *mpdclient.Client, themeFile string) error {
 	return client.PlayID(id)
 }
 
-// pickString shows an fzf-style fuzzy finder over labels and returns the
+// pick shows an fzf-style fuzzy finder over labels and returns the
 // index into labels the user picked, or -1 if they cancelled.
-func pickString(title string, labels []string) (int, error) {
+//
+// A variable rather than a plain function so the two Run* pickers above
+// -- which have their own logic either side of it -- can be tested
+// without one of them taking over the terminal.
+var pick = func(title string, labels []string) (int, error) {
+	return newFinder(title, labels).run()
+}
+
+// finder is the fuzzy finder's state: the labels it was given, the
+// filtered ordering currently on screen, and what the user settled on.
+// Split out from the run loop so the filtering and key handling can be
+// exercised directly, without a terminal or a tview event loop.
+type finder struct {
+	app   *tview.Application
+	list  *tview.List
+	input *tview.InputField
+
+	labels []string
+	// order maps a row in list back to its index in labels, since the
+	// list only holds whatever the current query matched.
+	order []int
+
+	// selected is the chosen index into labels, -1 for "cancelled",
+	// which is also its value until the user confirms.
+	selected int
+	stopped  bool
+}
+
+func newFinder(title string, labels []string) *finder {
 	applyTheme()
-	app := tview.NewApplication()
 
-	list := tview.NewList()
-	list.ShowSecondaryText(false)
-	list.SetHighlightFullLine(true)
-	list.SetSelectedTextColor(colorSelectedFg)
-	list.SetSelectedBackgroundColor(colorSelectedBg)
-	list.SetBorderColor(colorAccent)
-	list.SetBorder(true).SetTitle(fmt.Sprintf(" %s ", title))
-
-	input := tview.NewInputField().SetLabel("> ")
-	input.SetBorderColor(colorAccent)
-	input.SetBorder(true)
-
-	var order []int
-	rebuild := func(query string) {
-		order = FilterSortIndex(query, labels)
-		list.Clear()
-		for _, idx := range order {
-			list.AddItem(labels[idx], "", 0, nil)
-		}
-		if list.GetItemCount() > 0 {
-			list.SetCurrentItem(0)
-		}
-	}
-	rebuild("")
-	input.SetChangedFunc(rebuild)
-
-	selected := -1
-	confirm := func() {
-		if i := list.GetCurrentItem(); i >= 0 && i < len(order) {
-			selected = order[i]
-		}
-		app.Stop()
-	}
-	cancel := func() {
-		selected = -1
-		app.Stop()
+	f := &finder{
+		app:      tview.NewApplication(),
+		list:     tview.NewList(),
+		input:    tview.NewInputField().SetLabel("> "),
+		labels:   labels,
+		selected: -1,
 	}
 
-	input.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyDown, tcell.KeyCtrlN:
-			moveSelection(list, 1)
-			return nil
-		case tcell.KeyUp, tcell.KeyCtrlP:
-			moveSelection(list, -1)
-			return nil
-		case tcell.KeyEnter:
-			confirm()
-			return nil
-		case tcell.KeyEscape, tcell.KeyCtrlC:
-			cancel()
-			return nil
-		}
-		return event
-	})
+	f.list.ShowSecondaryText(false)
+	f.list.SetHighlightFullLine(true)
+	f.list.SetSelectedTextColor(colorSelectedFg)
+	f.list.SetSelectedBackgroundColor(colorSelectedBg)
+	f.list.SetBorderColor(colorAccent)
+	f.list.SetBorder(true).SetTitle(fmt.Sprintf(" %s ", title))
 
+	f.input.SetBorderColor(colorAccent)
+	f.input.SetBorder(true)
+
+	f.rebuild("")
+	f.input.SetChangedFunc(f.rebuild)
+	f.input.SetInputCapture(f.handleKey)
+	return f
+}
+
+// rebuild re-filters the list for query, keeping the selection on the
+// best match (row 0) so Enter always acts on something sensible.
+func (f *finder) rebuild(query string) {
+	f.order = FilterSortIndex(query, f.labels)
+	f.list.Clear()
+	for _, idx := range f.order {
+		f.list.AddItem(f.labels[idx], "", 0, nil)
+	}
+	if f.list.GetItemCount() > 0 {
+		f.list.SetCurrentItem(0)
+	}
+}
+
+// confirm settles on whatever row is highlighted. A query matching
+// nothing leaves selected at -1, so confirming an empty list cancels
+// rather than picking an arbitrary item.
+func (f *finder) confirm() {
+	if i := f.list.GetCurrentItem(); i >= 0 && i < len(f.order) {
+		f.selected = f.order[i]
+	}
+	f.stop()
+}
+
+func (f *finder) cancel() {
+	f.selected = -1
+	f.stop()
+}
+
+func (f *finder) stop() {
+	f.stopped = true
+	f.app.Stop()
+}
+
+// handleKey is the input field's capture: navigation and confirm/cancel
+// are claimed, and everything else falls through so it types normally.
+func (f *finder) handleKey(event *tcell.EventKey) *tcell.EventKey {
+	switch event.Key() {
+	case tcell.KeyDown, tcell.KeyCtrlN:
+		moveSelection(f.list, 1)
+		return nil
+	case tcell.KeyUp, tcell.KeyCtrlP:
+		moveSelection(f.list, -1)
+		return nil
+	case tcell.KeyEnter:
+		f.confirm()
+		return nil
+	case tcell.KeyEscape, tcell.KeyCtrlC:
+		f.cancel()
+		return nil
+	}
+	return event
+}
+
+func (f *finder) run() (int, error) {
 	layout := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(input, 3, 0, true).
-		AddItem(list, 0, 1, false)
+		AddItem(f.input, 3, 0, true).
+		AddItem(f.list, 0, 1, false)
 
-	app.SetRoot(layout, true).SetFocus(input)
-	if err := app.Run(); err != nil {
+	f.app.SetRoot(layout, true).SetFocus(f.input)
+	if err := f.app.Run(); err != nil {
 		return -1, err
 	}
-	return selected, nil
+	return f.selected, nil
 }
 
 func moveSelection(list *tview.List, delta int) {

@@ -20,11 +20,21 @@ func (c *Client) Watch(subsystems ...string) (*Watcher, error) {
 }
 
 // Events yields the subsystem name for each change as it happens.
-func (w *Watcher) Events() <-chan string { return w.w.Event }
+func (w *Watcher) Events() <-chan string {
+	if w == nil {
+		return nil
+	}
+	return w.w.Event
+}
 
 // Errors yields errors from the underlying idle connection (e.g. if it
 // drops); the watcher is no longer usable after one arrives.
-func (w *Watcher) Errors() <-chan error { return w.w.Error }
+func (w *Watcher) Errors() <-chan error {
+	if w == nil {
+		return nil
+	}
+	return w.w.Error
+}
 
 // Close stops watching and closes the idle connection.
 func (w *Watcher) Close() error { return w.w.Close() }

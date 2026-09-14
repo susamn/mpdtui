@@ -1,0 +1,351 @@
+package visualizer
+
+import (
+	"regexp"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/rivo/tview"
+
+	"mpdtui/internal/mpdclient"
+)
+
+var tagRegex = regexp.MustCompile(`\[[^\]]*\]`)
+
+func stripColorTags(s string) string {
+	return tagRegex.ReplaceAllString(s, "")
+}
+
+func TestCliampVisualizationImplementsVisualizationInterface(t *testing.T) {
+	var _ Visualization = newCliampVisualization(nil)
+	viz := newCliampVisualization(nil)
+	if got := viz.Name(); got != "Cliamp" {
+		t.Errorf("Name() = %q, want %q", got, "Cliamp")
+	}
+}
+
+func TestCliampVisualizationReturnsCorrectLineCount(t *testing.T) {
+	viz := newCliampVisualization(nil)
+	for _, h := range []int{1, 2, 3, 5} {
+		lines := viz.Render(30, h, 1*time.Second, mpdclient.Status{State: mpdclient.StatePlay, Volume: 80})
+		if len(lines) != h {
+			t.Errorf("Render with height=%d returned %d lines, want %d", h, len(lines), h)
+		}
+	}
+}
+
+func TestCliampVisualizationEmptyOnZeroDimensions(t *testing.T) {
+	viz := newCliampVisualization(nil)
+	lines0W := viz.Render(0, 2, 1*time.Second, mpdclient.Status{State: mpdclient.StatePlay, Volume: 80})
+	if len(lines0W) != 2 || lines0W[0] != "" || lines0W[1] != "" {
+		t.Errorf("Render(0, 2) = %v, want 2 empty lines", lines0W)
+	}
+
+	lines0H := viz.Render(30, 0, 1*time.Second, mpdclient.Status{State: mpdclient.StatePlay, Volume: 80})
+	if len(lines0H) != 0 {
+		t.Errorf("Render(30, 0) returned %d lines, want 0", len(lines0H))
+	}
+}
+
+func TestCliampVisualizationVisibleWidthMatchesPanelWidth(t *testing.T) {
+	viz := newCliampVisualization(nil)
+	st := mpdclient.Status{State: mpdclient.StatePlay, Volume: 90}
+
+	for _, w := range []int{6, 11, 15, 25, 40, 80} {
+		lines := viz.Render(w, 2, 1*time.Second, st)
+		for y, line := range lines {
+			visibleWidth := tview.TaggedStringWidth(line)
+			if visibleWidth != w {
+				t.Errorf("width=%d row=%d tagged width = %d, want %d (content: %q)", w, y, visibleWidth, w, line)
+			}
+		}
+	}
+}
+
+func TestCliampVisualizationVolumeScaling(t *testing.T) {
+	viz := newCliampVisualization(nil)
+	playingZeroVol := mpdclient.Status{State: mpdclient.StatePlay, Volume: 0}
+	linesZero := viz.Render(30, 2, 2*time.Second, playingZeroVol)
+
+	for y, line := range linesZero {
+		width := tview.TaggedStringWidth(line)
+		if width != 30 {
+			t.Fatalf("row %d width = %d, want 30", y, width)
+		}
+	}
+
+	// At volume 0, all visible characters should be spaces
+	stripped := stripColorTags(linesZero[0])
+	for _, r := range stripped {
+		if r != ' ' {
+			t.Errorf("at volume=0 row 0 contained non-space rune %q", r)
+		}
+	}
+
+	// At volume 100, playing state should have rendered active glyphs
+	viz2 := newCliampVisualization(nil)
+	playingFullVol := mpdclient.Status{State: mpdclient.StatePlay, Volume: 100}
+	linesFull := viz2.Render(30, 2, 2*time.Second, playingFullVol)
+	strippedFull := stripColorTags(linesFull[1])
+
+	hasActiveGlyph := false
+	for _, r := range strippedFull {
+		if r != ' ' {
+			hasActiveGlyph = true
+			break
+		}
+	}
+	if !hasActiveGlyph {
+		t.Errorf("at volume=100 bottom row had no active glyphs: %q", strippedFull)
+	}
+}
+
+func TestCliampVisualizationIdleWhenPausedOrStopped(t *testing.T) {
+	viz := newCliampVisualization(nil)
+	paused := mpdclient.Status{State: mpdclient.StatePause, Volume: 80}
+	lines := viz.Render(30, 2, 5*time.Second, paused)
+
+	for y, line := range lines {
+		stripped := stripColorTags(line)
+		for _, r := range stripped {
+			if r != ' ' {
+				t.Errorf("paused state row %d had non-space rune %q", y, r)
+			}
+		}
+	}
+
+	stopped := mpdclient.Status{State: mpdclient.StateStop, Volume: 80}
+	linesStopped := viz.Render(30, 2, 5*time.Second, stopped)
+	for y, line := range linesStopped {
+		stripped := stripColorTags(line)
+		for _, r := range stripped {
+			if r != ' ' {
+				t.Errorf("stopped state row %d had non-space rune %q", y, r)
+			}
+		}
+	}
+}
+
+func TestCliampVisualizationPeakHoldAndDecay(t *testing.T) {
+	viz := newCliampVisualization(nil)
+	st := mpdclient.Status{State: mpdclient.StatePlay, Volume: 100}
+
+	// Initial render
+	viz.Render(30, 2, 100*time.Millisecond, st)
+	if len(viz.peaks) == 0 {
+		t.Fatal("expected peaks to be initialized")
+	}
+
+	// Step forward beyond peak hold duration (120ms) and check decay mechanics
+	viz.Render(30, 2, 500*time.Millisecond, st)
+
+	// Verify peaks do not panic or produce NaN/Inf
+	for i, p := range viz.peaks {
+		if p < 0 || p > 16 {
+			t.Errorf("peak[%d] out of range: %v", i, p)
+		}
+	}
+}
+
+func TestCliampDrawsRealSpectrumWhenAudioIsLive(t *testing.T) {
+	// A 60Hz tone sits near the bottom of the analyzed range, so real
+	// bands put it in the leftmost bars and leave the treble end empty.
+	// The simulation drives every bar at once, so this distinguishes the
+	// two paths.
+	viz := newCliampVisualization(startTestSpectrum(t, 60))
+
+	const width = 40
+	lines := viz.Render(width, 2, 0, mpdclient.Status{State: mpdclient.StatePlay, Volume: 100})
+
+	plain := make([]string, len(lines))
+	for i, l := range lines {
+		plain[i] = stripColorTags(l)
+	}
+	filled := filledColumns(plain, width)
+
+	anyLeft := false
+	for x := 0; x < width/4; x++ {
+		if filled[x] {
+			anyLeft = true
+		}
+	}
+	if !anyLeft {
+		t.Errorf("no bars in the bass quarter for a 60Hz tone: %q", plain)
+	}
+	for x := width * 3 / 4; x < width; x++ {
+		if filled[x] {
+			t.Errorf("column %d filled for a 60Hz tone -- treble end should be silent: %q", x, plain)
+			break
+		}
+	}
+}
+
+func TestCliampRealSpectrumKeepsPanelWidth(t *testing.T) {
+	// The centering/padding arithmetic has to hold on the real-audio
+	// path too, not just the simulated one -- a mis-sized row corrupts
+	// the panel border.
+	viz := newCliampVisualization(startTestSpectrum(t, 440))
+	st := mpdclient.Status{State: mpdclient.StatePlay, Volume: 90}
+
+	for _, w := range []int{6, 11, 15, 25, 40, 80} {
+		for _, line := range viz.Render(w, 2, time.Second, st) {
+			if got := tview.TaggedStringWidth(line); got != w {
+				t.Errorf("width=%d: tagged width = %d, want %d (content: %q)", w, got, w, line)
+			}
+		}
+	}
+}
+
+func TestCliampRealSpectrumStillScalesWithVolume(t *testing.T) {
+	// MPD's fifo carries the stream ahead of the mixer its volume
+	// setting drives, so volume scaling has to be applied on top of the
+	// real spectrum or muting would leave the bars dancing.
+	viz := newCliampVisualization(startTestSpectrum(t, 440))
+
+	lines := viz.Render(40, 2, time.Second, mpdclient.Status{State: mpdclient.StatePlay, Volume: 0})
+	for y, line := range lines {
+		if strings.TrimSpace(stripColorTags(line)) != "" {
+			t.Errorf("volume 0: row %d = %q, want blank even with live audio", y, line)
+		}
+	}
+}
+
+func TestCliampFallsBackToSimulationWithoutAudio(t *testing.T) {
+	// No fifo: the panel must still animate rather than sit blank for a
+	// user who hasn't configured MPD's fifo output.
+	viz := newCliampVisualization(nil)
+	playing := mpdclient.Status{State: mpdclient.StatePlay, Volume: 80}
+
+	at0 := stripColorTags(viz.Render(40, 2, 0, playing)[1])
+	at1s := stripColorTags(viz.Render(40, 2, time.Second, playing)[1])
+
+	if strings.TrimSpace(at0) == "" && strings.TrimSpace(at1s) == "" {
+		t.Error("no output without a spectrum -- expected the simulated fallback")
+	}
+	if at0 == at1s {
+		t.Error("fallback output identical across elapsed times -- expected animation")
+	}
+}
+
+// TestCliampRenderLayoutsAcrossWidths covers the bar-layout branches:
+// the visualizer narrows its bars and drops the gap as the panel
+// shrinks, and must always return exactly height lines whatever it
+// decides.
+func TestCliampRenderLayoutsAcrossWidths(t *testing.T) {
+	v := newCliampVisualization(nil)
+
+	for _, width := range []int{60, 30, 25, 12, 11, 4, 1} {
+		const height = 2
+		lines := v.Render(width, height, time.Second, mpdclient.Status{
+			State: mpdclient.StatePlay, Volume: 70,
+		})
+		if len(lines) != height {
+			t.Errorf("width %d returned %d lines, want %d", width, len(lines), height)
+		}
+	}
+}
+
+// TestCliampRenderDegenerateSizes covers the guard: a collapsed panel
+// still gets exactly height (possibly zero) lines rather than a nil
+// slice the container would have to special-case.
+func TestCliampRenderDegenerateSizes(t *testing.T) {
+	v := newCliampVisualization(nil)
+
+	if got := v.Render(0, 3, 0, mpdclient.Status{}); len(got) != 3 {
+		t.Errorf("zero width returned %d lines, want 3", len(got))
+	}
+	if got := v.Render(20, 0, 0, mpdclient.Status{}); len(got) != 0 {
+		t.Errorf("zero height returned %d lines, want none", len(got))
+	}
+}
+
+// TestCliampResetsPeaksWhenTheClockRewinds covers the peak-decay
+// bookkeeping: a new track restarts elapsed from zero, and stale peaks
+// from the previous one must not hang above the new bars.
+func TestCliampResetsPeaksWhenTheClockRewinds(t *testing.T) {
+	v := newCliampVisualization(nil)
+	st := mpdclient.Status{State: mpdclient.StatePlay, Volume: 80}
+
+	v.Render(40, 3, 10*time.Second, st)
+	if len(v.peaks) == 0 {
+		t.Fatal("no peaks tracked after a render")
+	}
+	for i := range v.peaks {
+		v.peaks[i] = 999 // obviously stale
+	}
+
+	v.Render(40, 3, time.Second, st) // the clock went backwards
+
+	for i, p := range v.peaks {
+		if p == 999 {
+			t.Errorf("peak %d survived a rewound clock", i)
+			break
+		}
+	}
+}
+
+// TestCliampHandlesUnknownVolume covers the negative-volume case MPD
+// reports when it has no mixer.
+func TestCliampHandlesUnknownVolume(t *testing.T) {
+	v := newCliampVisualization(nil)
+	lines := v.Render(40, 2, time.Second, mpdclient.Status{
+		State: mpdclient.StatePlay, Volume: -1,
+	})
+	if len(lines) != 2 {
+		t.Fatalf("returned %d lines, want 2", len(lines))
+	}
+}
+
+// TestCliampClampsOutOfRangeVolume covers the guards either side of the
+// 0..100 range MPD is supposed to report.
+func TestCliampClampsOutOfRangeVolume(t *testing.T) {
+	v := newCliampVisualization(nil)
+	for _, vol := range []int{-50, -1, 0, 50, 100, 150, 1000} {
+		lines := v.Render(40, 2, time.Second, mpdclient.Status{State: mpdclient.StatePlay, Volume: vol})
+		if len(lines) != 2 {
+			t.Errorf("volume %d returned %d lines, want 2", vol, len(lines))
+		}
+	}
+}
+
+// TestCliampSingleBarOnAVeryNarrowPanel covers the floor on the bar
+// count: however little width there is, there is always at least one
+// bar rather than a division by zero.
+func TestCliampSingleBarOnAVeryNarrowPanel(t *testing.T) {
+	v := newCliampVisualization(nil)
+	lines := v.Render(1, 2, time.Second, mpdclient.Status{State: mpdclient.StatePlay, Volume: 50})
+	if len(lines) != 2 {
+		t.Fatalf("returned %d lines, want 2", len(lines))
+	}
+	if len(v.peaks) != 1 {
+		t.Errorf("tracked %d bars on a 1-column panel, want 1", len(v.peaks))
+	}
+}
+
+// TestCliampSustainedLoudAudioSaturatesAndDecays drives the level and
+// peak clamps: a loud feed pins both at the top of the panel, and the
+// peaks then fall back once it goes quiet.
+func TestCliampSustainedLoudAudioSaturatesAndDecays(t *testing.T) {
+	v := newCliampVisualization(nil)
+	st := mpdclient.Status{State: mpdclient.StatePlay, Volume: 100}
+
+	for i := 1; i <= 40; i++ {
+		v.Render(40, 3, time.Duration(i)*100*time.Millisecond, st)
+	}
+	loud := append([]float64(nil), v.peaks...)
+
+	// Let a long time pass with nothing new: the peaks decay.
+	for i := 41; i <= 120; i++ {
+		v.Render(40, 3, time.Duration(i)*100*time.Millisecond, mpdclient.Status{State: mpdclient.StateStop})
+	}
+
+	var before, after float64
+	for i := range loud {
+		before += loud[i]
+		after += v.peaks[i]
+	}
+	if after > before {
+		t.Errorf("peaks rose after the audio stopped: %v -> %v", before, after)
+	}
+}

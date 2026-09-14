@@ -10,12 +10,13 @@ import (
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/uitheme"
 )
 
 // cellFg reports the foreground color tview will actually draw for cell,
 // mirroring tview's own resolution: SetTextColor writes to the legacy
 // Color field if Style was still the zero value at call time, or into
-// Style otherwise -- which one depends on whether applyTheme() has
+// Style otherwise -- which one depends on whether uitheme.ApplyToTviewStyles() has
 // already mutated the global tview.Styles in this test binary, since
 // NewTableCell seeds Style from those globals. Checking only one side
 // makes the test's outcome depend on execution order across the whole
@@ -500,11 +501,11 @@ func TestQueueHeaderRowStyledAndNotSelectable(t *testing.T) {
 	a.queue.render(-1)
 
 	cell := a.queue.table.GetCell(0, 2) // "Title"
-	if got := cellFg(cell); got != queueHeaderFg {
-		t.Errorf("header foreground = %v, want %v", got, queueHeaderFg)
+	if got := cellFg(cell); got != uitheme.TableHeaderFg() {
+		t.Errorf("header foreground = %v, want %v", got, uitheme.TableHeaderFg())
 	}
-	if got := cellBg(cell); got != queueHeaderBg {
-		t.Errorf("header background = %v, want %v", got, queueHeaderBg)
+	if got := cellBg(cell); got != uitheme.TableHeaderBg() {
+		t.Errorf("header background = %v, want %v", got, uitheme.TableHeaderBg())
 	}
 	if !cell.NotSelectable {
 		t.Error("header cell should not be selectable")

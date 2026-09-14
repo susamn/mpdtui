@@ -24,16 +24,12 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
-
-	"golang.org/x/text/runes"
-	"golang.org/x/text/transform"
-	"golang.org/x/text/unicode/norm"
 
 	_ "modernc.org/sqlite"
 
 	"mpdtui/internal/lyrics"
+	"mpdtui/internal/textutil"
 )
 
 // schemaVersion is bumped only on an incompatible change to the entries
@@ -459,23 +455,11 @@ func lrcPlainText(raw string) string {
 	return strings.Join(texts, "\n")
 }
 
-// stripDiacritics matches internal/ui's own search folding exactly (NFD,
-// drop combining marks, NFC) -- the index stores text folded this way and
-// the interactive search folds its query the same way, so the two must
-// not drift. It's duplicated here rather than shared through a new
-// package so internal/lyricsindex stays a leaf; the transform never
-// errors on the well-formed UTF-8 this only ever sees.
-var stripDiacritics = transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
-
 // Fold lowercases s and strips its diacritics, so a query and the indexed
 // text match regardless of case or accent (the app-wide "buble" matches
 // "Bublé" promise).
 func Fold(s string) string {
-	folded, _, err := transform.String(stripDiacritics, s)
-	if err != nil {
-		folded = s
-	}
-	return strings.ToLower(folded)
+	return textutil.FoldSearch(s)
 }
 
 // SnippetRadius is the default number of characters Snippet keeps on

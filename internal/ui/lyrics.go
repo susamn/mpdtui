@@ -154,7 +154,7 @@ func resolveLyricsFormat(preferred lyricsFormat, available []lyricsFormat) lyric
 	return lyricsFormatNone
 }
 
-// lyricsColor matches colorActiveBorder, the same accent color a
+// lyricsColor matches uitheme.ActiveBorder(), the same accent color a
 // focused panel's (Library/Playlists/Queue) border and title use --
 // explicit request ("make the lyrics viewer border just like the
 // border of the player panels... when they are selected"). Set by
