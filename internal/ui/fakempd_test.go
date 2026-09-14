@@ -23,17 +23,18 @@ type fakeMPD struct {
 	// here want to look at.
 	calls []string
 
-	status  mpdclient.Status
-	song    mpdclient.Song
-	queue   []mpdclient.Song
-	pls     []mpdclient.Playlist
-	plIndex mpdclient.PlaylistIndex
-	artists []string
-	albums  map[string][]string
-	songs   []mpdclient.Song
-	dirs    map[string][]mpdclient.DirEntry
-	stats   mpdclient.LibraryStats
-	art     []byte
+	status       mpdclient.Status
+	song         mpdclient.Song
+	queue        []mpdclient.Song
+	pls          []mpdclient.Playlist
+	plIndex      mpdclient.PlaylistIndex
+	plIndexCalls int
+	artists      []string
+	albums       map[string][]string
+	songs        []mpdclient.Song
+	dirs         map[string][]mpdclient.DirEntry
+	stats        mpdclient.LibraryStats
+	art          []byte
 
 	// err, when set, is returned by every command that can fail, for
 	// exercising the error paths.
@@ -113,7 +114,19 @@ func (f *fakeMPD) Queue() ([]mpdclient.Song, error) { return f.queue, f.err }
 
 func (f *fakeMPD) Playlists() ([]mpdclient.Playlist, error) { return f.pls, f.err }
 
-func (f *fakeMPD) PlaylistIndex() (mpdclient.PlaylistIndex, error) { return f.plIndex, f.err }
+func (f *fakeMPD) PlaylistIndex() (mpdclient.PlaylistIndex, error) {
+	f.mu.Lock()
+	f.plIndexCalls++
+	f.mu.Unlock()
+	return f.plIndex, f.err
+}
+
+// playlistIndexCalls is how many full rescans were asked for.
+func (f *fakeMPD) playlistIndexCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.plIndexCalls
+}
 
 func (f *fakeMPD) Artists() ([]string, error) { return f.artists, f.err }
 

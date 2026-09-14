@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -168,7 +170,12 @@ type App struct {
 	locateFlashNodeStyle tcell.Style
 
 	playlistRefreshCancel context.CancelFunc
-	done                  chan struct{}
+
+	// playlistRefreshTimer is the pending debounced rescan (see
+	// scheduleTrackCountRefresh), nil when none is scheduled.
+	// Main-goroutine-only.
+	playlistRefreshTimer *time.Timer
+	done                 chan struct{}
 }
 
 // Run connects a Watcher and runs the full TUI until the user quits or an
@@ -450,12 +457,28 @@ func (a *App) refreshAll() {
 }
 
 // playlistCountRefreshInterval is how often eventLoop's countTicker
-// re-fetches every playlist's track count in the background (see
-// refreshTrackCounts) -- MPD has no idle event for "a playlist's track
-// count might be stale" (stored_playlist only fires for playlists
-// created/renamed/deleted, not edited-in-place by some other client), so
-// this is a plain timer rather than something event-driven.
+// re-fetches every playlist's track count and membership in the
+// background (see refreshTrackCounts).
+//
+// A backstop rather than the main mechanism: MPD does fire
+// stored_playlist when a playlist is edited in place, not only when one
+// is created, renamed or deleted, so handleSubsystem reacts to that and
+// this timer only catches anything the event stream missed -- a dropped
+// idle connection, say. (An earlier comment here claimed the event does
+// not fire on in-place edits. It does; verified against MPD 0.24.)
 const playlistCountRefreshInterval = 10 * time.Minute
+
+// playlistRefreshDebounce is how long stored_playlist events are
+// allowed to keep arriving before the rescan they trigger actually
+// runs.
+//
+// The rescan is one listplaylist round-trip per stored playlist -- half
+// a second across 215 of them -- and mpdclient holds its connection
+// mutex for the whole call, so it blocks the status poll and every
+// keypress while it runs. Adding a dozen tracks one after another
+// therefore must not mean a dozen scans. Each event restarts the timer,
+// so a burst collapses into one scan shortly after it stops.
+const playlistRefreshDebounce = 900 * time.Millisecond
 
 // watcherChannels is the current watcher's event and error streams, or
 // a pair of nils when there is no watcher. Reading them through here
@@ -540,6 +563,47 @@ func (a *App) eventLoop() {
 // differently-targeted newer one. silent suppresses the confirmation
 // flash: an automatic background refresh shouldn't announce itself, but a
 // deliberate keypress should.
+// notePlaylistMembership records that file is now in playlist name,
+// without a round-trip.
+//
+// Only ever an addition: this exists for the one case where the app
+// already knows the answer, having just made the change itself. Nothing
+// removes an entry here, because nothing else can be known that cheaply
+// -- the next rescan replaces the whole map anyway. Kept sorted and
+// deduplicated to match what PlaylistIndex produces, so the Track Info
+// card cannot show a different order depending on whether the rescan
+// has landed yet.
+func (a *App) notePlaylistMembership(file, name string) {
+	if file == "" || name == "" {
+		return
+	}
+	if a.playlistMembership == nil {
+		a.playlistMembership = make(map[string][]string)
+	}
+	names := a.playlistMembership[file]
+	if slices.Contains(names, name) {
+		return
+	}
+	names = append(names, name)
+	sort.Strings(names)
+	a.playlistMembership[file] = names
+}
+
+// scheduleTrackCountRefresh runs refreshTrackCounts once the
+// stored_playlist events stop arriving, coalescing a burst of edits
+// into a single rescan -- see playlistRefreshDebounce for why that
+// matters. Restarting an existing timer is safe here because this only
+// ever runs on the UI goroutine, which is also where the timer's own
+// callback lands.
+func (a *App) scheduleTrackCountRefresh() {
+	if a.playlistRefreshTimer != nil {
+		a.playlistRefreshTimer.Stop()
+	}
+	a.playlistRefreshTimer = time.AfterFunc(playlistRefreshDebounce, func() {
+		a.applyToUI(func() { a.refreshTrackCounts(true) })
+	})
+}
+
 func (a *App) refreshTrackCounts(silent bool) {
 	if a.playlistRefreshCancel != nil {
 		a.playlistRefreshCancel()
@@ -596,6 +660,10 @@ func (a *App) handleSubsystem(name string) {
 	case "stored_playlist":
 		a.playlists.refresh()
 		a.queue.refreshStats()
+		// A playlist gained or lost a track, possibly from another
+		// client entirely, so which playlists hold which track is now
+		// stale -- that is what the Track Info card reads.
+		a.scheduleTrackCountRefresh()
 	case "database":
 		a.queue.refreshStats()
 	}

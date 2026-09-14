@@ -452,3 +452,22 @@ func newFakeAppWithMetaDB(t *testing.T, f *fakeMPD) *App {
 	}
 	return a
 }
+
+// enterKey is the Enter keypress, used wherever a test confirms.
+func enterKey() *tcell.EventKey { return tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone) }
+
+// openInputFieldOf returns whatever text input the currently open
+// overlay focused.
+func openInputFieldOf(t *testing.T, a *App) *tview.InputField {
+	t.Helper()
+	field, ok := a.tv.GetFocus().(*tview.InputField)
+	if !ok {
+		t.Fatalf("focus is %T, want a text input overlay", a.tv.GetFocus())
+	}
+	return field
+}
+
+// trackInfoPlaylists is the Track Info card's Playlists section.
+func trackInfoPlaylists(a *App) string {
+	return a.trackInfo.playlists.GetText(true)
+}

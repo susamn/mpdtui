@@ -157,6 +157,13 @@ func (a *App) openAddToPlaylistPicker() {
 			a.showError(err)
 			return
 		}
+		// Record it locally rather than waiting for the rescan the
+		// stored_playlist event schedules: that is debounced and then
+		// takes half a second, and pressing 'i' straight after adding
+		// is the obvious thing to do. The rescan still runs and is
+		// authoritative; this just makes our own edit visible at once.
+		a.notePlaylistMembership(song.File, name)
+		a.renderTrackInfo()
 		a.showMessage("added to playlist \"" + name + "\": " + song.DisplayName())
 	}
 
