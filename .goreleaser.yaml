@@ -1,0 +1,83 @@
+# GoReleaser builds the release binaries and updates susamn/homebrew-tap.
+# Exercise locally with: goreleaser release --snapshot --clean
+version: 2
+
+project_name: mpdtui
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: mpdtui
+    main: ./cmd/mpdtui
+    binary: mpdtui
+    env:
+      - CGO_ENABLED=0
+    # Trim this to what the tool can actually talk to. A Linux-only tool
+    # (anything reading /sys, /proc, or a Linux-only daemon) builds linux only.
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    # No -X version ldflag: mpdtui's version is //go:embed-ed from
+    # internal/version/VERSION, and ldflags cannot override a var whose value
+    # is computed at init from an embed. The release workflow instead refuses
+    # to build when that file disagrees with the tag.
+    ldflags:
+      - -s -w
+
+archives:
+  - id: mpdtui
+    ids:
+      - mpdtui
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - "^build:"
+      - "^merge:"
+
+homebrew_casks:
+  - name: mpdtui
+    repository:
+      owner: susamn
+      name: homebrew-tap
+      branch: main
+      # A fine-grained PAT with Contents:read-write on susamn/homebrew-tap.
+      # The default GITHUB_TOKEN cannot push to another repository.
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Casks
+    homepage: "https://github.com/susamn/mpdtui"
+    description: "Lazygit-style terminal UI for MPD (Music Player Daemon)"
+    commit_msg_template: "mpdtui {{ .Tag }}"
+    caveats: |
+      mpdtui is a client -- it needs an MPD server to talk to.
+
+        brew      brew install mpd && brew services start mpd
+        Arch      sudo pacman -S mpd
+        Debian    sudo apt install mpd
+
+      It connects to 127.0.0.1:6600 by default; override with MPD_HOST
+      and MPD_PORT.
+
+release:
+  github:
+    owner: susamn
+    name: mpdtui

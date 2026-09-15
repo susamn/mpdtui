@@ -131,12 +131,18 @@ single-line inline player for a shell or tmux pane.
 ### Homebrew
 
 ```bash
-brew tap susamn/mpdtui
-brew install mpdtui
+brew install susamn/tap/mpdtui
 ```
 
-(First install of a third-party tap: if Homebrew refuses to load the
-formula as untrusted, run `brew trust susamn/mpdtui` first.)
+Ships as a prebuilt binary, so this needs no Go toolchain and takes seconds.
+
+Previously this lived in its own tap, `susamn/mpdtui`. That tap is deprecated
+and no longer updated -- if you installed from it, move over with:
+
+```bash
+brew uninstall mpdtui && brew untap susamn/mpdtui
+brew install susamn/tap/mpdtui
+```
 
 ### From source
 
