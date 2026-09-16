@@ -265,6 +265,11 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			// Table (Queue, Playlists) and TreeView (Library) all handle
 			// these natively -- nothing in this app needs vim-motion
 			// translation, so these just pass through unchanged.
+			//
+			// h/l reach Table as horizontal scrolling because columns
+			// aren't selectable in either table (see newQueuePanel),
+			// which is what pans the Queue past its pinned columns;
+			// TreeView ignores both, so the Library is unaffected.
 			return event
 		default:
 			a.invalidKey(string(event.Rune()))

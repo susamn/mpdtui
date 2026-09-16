@@ -236,10 +236,11 @@ func TestBookmarkNoteBoxKeys(t *testing.T) {
 }
 
 // TestQueueColumnTruncation covers how the Queue divides the width it
-// has between Title, Album and Artist as columns come and go.
+// has between Title, Album and Artist -- the only pinned columns whose
+// width is negotiable.
 func TestQueueColumnTruncation(t *testing.T) {
-	// Everything on: the full fixed maxima, regardless of width.
-	tl, al, arl := queueColumnTruncation(200, true, true, true, true, true, true)
+	// Plenty of room: the full fixed maxima.
+	tl, al, arl := queueColumnTruncation(200, true, true)
 	if tl != queueTitleMaxLen || al != queueAlbumMaxLen || arl != queueArtistMaxLen {
 		t.Errorf("with every column shown = %d/%d/%d, want the fixed maxima %d/%d/%d",
 			tl, al, arl, queueTitleMaxLen, queueAlbumMaxLen, queueArtistMaxLen)
@@ -247,14 +248,14 @@ func TestQueueColumnTruncation(t *testing.T) {
 
 	// No width known yet (the panel has not been laid out): the compact
 	// defaults, not zeroes, so the first paint is not blank.
-	tl, al, arl = queueColumnTruncation(0, true, true, false, false, false, false)
+	tl, al, arl = queueColumnTruncation(0, true, true)
 	if tl != queueTitleCompactMaxLen || al != queueAlbumCompactMaxLen || arl != queueArtistCompactMaxLen {
 		t.Errorf("with no width = %d/%d/%d, want the compact defaults", tl, al, arl)
 	}
 
 	// A terminal too narrow for even the fixed columns still leaves
 	// something readable rather than negative widths.
-	tl, al, arl = queueColumnTruncation(10, true, true, false, false, false, false)
+	tl, al, arl = queueColumnTruncation(10, true, true)
 	if tl < 1 || al < 1 || arl < 1 {
 		t.Errorf("a very narrow terminal gave %d/%d/%d, want positive widths", tl, al, arl)
 	}
@@ -262,7 +263,7 @@ func TestQueueColumnTruncation(t *testing.T) {
 	// Between those, more width never means less room.
 	prevT := -1
 	for _, width := range []int{60, 80, 100, 140, 200} {
-		tl, al, arl = queueColumnTruncation(width, true, true, false, false, false, false)
+		tl, al, arl = queueColumnTruncation(width, true, true)
 		if tl < 1 || al < 1 || arl < 1 {
 			t.Fatalf("width %d gave %d/%d/%d, want positive widths", width, tl, al, arl)
 		}
