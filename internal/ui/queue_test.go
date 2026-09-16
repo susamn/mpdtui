@@ -180,8 +180,9 @@ func TestQueueHeaderRowLabelsAndAlignment(t *testing.T) {
 }
 
 // TestQueueHeaderRowIncludesLyrColumnWhenLyricsActive is the counterpart
-// to the test above: with a valid musicDir configured, Lyr appears right
-// after Title and everything else shifts one column right.
+// to the test above: with a valid musicDir configured, Lyr appears at
+// the head of the scrolling half (right after Rating, where there is
+// one) and everything behind it shifts one column right.
 func TestQueueHeaderRowIncludesLyrColumnWhenLyricsActive(t *testing.T) {
 	a := newTestAppWithMusicDir(t.TempDir())
 	a.queue.render(-1)
@@ -191,9 +192,9 @@ func TestQueueHeaderRowIncludesLyrColumnWhenLyricsActive(t *testing.T) {
 		text string
 	}{
 		{2, "Title" + queueColumnGap},
-		{3, "Lyr"},
-		{4, "Album" + queueColumnGap},
-		{5, "Artist" + queueColumnGap},
+		{3, "Album" + queueColumnGap},
+		{4, "Artist" + queueColumnGap},
+		{5, "Lyr"},
 		{6, "Year" + queueColumnGap},
 		{7, "Genre" + queueColumnGap},
 		{8, "Composer" + queueColumnGap},
@@ -273,7 +274,7 @@ func TestNewQueueColumnsOmitsLyrWhenInactive(t *testing.T) {
 	if cols.lyr != -1 {
 		t.Errorf("lyr = %d, want -1 (no Lyr column when lyrics is inactive)", cols.lyr)
 	}
-	want := queueColumns{lyr: -1, title: 2, album: 3, artist: 4, rating: -1, frozen: 5, playcount: -1, mark: -1, year: 5, genre: 6, composer: 7, typ: 8, duration: 9}
+	want := queueColumns{title: 2, album: 3, artist: 4, rating: -1, lyr: -1, frozen: 5, playcount: -1, mark: -1, year: 5, genre: 6, composer: 7, typ: 8, duration: 9}
 	if cols != want {
 		t.Errorf("newQueueColumns(false, false) = %+v, want %+v", cols, want)
 	}
@@ -281,7 +282,7 @@ func TestNewQueueColumnsOmitsLyrWhenInactive(t *testing.T) {
 
 func TestNewQueueColumnsIncludesLyrWhenActive(t *testing.T) {
 	cols := newQueueColumns(true, false)
-	want := queueColumns{lyr: 3, title: 2, album: 4, artist: 5, rating: -1, frozen: 6, playcount: -1, mark: -1, year: 6, genre: 7, composer: 8, typ: 9, duration: 10}
+	want := queueColumns{title: 2, album: 3, artist: 4, rating: -1, lyr: 5, frozen: 5, playcount: -1, mark: -1, year: 6, genre: 7, composer: 8, typ: 9, duration: 10}
 	if cols != want {
 		t.Errorf("newQueueColumns(true, false) = %+v, want %+v", cols, want)
 	}
@@ -294,7 +295,7 @@ func TestNewQueueColumnsIncludesLyrWhenActive(t *testing.T) {
 // own "no such column" omission.
 func TestNewQueueColumnsIncludesMarkAndRatingWhenMetadataActive(t *testing.T) {
 	cols := newQueueColumns(false, true)
-	want := queueColumns{lyr: -1, title: 2, album: 3, artist: 4, rating: 5, frozen: 6, playcount: 6, mark: 7, year: 8, genre: 9, composer: 10, typ: 11, duration: 12}
+	want := queueColumns{title: 2, album: 3, artist: 4, rating: 5, lyr: -1, frozen: 5, playcount: 6, mark: 7, year: 8, genre: 9, composer: 10, typ: 11, duration: 12}
 	if cols != want {
 		t.Errorf("newQueueColumns(false, true) = %+v, want %+v", cols, want)
 	}
@@ -302,20 +303,20 @@ func TestNewQueueColumnsIncludesMarkAndRatingWhenMetadataActive(t *testing.T) {
 
 func TestNewQueueColumnsIncludesLyrAndMarkAndRatingTogether(t *testing.T) {
 	cols := newQueueColumns(true, true)
-	want := queueColumns{lyr: 3, title: 2, album: 4, artist: 5, rating: 6, frozen: 7, playcount: 7, mark: 8, year: 9, genre: 10, composer: 11, typ: 12, duration: 13}
+	want := queueColumns{title: 2, album: 3, artist: 4, rating: 5, lyr: 6, frozen: 5, playcount: 7, mark: 8, year: 9, genre: 10, composer: 11, typ: 12, duration: 13}
 	if cols != want {
 		t.Errorf("newQueueColumns(true, true) = %+v, want %+v", cols, want)
 	}
 }
 
-// TestNewQueueColumnsFreezesThroughRating pins the boundary between the
+// TestNewQueueColumnsFreezesThroughArtist pins the boundary between the
 // two halves of the layout: frozen is the first scrolling column, so
-// every identifying column (marker, position, Title, Lyr, Album, Artist,
-// Rating) must sit below it and everything else at or above it. Getting
-// this wrong is invisible on a wide terminal and total on a narrow one --
-// a too-small frozen scrolls Artist away, a too-large one pins columns
-// that should pan.
-func TestNewQueueColumnsFreezesThroughRating(t *testing.T) {
+// every naming column (marker, position, Title, Album, Artist) must sit
+// below it and everything else at or above it. Getting this wrong is
+// invisible on a wide terminal and total on a narrow one -- a too-small
+// frozen scrolls Artist away, a too-large one pins columns that should
+// pan.
+func TestNewQueueColumnsFreezesThroughArtist(t *testing.T) {
 	for _, tc := range []struct {
 		name                         string
 		lyricsActive, metadataActive bool
@@ -329,12 +330,6 @@ func TestNewQueueColumnsFreezesThroughRating(t *testing.T) {
 			c := newQueueColumns(tc.lyricsActive, tc.metadataActive)
 
 			pinned := map[string]int{"marker": 0, "pos": 1, "title": c.title, "album": c.album, "artist": c.artist}
-			if c.lyr >= 0 {
-				pinned["lyr"] = c.lyr
-			}
-			if c.rating >= 0 {
-				pinned["rating"] = c.rating
-			}
 			for name, col := range pinned {
 				if col >= c.frozen {
 					t.Errorf("%s is at column %d, at or past the frozen boundary %d -- it would scroll away", name, col, c.frozen)
@@ -342,11 +337,10 @@ func TestNewQueueColumnsFreezesThroughRating(t *testing.T) {
 			}
 
 			scrolling := map[string]int{"year": c.year, "genre": c.genre, "composer": c.composer, "typ": c.typ, "duration": c.duration}
-			if c.playcount >= 0 {
-				scrolling["playcount"] = c.playcount
-			}
-			if c.mark >= 0 {
-				scrolling["mark"] = c.mark
+			for name, col := range map[string]int{"rating": c.rating, "lyr": c.lyr, "playcount": c.playcount, "mark": c.mark} {
+				if col >= 0 {
+					scrolling[name] = col
+				}
 			}
 			for name, col := range scrolling {
 				if col < c.frozen {
@@ -438,10 +432,10 @@ func queueHeaderLine(t *testing.T, q *queuePanel, w, h int) string {
 // TestQueueNarrowScrollsToTheHiddenColumns is the regression test for
 // the reported bug: on a small screen the rightmost columns could not be
 // seen at all. Now l pans to them, and -- the other half of the fix --
-// the identifying columns stay put while it does, because SetFixed pins
-// them. 54 is about what the Queue panel gets on an 80-column terminal
-// once the Library sits beside it, which is the width the bug was
-// actually reported at.
+// Title/Album/Artist stay put while it does, because SetFixed pins them.
+// 54 is about what the Queue panel gets on an 80-column terminal once
+// the Library sits beside it, which is the width the bug was actually
+// reported at.
 func TestQueueNarrowScrollsToTheHiddenColumns(t *testing.T) {
 	for _, width := range []int{54, 80} {
 		t.Run(fmt.Sprintf("width%d", width), func(t *testing.T) {
@@ -455,7 +449,7 @@ func TestQueueNarrowScrollsToTheHiddenColumns(t *testing.T) {
 
 			const h = 10
 			before := queueHeaderLine(t, a.queue, width, h)
-			for _, want := range []string{"Title", "Rating"} {
+			for _, want := range []string{"Title", "Album", "Artist"} {
 				if !strings.Contains(before, want) {
 					t.Fatalf("header at width %d = %q, want the pinned %s on screen", width, before, want)
 				}
@@ -476,7 +470,7 @@ func TestQueueNarrowScrollsToTheHiddenColumns(t *testing.T) {
 			if !strings.Contains(after, "Duration") {
 				t.Errorf("after scrolling right at width %d, header = %q, want Duration to have come into view", width, after)
 			}
-			for _, want := range []string{"Title", "Rating"} {
+			for _, want := range []string{"Title", "Album", "Artist"} {
 				if !strings.Contains(after, want) {
 					t.Errorf("after scrolling right at width %d, header = %q, want %s still pinned on screen", width, after, want)
 				}
@@ -548,7 +542,7 @@ func TestQueueRenderNarrowTruncatesTextKeepsColumns(t *testing.T) {
 	a.queue.render(-1)
 
 	row := queueHeaderRows
-	titleLen, albumLen, artistLen := queueColumnTruncation(80, false, false)
+	titleLen, albumLen, artistLen := queueColumnTruncation(80)
 	for _, tc := range []struct {
 		name, full, want string
 		col              int
@@ -582,7 +576,7 @@ func TestQueueRenderNarrowTruncatesTextKeepsColumns(t *testing.T) {
 func TestQueueColumnTruncationAcrossDifferentWidths(t *testing.T) {
 	// Full layout on wide screens. The maxima need a little more room
 	// than they used to: queueScrollWindowMax comes off the top first.
-	tLen, aLen, arLen := queueColumnTruncation(200, true, true)
+	tLen, aLen, arLen := queueColumnTruncation(200)
 	if tLen != queueTitleMaxLen || aLen != queueAlbumMaxLen || arLen != queueArtistMaxLen {
 		t.Errorf("wide full truncation = (%d, %d, %d), want (%d, %d, %d)", tLen, aLen, arLen, queueTitleMaxLen, queueAlbumMaxLen, queueArtistMaxLen)
 	}
@@ -591,15 +585,15 @@ func TestQueueColumnTruncationAcrossDifferentWidths(t *testing.T) {
 	// nothing: tview clips fixed columns it has no room for, and no
 	// amount of scrolling brings them back.
 	for _, width := range []int{80, 95, 120} {
-		tLen, aLen, arLen = queueColumnTruncation(width, true, true)
-		frozen := queueFrozenWidth(true, true) + (tLen + 2) + (aLen + 2) + (arLen + 2)
+		tLen, aLen, arLen = queueColumnTruncation(width)
+		frozen := queueFrozenWidth() + (tLen + 2) + (aLen + 2) + (arLen + 2)
 		if frozen > width {
 			t.Errorf("width %d: pinned half needs %d columns, more than there are", width, frozen)
 		}
 	}
 
 	// Very narrow width (e.g. 60 width)
-	tLen, aLen, arLen = queueColumnTruncation(60, true, true)
+	tLen, aLen, arLen = queueColumnTruncation(60)
 	if tLen < queueTitleFloor || aLen < queueAlbumFloor || arLen < queueArtistFloor {
 		t.Errorf("narrow truncation dropped below floor: (%d, %d, %d)", tLen, aLen, arLen)
 	}
@@ -617,8 +611,8 @@ func TestQueueColumnTruncationLeavesRoomToScrollInto(t *testing.T) {
 	// floors start eating into it, which queueColumnTruncation documents
 	// as the deliberate degradation.
 	for _, width := range []int{70, 80, 100, 120, 150, 200} {
-		tLen, aLen, arLen := queueColumnTruncation(width, true, true)
-		pinned := queueFrozenWidth(true, true) + (tLen + 2) + (aLen + 2) + (arLen + 2)
+		tLen, aLen, arLen := queueColumnTruncation(width)
+		pinned := queueFrozenWidth() + (tLen + 2) + (aLen + 2) + (arLen + 2)
 		if left := width - pinned; left < queueScrollWindowMax {
 			t.Errorf("width %d: the pinned columns take %d, leaving only %d to scroll into, want at least %d",
 				width, pinned, left, queueScrollWindowMax)
