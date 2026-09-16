@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -179,8 +180,9 @@ func TestQueueHeaderRowLabelsAndAlignment(t *testing.T) {
 }
 
 // TestQueueHeaderRowIncludesLyrColumnWhenLyricsActive is the counterpart
-// to the test above: with a valid musicDir configured, Lyr appears right
-// after Title and everything else shifts one column right.
+// to the test above: with a valid musicDir configured, Lyr appears at
+// the head of the scrolling half (right after Rating, where there is
+// one) and everything behind it shifts one column right.
 func TestQueueHeaderRowIncludesLyrColumnWhenLyricsActive(t *testing.T) {
 	a := newTestAppWithMusicDir(t.TempDir())
 	a.queue.render(-1)
@@ -190,9 +192,9 @@ func TestQueueHeaderRowIncludesLyrColumnWhenLyricsActive(t *testing.T) {
 		text string
 	}{
 		{2, "Title" + queueColumnGap},
-		{3, "Lyr"},
-		{4, "Album" + queueColumnGap},
-		{5, "Artist" + queueColumnGap},
+		{3, "Album" + queueColumnGap},
+		{4, "Artist" + queueColumnGap},
+		{5, "Lyr"},
 		{6, "Year" + queueColumnGap},
 		{7, "Genre" + queueColumnGap},
 		{8, "Composer" + queueColumnGap},
@@ -207,9 +209,10 @@ func TestQueueHeaderRowIncludesLyrColumnWhenLyricsActive(t *testing.T) {
 
 // TestQueueHeaderIncludesMarkAndRatingWhenMetadataActive is the
 // metadata counterpart to TestQueueHeaderRowIncludesLyrColumnWhenLyricsActive:
-// Plays, Mark and Rating appear right before Type, in that order and
-// right-aligned like Type/Duration, only when the track-metadata feature
-// is active (App.metaDB != nil).
+// Rating closes the pinned half right after Artist, and Plays/Mark open
+// the scrolling half behind it, all right-aligned like Type/Duration.
+// None of the three exist unless the track-metadata feature is active
+// (App.metaDB != nil).
 func TestQueueHeaderIncludesMarkAndRatingWhenMetadataActive(t *testing.T) {
 	a := newTestAppWithMetaDB(t)
 	a.queue.render(-1)
@@ -219,10 +222,13 @@ func TestQueueHeaderIncludesMarkAndRatingWhenMetadataActive(t *testing.T) {
 		text  string
 		align int
 	}{
-		{7, "Composer" + queueColumnGap, tview.AlignLeft},
-		{8, "Plays" + queueColumnGap, tview.AlignRight},
-		{9, "Mark" + queueColumnGap, tview.AlignRight},
-		{10, "Rating" + queueColumnGap, tview.AlignRight},
+		{4, "Artist" + queueColumnGap, tview.AlignLeft},
+		{5, "Rating" + queueColumnGap, tview.AlignRight},
+		{6, "Plays" + queueColumnGap, tview.AlignRight},
+		{7, "Mark" + queueColumnGap, tview.AlignRight},
+		{8, "Year" + queueColumnGap, tview.AlignLeft},
+		{9, "Genre" + queueColumnGap, tview.AlignLeft},
+		{10, "Composer" + queueColumnGap, tview.AlignLeft},
 		{11, "Type" + formatGap, tview.AlignRight},
 		{12, "Duration", tview.AlignRight},
 	}
@@ -264,21 +270,21 @@ func TestQueueRenderShowsDefaultUnratedUnmarkedRow(t *testing.T) {
 // lyr == -1 is the "no such column" sentinel render()/setQueueHeader
 // check before ever touching that index.
 func TestNewQueueColumnsOmitsLyrWhenInactive(t *testing.T) {
-	cols := newQueueColumns(false, false, true, true, true, true)
+	cols := newQueueColumns(false, false)
 	if cols.lyr != -1 {
 		t.Errorf("lyr = %d, want -1 (no Lyr column when lyrics is inactive)", cols.lyr)
 	}
-	want := queueColumns{lyr: -1, title: 2, album: 3, artist: 4, year: 5, genre: 6, composer: 7, playcount: -1, mark: -1, rating: -1, typ: 8, duration: 9}
+	want := queueColumns{title: 2, album: 3, artist: 4, rating: -1, lyr: -1, frozen: 5, playcount: -1, mark: -1, year: 5, genre: 6, composer: 7, typ: 8, duration: 9}
 	if cols != want {
-		t.Errorf("newQueueColumns(false, false, true, true, true, true) = %+v, want %+v", cols, want)
+		t.Errorf("newQueueColumns(false, false) = %+v, want %+v", cols, want)
 	}
 }
 
 func TestNewQueueColumnsIncludesLyrWhenActive(t *testing.T) {
-	cols := newQueueColumns(true, false, true, true, true, true)
-	want := queueColumns{lyr: 3, title: 2, album: 4, artist: 5, year: 6, genre: 7, composer: 8, playcount: -1, mark: -1, rating: -1, typ: 9, duration: 10}
+	cols := newQueueColumns(true, false)
+	want := queueColumns{title: 2, album: 3, artist: 4, rating: -1, lyr: 5, frozen: 5, playcount: -1, mark: -1, year: 6, genre: 7, composer: 8, typ: 9, duration: 10}
 	if cols != want {
-		t.Errorf("newQueueColumns(true, false, true, true, true, true) = %+v, want %+v", cols, want)
+		t.Errorf("newQueueColumns(true, false) = %+v, want %+v", cols, want)
 	}
 }
 
@@ -288,97 +294,203 @@ func TestNewQueueColumnsIncludesLyrWhenActive(t *testing.T) {
 // (i.e. App.metaDB != nil) -- otherwise the layout is identical to Lyr's
 // own "no such column" omission.
 func TestNewQueueColumnsIncludesMarkAndRatingWhenMetadataActive(t *testing.T) {
-	cols := newQueueColumns(false, true, true, true, true, true)
-	want := queueColumns{lyr: -1, title: 2, album: 3, artist: 4, year: 5, genre: 6, composer: 7, playcount: 8, mark: 9, rating: 10, typ: 11, duration: 12}
+	cols := newQueueColumns(false, true)
+	want := queueColumns{title: 2, album: 3, artist: 4, rating: 5, lyr: -1, frozen: 5, playcount: 6, mark: 7, year: 8, genre: 9, composer: 10, typ: 11, duration: 12}
 	if cols != want {
-		t.Errorf("newQueueColumns(false, true, true, true, true, true) = %+v, want %+v", cols, want)
+		t.Errorf("newQueueColumns(false, true) = %+v, want %+v", cols, want)
 	}
 }
 
 func TestNewQueueColumnsIncludesLyrAndMarkAndRatingTogether(t *testing.T) {
-	cols := newQueueColumns(true, true, true, true, true, true)
-	want := queueColumns{lyr: 3, title: 2, album: 4, artist: 5, year: 6, genre: 7, composer: 8, playcount: 9, mark: 10, rating: 11, typ: 12, duration: 13}
+	cols := newQueueColumns(true, true)
+	want := queueColumns{title: 2, album: 3, artist: 4, rating: 5, lyr: 6, frozen: 5, playcount: 7, mark: 8, year: 9, genre: 10, composer: 11, typ: 12, duration: 13}
 	if cols != want {
-		t.Errorf("newQueueColumns(true, true, true, true, true, true) = %+v, want %+v", cols, want)
+		t.Errorf("newQueueColumns(true, true) = %+v, want %+v", cols, want)
 	}
 }
 
-func TestNewQueueColumnsProgressivePriority(t *testing.T) {
-	// Level 0: Year, Genre, Composer, Type all omitted
-	c0 := newQueueColumns(false, false, false, false, false, false)
-	want0 := queueColumns{lyr: -1, title: 2, album: 3, artist: 4, year: -1, genre: -1, composer: -1, playcount: -1, mark: -1, rating: -1, typ: -1, duration: 5}
-	if c0 != want0 {
-		t.Errorf("level 0 columns = %+v, want %+v", c0, want0)
-	}
+// TestNewQueueColumnsFreezesThroughArtist pins the boundary between the
+// two halves of the layout: frozen is the first scrolling column, so
+// every naming column (marker, position, Title, Album, Artist) must sit
+// below it and everything else at or above it. Getting this wrong is
+// invisible on a wide terminal and total on a narrow one -- a too-small
+// frozen scrolls Artist away, a too-large one pins columns that should
+// pan.
+func TestNewQueueColumnsFreezesThroughArtist(t *testing.T) {
+	for _, tc := range []struct {
+		name                         string
+		lyricsActive, metadataActive bool
+	}{
+		{"bare", false, false},
+		{"lyrics", true, false},
+		{"metadata", false, true},
+		{"both", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newQueueColumns(tc.lyricsActive, tc.metadataActive)
 
-	// Level 1: Year only (Priority 1)
-	c1 := newQueueColumns(false, false, true, false, false, false)
-	want1 := queueColumns{lyr: -1, title: 2, album: 3, artist: 4, year: 5, genre: -1, composer: -1, playcount: -1, mark: -1, rating: -1, typ: -1, duration: 6}
-	if c1 != want1 {
-		t.Errorf("level 1 (Year) columns = %+v, want %+v", c1, want1)
-	}
+			pinned := map[string]int{"marker": 0, "pos": 1, "title": c.title, "album": c.album, "artist": c.artist}
+			for name, col := range pinned {
+				if col >= c.frozen {
+					t.Errorf("%s is at column %d, at or past the frozen boundary %d -- it would scroll away", name, col, c.frozen)
+				}
+			}
 
-	// Level 2: Year + Genre (Priority 1 + 2)
-	c2 := newQueueColumns(false, false, true, true, false, false)
-	want2 := queueColumns{lyr: -1, title: 2, album: 3, artist: 4, year: 5, genre: 6, composer: -1, playcount: -1, mark: -1, rating: -1, typ: -1, duration: 7}
-	if c2 != want2 {
-		t.Errorf("level 2 (Year+Genre) columns = %+v, want %+v", c2, want2)
-	}
-
-	// Level 3: Year + Genre + Composer (Priority 1 + 2 + 3)
-	c3 := newQueueColumns(false, false, true, true, true, false)
-	want3 := queueColumns{lyr: -1, title: 2, album: 3, artist: 4, year: 5, genre: 6, composer: 7, playcount: -1, mark: -1, rating: -1, typ: -1, duration: 8}
-	if c3 != want3 {
-		t.Errorf("level 3 (Year+Genre+Composer) columns = %+v, want %+v", c3, want3)
-	}
-
-	// Level 4: Full + Type (Priority 1 + 2 + 3 + 4) with metadata and lyrics
-	c4 := newQueueColumns(true, true, true, true, true, true)
-	want4 := queueColumns{lyr: 3, title: 2, album: 4, artist: 5, year: 6, genre: 7, composer: 8, playcount: 9, mark: 10, rating: 11, typ: 12, duration: 13}
-	if c4 != want4 {
-		t.Errorf("level 4 (Full) columns = %+v, want %+v", c4, want4)
-	}
-}
-
-func TestQueueOptionalColumnsProgressiveBreakpoints(t *testing.T) {
-	// Narrow screen (e.g. 70 runes with metadata & lyrics active)
-	y, g, c, ty := queueOptionalColumns(70, true, true)
-	if y || g || c || ty {
-		t.Errorf("width 70: got (year=%v, genre=%v, composer=%v, type=%v), want all false", y, g, c, ty)
-	}
-
-	// 1080p @ 1.5x scale (approx 95 runes with metadata & lyrics active)
-	y, g, c, ty = queueOptionalColumns(95, true, true)
-	if y || g || c || ty {
-		t.Errorf("width 95: got (year=%v, genre=%v, composer=%v, type=%v), want all false", y, g, c, ty)
-	}
-
-	// Medium screen with room for Year (Priority 1)
-	y, g, c, ty = queueOptionalColumns(115, true, true)
-	if !y || g || c || ty {
-		t.Errorf("width 115: got (year=%v, genre=%v, composer=%v, type=%v), want (true, false, false, false)", y, g, c, ty)
-	}
-
-	// Medium-wide screen with room for Year + Genre (Priority 1 + 2)
-	y, g, c, ty = queueOptionalColumns(125, true, true)
-	if !y || !g || c || ty {
-		t.Errorf("width 125: got (year=%v, genre=%v, composer=%v, type=%v), want (true, true, false, false)", y, g, c, ty)
-	}
-
-	// Wide screen with room for Year + Genre + Composer (Priority 1 + 2 + 3)
-	y, g, c, ty = queueOptionalColumns(140, true, true)
-	if !y || !g || !c || ty {
-		t.Errorf("width 140: got (year=%v, genre=%v, composer=%v, type=%v), want (true, true, true, false)", y, g, c, ty)
-	}
-
-	// Ultra-wide screen with room for all columns including Type (Priority 1 + 2 + 3 + 4)
-	y, g, c, ty = queueOptionalColumns(150, true, true)
-	if !y || !g || !c || !ty {
-		t.Errorf("width 150: got (year=%v, genre=%v, composer=%v, type=%v), want (true, true, true, true)", y, g, c, ty)
+			scrolling := map[string]int{"year": c.year, "genre": c.genre, "composer": c.composer, "typ": c.typ, "duration": c.duration}
+			for name, col := range map[string]int{"rating": c.rating, "lyr": c.lyr, "playcount": c.playcount, "mark": c.mark} {
+				if col >= 0 {
+					scrolling[name] = col
+				}
+			}
+			for name, col := range scrolling {
+				if col < c.frozen {
+					t.Errorf("%s is at column %d, inside the frozen block ending at %d -- it would never scroll", name, col, c.frozen)
+				}
+			}
+		})
 	}
 }
 
-func TestQueueHeaderRowCompactOmitsYearGenreComposer(t *testing.T) {
+// TestNewQueueColumnsAreWidthIndependent is the regression test for the
+// reported bug: the rightmost columns used to be dropped outright on a
+// narrow terminal, which made them unreachable -- you cannot scroll to a
+// column that was never laid out. The layout must now be a pure function
+// of which features are on, never of how much room there is.
+func TestNewQueueColumnsAreWidthIndependent(t *testing.T) {
+	a := newTestApp()
+	var narrow, wide queueColumns
+	for _, tc := range []struct {
+		width int
+		into  *queueColumns
+	}{{40, &narrow}, {200, &wide}} {
+		a.queue.table.SetRect(0, 0, tc.width, 40)
+		a.queue.render(-1)
+		*tc.into = a.queue.cols
+	}
+	if narrow != wide {
+		t.Errorf("columns at width 40 = %+v, at width 200 = %+v -- want identical", narrow, wide)
+	}
+	for name, col := range map[string]int{"year": narrow.year, "genre": narrow.genre, "composer": narrow.composer, "typ": narrow.typ, "duration": narrow.duration} {
+		if col < 0 {
+			t.Errorf("%s = %d at width 40, want a real column reachable by scrolling", name, col)
+		}
+	}
+}
+
+// renderQueueLines draws the Queue table at w x h on a simulation screen
+// and returns what actually lands there, row by row. Column indices and
+// SetFixed calls can all be right while the user still sees the wrong
+// thing -- horizontal scrolling only exists on screen, so only the
+// screen can testify to it.
+func renderQueueLines(t *testing.T, q *queuePanel, w, h int) []string {
+	t.Helper()
+	q.table.SetRect(0, 0, w, h)
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatalf("init simulation screen: %v", err)
+	}
+	defer screen.Fini()
+	screen.SetSize(w, h)
+	q.table.Draw(screen)
+	screen.Show()
+
+	cells, sw, _ := screen.GetContents()
+	lines := make([]string, 0, h)
+	for row := 0; row < h; row++ {
+		var b strings.Builder
+		for col := 0; col < w; col++ {
+			c := cells[row*sw+col]
+			if len(c.Runes) == 0 || c.Runes[0] == 0 {
+				b.WriteString(" ")
+				continue
+			}
+			b.WriteString(string(c.Runes))
+		}
+		lines = append(lines, b.String())
+	}
+	return lines
+}
+
+// pressQueueKey sends one rune to the Queue table's own input handler,
+// the same path a real keypress takes (keys.go passes h/l straight
+// through to the focused primitive).
+func pressQueueKey(q *queuePanel, r rune) {
+	q.table.InputHandler()(tcell.NewEventKey(tcell.KeyRune, r, tcell.ModNone), func(tview.Primitive) {})
+}
+
+// queueHeaderLine is the drawn header row: row 0 of the table, which the
+// border pushes down to screen line 1.
+func queueHeaderLine(t *testing.T, q *queuePanel, w, h int) string {
+	t.Helper()
+	lines := renderQueueLines(t, q, w, h)
+	if len(lines) < 2 {
+		t.Fatalf("queue drew %d lines, want at least 2", len(lines))
+	}
+	return lines[1]
+}
+
+// TestQueueNarrowScrollsToTheHiddenColumns is the regression test for
+// the reported bug: on a small screen the rightmost columns could not be
+// seen at all. Now l pans to them, and -- the other half of the fix --
+// Title/Album/Artist stay put while it does, because SetFixed pins them.
+// 54 is about what the Queue panel gets on an 80-column terminal once
+// the Library sits beside it, which is the width the bug was actually
+// reported at.
+func TestQueueNarrowScrollsToTheHiddenColumns(t *testing.T) {
+	for _, width := range []int{54, 80} {
+		t.Run(fmt.Sprintf("width%d", width), func(t *testing.T) {
+			a := newTestAppWithMetaDB(t)
+			a.queue.songs = []mpdclient.Song{{
+				ID: 1, Title: "Song", Album: "Album", Artist: "Artist",
+				Date: "1999", Genre: "Rock", Composer: "Composer",
+				File: "artist/track.mp3", Duration: 180 * time.Second,
+			}}
+			a.queue.render(-1)
+
+			const h = 10
+			before := queueHeaderLine(t, a.queue, width, h)
+			for _, want := range []string{"Title", "Album", "Artist"} {
+				if !strings.Contains(before, want) {
+					t.Fatalf("header at width %d = %q, want the pinned %s on screen", width, before, want)
+				}
+			}
+			if strings.Contains(before, "Duration") {
+				t.Fatalf("header at width %d = %q, already shows Duration -- too wide to test scrolling", width, before)
+			}
+
+			// Pan right to the far end of the layout; tview clamps the
+			// offset for us, so overshooting is safe.
+			for i := 0; i < 12; i++ {
+				pressQueueKey(a.queue, 'l')
+			}
+			after := queueHeaderLine(t, a.queue, width, h)
+			if after == before {
+				t.Errorf("scrolling right at width %d changed nothing: header is still %q", width, after)
+			}
+			if !strings.Contains(after, "Duration") {
+				t.Errorf("after scrolling right at width %d, header = %q, want Duration to have come into view", width, after)
+			}
+			for _, want := range []string{"Title", "Album", "Artist"} {
+				if !strings.Contains(after, want) {
+					t.Errorf("after scrolling right at width %d, header = %q, want %s still pinned on screen", width, after, want)
+				}
+			}
+
+			// And back again.
+			for i := 0; i < 12; i++ {
+				pressQueueKey(a.queue, 'h')
+			}
+			if got := queueHeaderLine(t, a.queue, width, h); got != before {
+				t.Errorf("after scrolling back left at width %d, header = %q, want the original %q", width, got, before)
+			}
+		})
+	}
+}
+
+// TestQueueHeaderRowNarrowKeepsEveryColumn is the header-row half of
+// TestNewQueueColumnsAreWidthIndependent: at 80 columns the labels past
+// Artist are still written, just off screen until h/l pans to them.
+func TestQueueHeaderRowNarrowKeepsEveryColumn(t *testing.T) {
 	a := newTestApp()
 	a.queue.table.SetRect(0, 0, 80, 40)
 	a.queue.render(-1)
@@ -393,7 +505,11 @@ func TestQueueHeaderRowCompactOmitsYearGenreComposer(t *testing.T) {
 		{2, "Title" + queueColumnGap, tview.AlignLeft},
 		{3, "Album" + queueColumnGap, tview.AlignLeft},
 		{4, "Artist" + queueColumnGap, tview.AlignLeft},
-		{5, "Duration", tview.AlignRight},
+		{5, "Year" + queueColumnGap, tview.AlignLeft},
+		{6, "Genre" + queueColumnGap, tview.AlignLeft},
+		{7, "Composer" + queueColumnGap, tview.AlignLeft},
+		{8, "Type" + formatGap, tview.AlignRight},
+		{9, "Duration", tview.AlignRight},
 	}
 	for _, w := range wantHeaders {
 		cell := a.queue.table.GetCell(0, w.col)
@@ -404,12 +520,12 @@ func TestQueueHeaderRowCompactOmitsYearGenreComposer(t *testing.T) {
 			t.Errorf("header col %d align = %d, want %d", w.col, cell.Align, w.align)
 		}
 	}
-	if a.queue.table.GetCell(0, 4).Expansion != 1 {
-		t.Errorf("Artist header cell in compact mode has expansion %d, want 1", a.queue.table.GetCell(0, 4).Expansion)
-	}
 }
 
-func TestQueueRenderCompactOmitsYearGenreComposerAndExpandsArtist(t *testing.T) {
+// TestQueueRenderNarrowTruncatesTextKeepsColumns covers the trade the
+// narrow layout actually makes: Title/Album/Artist shrink to fit the
+// pinned half, and nothing is dropped to pay for it.
+func TestQueueRenderNarrowTruncatesTextKeepsColumns(t *testing.T) {
 	a := newTestApp()
 	a.queue.table.SetRect(0, 0, 80, 40)
 	a.queue.songs = []mpdclient.Song{{
@@ -426,59 +542,95 @@ func TestQueueRenderCompactOmitsYearGenreComposerAndExpandsArtist(t *testing.T) 
 	a.queue.render(-1)
 
 	row := queueHeaderRows
-	showY, showG, showC, showTy := queueOptionalColumns(80, false, false)
-	titleLen, albumLen, artistLen := queueColumnTruncation(80, false, false, showY, showG, showC, showTy)
-	wantTitle := truncateWithEllipsis("A Very Long Song Title Exceeding Max", titleLen) + queueColumnGap
-	if got := a.queue.table.GetCell(row, 2).Text; got != wantTitle {
-		t.Errorf("compact title cell = %q, want %q", got, wantTitle)
+	titleLen, albumLen, artistLen := queueColumnTruncation(80)
+	for _, tc := range []struct {
+		name, full, want string
+		col              int
+	}{
+		{"title", "A Very Long Song Title Exceeding Max", truncateWithEllipsis("A Very Long Song Title Exceeding Max", titleLen) + queueColumnGap, 2},
+		{"album", "A Very Long Album Name Exceeding Max", truncateWithEllipsis("A Very Long Album Name Exceeding Max", albumLen) + queueColumnGap, 3},
+		{"artist", "A Very Long Artist Name Exceeding Max", truncateWithEllipsis("A Very Long Artist Name Exceeding Max", artistLen) + queueColumnGap, 4},
+	} {
+		if got := a.queue.table.GetCell(row, tc.col).Text; got != tc.want {
+			t.Errorf("narrow %s cell = %q, want %q", tc.name, got, tc.want)
+		}
 	}
-	wantAlbum := truncateWithEllipsis("A Very Long Album Name Exceeding Max", albumLen) + queueColumnGap
-	if got := a.queue.table.GetCell(row, 3).Text; got != wantAlbum {
-		t.Errorf("compact album cell = %q, want %q", got, wantAlbum)
-	}
-	wantArtist := truncateWithEllipsis("A Very Long Artist Name Exceeding Max", artistLen) + queueColumnGap
-	if got := a.queue.table.GetCell(row, 4).Text; got != wantArtist {
-		t.Errorf("compact artist cell = %q, want %q", got, wantArtist)
-	}
-	if a.queue.table.GetCell(row, 4).Expansion != 1 {
-		t.Errorf("Artist data cell in compact mode has expansion %d, want 1", a.queue.table.GetCell(row, 4).Expansion)
-	}
-	if got := a.queue.table.GetCell(row, 5).Text; got != "3:00" {
-		t.Errorf("compact duration cell = %q, want %q", got, "3:00")
+
+	// The scrolling half is still populated, off screen though it is.
+	cols := a.queue.cols
+	for _, tc := range []struct {
+		name, want string
+		col        int
+	}{
+		{"year", "1999" + queueColumnGap, cols.year},
+		{"genre", "Rock" + queueColumnGap, cols.genre},
+		{"composer", "Composer Name" + queueColumnGap, cols.composer},
+		{"duration", "3:00", cols.duration},
+	} {
+		if got := a.queue.table.GetCell(row, tc.col).Text; got != tc.want {
+			t.Errorf("narrow %s cell = %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }
 
 func TestQueueColumnTruncationAcrossDifferentWidths(t *testing.T) {
-	// Full layout on wide screens
-	tLen, aLen, arLen := queueColumnTruncation(150, true, true, true, true, true, true)
+	// Full layout on wide screens. The maxima need a little more room
+	// than they used to: queueScrollWindowMax comes off the top first.
+	tLen, aLen, arLen := queueColumnTruncation(200)
 	if tLen != queueTitleMaxLen || aLen != queueAlbumMaxLen || arLen != queueArtistMaxLen {
 		t.Errorf("wide full truncation = (%d, %d, %d), want (%d, %d, %d)", tLen, aLen, arLen, queueTitleMaxLen, queueAlbumMaxLen, queueArtistMaxLen)
 	}
 
-	// 1080p @ 1.5x scale (approx 95 width with metadata and lyrics active)
-	showY, showG, showC, showTy := queueOptionalColumns(95, true, true)
-	tLen, aLen, arLen = queueColumnTruncation(95, true, true, showY, showG, showC, showTy)
-	// Fixed width: 2(marker) + 3(pos) + 3(lyr) + 7(plays) + 4(mark) + 8(rating) + 8(duration) + 2(border) = 37
-	// Text width: (tLen+2) + (aLen+2) + (arLen+2)
-	totalWidth := 37 + (tLen + 2) + (aLen + 2) + (arLen + 2)
-	if totalWidth > 95 {
-		t.Errorf("95-width queue total column width = %d, exceeds available 95", totalWidth)
+	// The pinned half has to actually fit, or freezing it achieves
+	// nothing: tview clips fixed columns it has no room for, and no
+	// amount of scrolling brings them back.
+	for _, width := range []int{80, 95, 120} {
+		tLen, aLen, arLen = queueColumnTruncation(width)
+		frozen := queueFrozenWidth() + (tLen + 2) + (aLen + 2) + (arLen + 2)
+		if frozen > width {
+			t.Errorf("width %d: pinned half needs %d columns, more than there are", width, frozen)
+		}
 	}
 
 	// Very narrow width (e.g. 60 width)
-	tLen, aLen, arLen = queueColumnTruncation(60, true, true, false, false, false, false)
-	if tLen < 12 || aLen < 8 || arLen < 12 {
+	tLen, aLen, arLen = queueColumnTruncation(60)
+	if tLen < queueTitleFloor || aLen < queueAlbumFloor || arLen < queueArtistFloor {
 		t.Errorf("narrow truncation dropped below floor: (%d, %d, %d)", tLen, aLen, arLen)
+	}
+}
+
+// TestQueueColumnTruncationLeavesRoomToScrollInto is the regression test
+// for a fix that was only half a fix. The columns were frozen correctly
+// and h/l moved Table's column offset correctly, but Title/Album/Artist
+// still expanded into every spare cell -- so there was nowhere for a
+// scrolling column to appear, and pressing l changed precisely nothing
+// on screen. Freezing columns is only worth anything if something is
+// left over for the rest to scroll through.
+func TestQueueColumnTruncationLeavesRoomToScrollInto(t *testing.T) {
+	// Every width here has room for the full window; below about 66 the
+	// floors start eating into it, which queueColumnTruncation documents
+	// as the deliberate degradation.
+	for _, width := range []int{70, 80, 100, 120, 150, 200} {
+		tLen, aLen, arLen := queueColumnTruncation(width)
+		pinned := queueFrozenWidth() + (tLen + 2) + (aLen + 2) + (arLen + 2)
+		if left := width - pinned; left < queueScrollWindowMax {
+			t.Errorf("width %d: the pinned columns take %d, leaving only %d to scroll into, want at least %d",
+				width, pinned, left, queueScrollWindowMax)
+		}
 	}
 }
 
 func TestQueueDynamicResizeOnDraw(t *testing.T) {
 	a := newTestApp()
 	a.queue.table.SetRect(0, 0, 150, 40)
+	a.queue.songs = []mpdclient.Song{{
+		ID:     1,
+		Title:  "A Very Long Song Title Exceeding Max",
+		Artist: "A Very Long Artist Name Exceeding Max",
+		File:   "artist/track.mp3",
+	}}
 	a.queue.render(-1)
-	if a.queue.cols.year < 0 || a.queue.cols.genre < 0 || a.queue.cols.composer < 0 {
-		t.Errorf("initial wide width 150: expected full columns, got year=%d, genre=%d, composer=%d", a.queue.cols.year, a.queue.cols.genre, a.queue.cols.composer)
-	}
+	wideTitle := a.queue.table.GetCell(queueHeaderRows, a.queue.cols.title).Text
 
 	// Shrink below threshold and trigger Draw on table (which executes SetDrawFunc)
 	screen := tcell.NewSimulationScreen("")
@@ -491,8 +643,15 @@ func TestQueueDynamicResizeOnDraw(t *testing.T) {
 	a.queue.table.SetRect(0, 0, 80, 24)
 	a.queue.table.Draw(screen)
 
-	if a.queue.cols.year >= 0 || a.queue.cols.genre >= 0 || a.queue.cols.composer >= 0 {
-		t.Errorf("after shrinking to width 80: expected optional columns hidden, got year=%d, genre=%d, composer=%d", a.queue.cols.year, a.queue.cols.genre, a.queue.cols.composer)
+	// Draw must have re-rendered at the new width: the pinned text
+	// columns give up room, while the column layout itself is unmoved.
+	narrowTitle := a.queue.table.GetCell(queueHeaderRows, a.queue.cols.title).Text
+	if len([]rune(narrowTitle)) >= len([]rune(wideTitle)) {
+		t.Errorf("after shrinking to width 80 the Title cell is %q (%d runes), not narrower than the wide %q (%d runes)",
+			narrowTitle, len([]rune(narrowTitle)), wideTitle, len([]rune(wideTitle)))
+	}
+	if a.queue.cols.year < 0 || a.queue.cols.genre < 0 || a.queue.cols.composer < 0 {
+		t.Errorf("after shrinking to width 80 columns were dropped: year=%d, genre=%d, composer=%d", a.queue.cols.year, a.queue.cols.genre, a.queue.cols.composer)
 	}
 }
 

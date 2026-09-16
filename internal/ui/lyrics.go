@@ -296,6 +296,12 @@ func resolveLyricsViewerColumnBounds(qx, qw, yearX, durationX int) (int, int) {
 // resolveLyricsViewerColumnBounds) since a narrow enough terminal can
 // leave one of them stale or zero.
 //
+// Either boundary can also simply not be on screen, now that everything
+// past Rating scrolls: queuePanel.columnOnScreen is what decides whether
+// a column's last-drawn position can be trusted this frame. When Year
+// isn't there the viewer falls back to the Queue's right half, and when
+// Duration isn't, the band just runs to the Queue's right edge.
+//
 // The column indices themselves come from queue.go's newQueueColumns,
 // the same function render() uses to lay out the table in the first
 // place -- Year/Duration's positions shift by one when the Lyr column
@@ -313,15 +319,24 @@ func resolveLyricsViewerColumnBounds(qx, qw, yearX, durationX int) (int, int) {
 // layout, not a stale one.
 func (v *lyricsViewer) positionOverQueueColumns() {
 	qx, qy, qw, qh := v.app.queue.table.GetRect()
-	cols := v.app.queue.cols
+	q := v.app.queue
+	cols := q.cols
+
 	var yearX int
-	if cols.year >= 0 {
-		yearX, _, _ = v.app.queue.table.GetCell(0, cols.year).GetLastPosition()
+	if q.columnOnScreen(cols.year) {
+		yearX, _, _ = q.table.GetCell(0, cols.year).GetLastPosition()
 	} else {
-		// In compact mode (no Year column), position lyrics viewer over the right 50% of the Queue table.
+		// Year is off screen -- either the column doesn't exist, or the
+		// Queue is scrolled somewhere that doesn't show it. Fall back to
+		// the right half of the Queue rather than to Year's stale
+		// coordinates.
 		yearX = qx + qw/2
 	}
-	durationX, _, _ := v.app.queue.table.GetCell(0, cols.duration).GetLastPosition()
+
+	durationX := qx + qw
+	if q.columnOnScreen(cols.duration) {
+		durationX, _, _ = q.table.GetCell(0, cols.duration).GetLastPosition()
+	}
 	yearX, durationX = resolveLyricsViewerColumnBounds(qx, qw, yearX, durationX)
 	v.SetRect(lyricsViewerRect(qy, qh, yearX, durationX))
 }

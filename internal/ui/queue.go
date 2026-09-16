@@ -70,7 +70,6 @@ func newQueuePanel(app *App) *queuePanel {
 	t := tview.NewTable()
 	t.SetBorder(true).SetTitle(" Queue ")
 	t.SetSelectable(true, false)
-	t.SetFixed(queueHeaderRows, 0)
 	t.SetSelectedStyle(uitheme.SelectedStyle())
 	t.SetSelectedFunc(func(row, _ int) {
 		i := row - queueHeaderRows
@@ -85,9 +84,11 @@ func newQueuePanel(app *App) *queuePanel {
 		q.app.refreshNowPlaying()
 	})
 	q.table = t
-	_, _, w, _ := t.GetRect()
-	showYear, showGenre, showComposer, showType := queueOptionalColumns(w, app.musicDir != "", app.metaDB != nil)
-	q.cols = newQueueColumns(app.musicDir != "", app.metaDB != nil, showYear, showGenre, showComposer, showType)
+	q.cols = newQueueColumns(app.musicDir != "", app.metaDB != nil)
+	// Pin the identifying half of the layout; Table's own input handler
+	// pans the rest with h/l, since columns aren't selectable here
+	// (SetSelectable's second argument is false above).
+	t.SetFixed(queueHeaderRows, q.cols.frozen)
 	setQueueHeader(t, q.cols)
 
 	t.SetDrawFunc(func(screen tcell.Screen, x, y, width, height int) (int, int, int, int) {
@@ -134,6 +135,31 @@ func newQueuePanel(app *App) *queuePanel {
 	q.stats = stats
 
 	return q
+}
+
+// columnOnScreen reports whether a Queue column is currently drawn.
+// Three things can hide one: the feature it belongs to being off (a -1
+// index), horizontal scrolling having panned past it, or it falling off
+// the right edge of the window. The first two are answered from the
+// layout and Table's own column offset; the last from whether the
+// column's header cell got a width the last time it was drawn, since
+// tview only assigns one to cells it actually put on screen.
+//
+// Anything relying on a column's rendered position has to ask this
+// first: an off-screen cell keeps whatever position it last had, so its
+// coordinates look perfectly plausible while being stale by an
+// arbitrary number of scroll steps.
+func (q *queuePanel) columnOnScreen(col int) bool {
+	if col < 0 {
+		return false
+	}
+	if col >= q.cols.frozen {
+		if _, offset := q.table.GetOffset(); col < q.cols.frozen+offset {
+			return false
+		}
+	}
+	_, _, width := q.table.GetCell(0, col).GetLastPosition()
+	return width > 0
 }
 
 // refreshStats fetches and displays library-wide totals (tracks, artists,
@@ -198,17 +224,23 @@ const (
 	queueArtistCompactMaxLen = 20
 	queueColumnGap           = "  "
 
-	// queueYearWidth, queueGenreWidth, queueComposerWidth, and
-	// queueTypeWidth are each optional column's on-screen width (label/
-	// value plus its trailing queueColumnGap), used by both
-	// queueOptionalColumns (deciding which columns fit) and
-	// queueColumnTruncation (sizing Title/Album/Artist once that's
-	// decided) via the shared queueBaseFixedWidth helper below, so the
-	// two stay in lockstep.
-	queueYearWidth     = 6  // 4 + 2 gap
-	queueGenreWidth    = 11 // 9 + 2 gap
-	queueComposerWidth = 16 // 14 + 2 gap
-	queueTypeWidth     = 6  // 4 + 2 gap
+	// queueScrollWindowMax is the widest strip of the terminal the
+	// pinned columns will give up so that the scrolling ones have
+	// somewhere to appear. Freezing columns is only half a feature:
+	// Table draws the frozen block first and pans the rest into
+	// whatever is left over, so if Title/Album/Artist expand to fill
+	// every last cell, h/l move the offset and nothing changes on
+	// screen. 20 fits the widest scrolling column (Duration, 8) with
+	// room for a second beside it.
+	queueScrollWindowMax = 20
+
+	// queueTitleFloor, queueAlbumFloor and queueArtistFloor are how far
+	// the pinned text columns may be squeezed to buy that window. They
+	// only bite on a genuinely cramped panel; anywhere with room to
+	// spare, the proportional split lands well above them.
+	queueTitleFloor  = 8
+	queueAlbumFloor  = 6
+	queueArtistFloor = 8
 )
 
 // queueTitleColor tints the Title cell with the active theme's Green,
@@ -219,71 +251,74 @@ const (
 var queueTitleColor tcell.Color
 
 // queueColumns holds the Queue table's column indices for one header/
-// render pass. Lyr only exists as a column when the lyrics feature is
-// actually active. Playcount/Mark/Rating exist when metadata is active.
-// Year, Genre, Composer, and Type are optional columns included
-// progressively based on available screen width in order of priority:
-// Year first, then Genre, Composer, and finally Type on wide screens.
+// render pass, plus frozen: how many leading columns stay pinned on
+// screen while the rest scroll past them (see Table.SetFixed).
+//
+// The layout is in two halves. Marker, position, Title, Album and
+// Artist name the track and are on screen no matter how narrow the
+// terminal gets. Everything else (Rating, Lyr, Plays, Mark, Year,
+// Genre, Composer, Type, Duration) is a window the user pans with h/l,
+// so a column that doesn't fit is one keypress away rather than gone.
+//
+// Lyr exists only when the lyrics feature is active, and Playcount/
+// Mark/Rating only when metadata is (App.metaDB != nil); an absent
+// column is -1. Nothing else is ever dropped for want of width -- that
+// is what the scrolling half is for.
 type queueColumns struct {
-	lyr, title, album, artist, year, genre, composer, playcount, mark, rating, typ, duration int
+	title, album, artist, rating, lyr, playcount, mark, year, genre, composer, typ, duration int
+
+	// frozen is what Table.SetFixed gets as its column count: the index
+	// one past Artist, which is also the first column that scrolls.
+	frozen int
 }
 
-// newQueueColumns computes the column layout for one header/render pass.
-// Marker (0) and position (1) are always fixed; Title always follows at
-// 2; everything from there on is assigned sequentially, with Lyr
-// included only when lyricsActive and Playcount/Mark/Rating included
-// only when metadataActive (App.metaDB != nil). Year, Genre, Composer,
-// and Type are included conditionally according to available space and priority.
-func newQueueColumns(lyricsActive, metadataActive, showYear, showGenre, showComposer, showType bool) queueColumns {
+// newQueueColumns computes the column layout for one header/render
+// pass. Marker (0) and position (1) are always fixed; Title always
+// follows at 2; everything from there on is assigned sequentially.
+// The result deliberately does not depend on the terminal width: every
+// column always exists, and width decides only how much of the
+// scrolling half is on screen at once.
+func newQueueColumns(lyricsActive, metadataActive bool) queueColumns {
 	var c queueColumns
 	c.title = 2
 	next := 3
+	c.album = next
+	next++
+	c.artist = next
+	next++
+
+	// Everything assigned from here on scrolls.
+	c.frozen = next
+
+	if metadataActive {
+		c.rating = next
+		next++
+	} else {
+		c.rating = -1
+	}
 	if lyricsActive {
 		c.lyr = next
 		next++
 	} else {
 		c.lyr = -1
 	}
-	c.album = next
-	next++
-	c.artist = next
-	next++
-	if showYear {
-		c.year = next
-		next++
-	} else {
-		c.year = -1
-	}
-	if showGenre {
-		c.genre = next
-		next++
-	} else {
-		c.genre = -1
-	}
-	if showComposer {
-		c.composer = next
-		next++
-	} else {
-		c.composer = -1
-	}
 	if metadataActive {
 		c.playcount = next
 		next++
 		c.mark = next
 		next++
-		c.rating = next
-		next++
 	} else {
 		c.playcount = -1
 		c.mark = -1
-		c.rating = -1
 	}
-	if showType {
-		c.typ = next
-		next++
-	} else {
-		c.typ = -1
-	}
+	c.year = next
+	next++
+	c.genre = next
+	next++
+	c.composer = next
+	next++
+	c.typ = next
+	next++
 	c.duration = next
 	return c
 }
@@ -318,9 +353,9 @@ func newQueueColumns(lyricsActive, metadataActive, showYear, showGenre, showComp
 // on the header cell too, an empty queue has no cell anywhere reporting
 // Expansion > 0 for that column, so the leftover terminal width past
 // Duration goes completely undistributed instead of widening Composer,
-// and every column from Composer rightward (Plays/Mark/Rating/Type/
-// Duration) collapses back to its bare minimum width and bunches up on
-// the left the moment the queue empties -- the actual dominant cause of
+// and every column from Composer rightward (Type/Duration) collapses
+// back to its bare minimum width and bunches up on the left the moment
+// the queue empties -- the actual dominant cause of
 // "the header shrinks", more than the missing per-label gap above.
 func setQueueHeader(t *tview.Table, cols queueColumns) {
 	set := func(col int, text string, align int) {
@@ -332,23 +367,14 @@ func setQueueHeader(t *tview.Table, cols queueColumns) {
 	}
 	set(0, "", tview.AlignLeft)
 	set(1, "", tview.AlignLeft)
-	if cols.lyr >= 0 {
-		set(cols.lyr, "Lyr", tview.AlignLeft)
-	}
 	set(cols.title, "Title"+queueColumnGap, tview.AlignLeft)
 	set(cols.album, "Album"+queueColumnGap, tview.AlignLeft)
 	set(cols.artist, "Artist"+queueColumnGap, tview.AlignLeft)
-	if cols.year >= 0 {
-		set(cols.year, "Year"+queueColumnGap, tview.AlignLeft)
+	if cols.rating >= 0 {
+		set(cols.rating, "Rating"+queueColumnGap, tview.AlignRight)
 	}
-	if cols.genre >= 0 {
-		set(cols.genre, "Genre"+queueColumnGap, tview.AlignLeft)
-	}
-	if cols.composer >= 0 {
-		set(cols.composer, "Composer"+queueColumnGap, tview.AlignLeft)
-		t.GetCell(0, cols.composer).SetExpansion(1)
-	} else {
-		t.GetCell(0, cols.artist).SetExpansion(1)
+	if cols.lyr >= 0 {
+		set(cols.lyr, "Lyr", tview.AlignLeft)
 	}
 	if cols.playcount >= 0 {
 		set(cols.playcount, "Plays"+queueColumnGap, tview.AlignRight)
@@ -356,107 +382,76 @@ func setQueueHeader(t *tview.Table, cols queueColumns) {
 	if cols.mark >= 0 {
 		set(cols.mark, "Mark"+queueColumnGap, tview.AlignRight)
 	}
-	if cols.rating >= 0 {
-		set(cols.rating, "Rating"+queueColumnGap, tview.AlignRight)
-	}
-	if cols.typ >= 0 {
-		set(cols.typ, "Type"+formatGap, tview.AlignRight)
-	}
+	set(cols.year, "Year"+queueColumnGap, tview.AlignLeft)
+	set(cols.genre, "Genre"+queueColumnGap, tview.AlignLeft)
+	set(cols.composer, "Composer"+queueColumnGap, tview.AlignLeft)
+	t.GetCell(0, cols.composer).SetExpansion(1)
+	set(cols.typ, "Type"+formatGap, tview.AlignRight)
 	set(cols.duration, "Duration", tview.AlignRight)
 }
 
-// queueBaseFixedWidth returns the width (runes) consumed by the always-
-// present Queue columns -- marker, position, duration, and the table's
-// own border -- plus Lyr when lyricsActive and Playcount/Mark/Rating when
-// metadataActive. Both queueOptionalColumns (deciding which optional
-// columns fit) and queueColumnTruncation (sizing Title/Album/Artist once
-// that's decided) derive their fixed-width budget from this single place
-// so the two formulas can't drift apart and silently reintroduce columns
-// being pushed off screen.
-func queueBaseFixedWidth(lyricsActive, metadataActive bool) int {
-	fixed := 2 + 3 + 8 + 2 // marker(2) + pos(3) + duration(8) + border(2)
-	if lyricsActive {
-		fixed += 3
-	}
-	if metadataActive {
-		fixed += 7 + 4 + 8 // plays(7) + mark(4) + rating(8)
-	}
-	return fixed
+// queueFrozenWidth returns the width (runes) consumed by the pinned
+// half of the Queue table other than Title/Album/Artist themselves:
+// the marker and position gutter plus the table's own border. Nothing
+// here depends on which features are on, because every
+// feature-dependent column (Rating, Lyr, Plays, Mark) scrolls.
+//
+// It is the budget queueColumnTruncation sizes the three text columns
+// against, and it deliberately counts only frozen columns: everything
+// past Artist scrolls, so it must not compete for the width the pinned
+// half needs to stay readable.
+func queueFrozenWidth() int {
+	return 2 + 3 + 2 // marker(2) + pos(3) + border(2)
 }
 
-// queueOptionalColumns determines which optional columns (Year, Genre,
-// Composer, Type) should be shown given the available table width and active
-// features. The core columns (Title, Lyr, Album, Artist, Plays, Mark,
-// Rating, Duration) are always preserved on all displays. Extra
-// space is allocated progressively by priority: Year first, then Genre,
-// Composer, and finally Type on wide screens.
-func queueOptionalColumns(width int, lyricsActive, metadataActive bool) (showYear, showGenre, showComposer, showType bool) {
-	if width <= 0 {
-		return false, false, false, false
-	}
-	avail := width - queueBaseFixedWidth(lyricsActive, metadataActive)
-	// Base comfortable text space for Title (24), Album (16), Artist (22) + gaps (6) = 68
-	const baseTextSpace = 68
-	if avail >= baseTextSpace+queueYearWidth { // Priority 1: Year
-		showYear = true
-	}
-	if avail >= baseTextSpace+queueYearWidth+queueGenreWidth { // Priority 2: Genre
-		showGenre = true
-	}
-	if avail >= baseTextSpace+queueYearWidth+queueGenreWidth+queueComposerWidth { // Priority 3: Composer
-		showComposer = true
-	}
-	if avail >= baseTextSpace+queueYearWidth+queueGenreWidth+queueComposerWidth+queueTypeWidth { // Priority 4 (Last): Type
-		showType = true
-	}
-	return showYear, showGenre, showComposer, showType
-}
-
-// queueColumnTruncation calculates the maximum text lengths (runes) for Title,
-// Album, and Artist based on available table width and optional columns.
-// Fixed standard caps (30/20/40) are used when all columns fit comfortably.
-// On narrower screens, text column caps scale proportionally to the available width
-// after reserving fixed space for marker, pos, lyrics, play count, mark, rating,
-// type, and duration columns, ensuring the trailing metadata and duration columns
-// are never pushed off screen.
-func queueColumnTruncation(width int, lyricsActive, metadataActive, showYear, showGenre, showComposer, showType bool) (titleLen, albumLen, artistLen int) {
-	if showYear && showGenre && showComposer && showType {
-		return queueTitleMaxLen, queueAlbumMaxLen, queueArtistMaxLen
-	}
+// queueColumnTruncation calculates the maximum text lengths (runes) for
+// Title, Album, and Artist -- the only pinned columns whose width is
+// negotiable. They share whatever the terminal has left after
+// queueFrozenWidth, split by a fixed ratio and clamped between a floor
+// (so a very narrow terminal still shows something of each) and the
+// standard caps (so a very wide one doesn't stretch them absurdly).
+//
+// The scrolling columns are not considered here at all: they no longer
+// have to fit, so letting them shrink Title/Album/Artist would be
+// paying a price for nothing.
+func queueColumnTruncation(width int) (titleLen, albumLen, artistLen int) {
 	if width <= 0 {
 		return queueTitleCompactMaxLen, queueAlbumCompactMaxLen, queueArtistCompactMaxLen
 	}
-	fixed := queueBaseFixedWidth(lyricsActive, metadataActive)
-	if showYear {
-		fixed += queueYearWidth
-	}
-	if showGenre {
-		fixed += queueGenreWidth
-	}
-	if showComposer {
-		fixed += queueComposerWidth
-	}
-	if showType {
-		fixed += queueTypeWidth
-	}
-	avail := width - fixed
+	avail := width - queueFrozenWidth()
 	if avail <= 0 {
-		return 12, 8, 12
+		return queueTitleFloor, queueAlbumFloor, queueArtistFloor
 	}
-	// Distribute available width proportionally: Title ~38%, Album ~26%, Artist ~36%
-	// Subtract 2 per column for queueColumnGap
-	tLen := (avail*38)/100 - 2
-	aLen := (avail*26)/100 - 2
-	arLen := (avail*36)/100 - 2
 
-	if tLen < 12 {
-		tLen = 12
+	// Hold back a strip for the scrolling half before splitting the
+	// rest, but never more than what is there above the floors: on a
+	// panel too cramped to afford a window at all, the pinned columns
+	// keep everything and the layout degrades to not scrolling rather
+	// than to being unreadable.
+	floors := queueTitleFloor + queueAlbumFloor + queueArtistFloor + 3*len(queueColumnGap)
+	reserve := avail - floors
+	if reserve < 0 {
+		reserve = 0
 	}
-	if aLen < 8 {
-		aLen = 8
+	if reserve > queueScrollWindowMax {
+		reserve = queueScrollWindowMax
 	}
-	if arLen < 12 {
-		arLen = 12
+	budget := avail - reserve
+
+	// Distribute the budget proportionally: Title ~38%, Album ~26%, Artist ~36%
+	// Subtract 2 per column for queueColumnGap
+	tLen := (budget*38)/100 - 2
+	aLen := (budget*26)/100 - 2
+	arLen := (budget*36)/100 - 2
+
+	if tLen < queueTitleFloor {
+		tLen = queueTitleFloor
+	}
+	if aLen < queueAlbumFloor {
+		aLen = queueAlbumFloor
+	}
+	if arLen < queueArtistFloor {
+		arLen = queueArtistFloor
 	}
 
 	if tLen > queueTitleMaxLen {
@@ -479,9 +474,9 @@ func (q *queuePanel) render(curID int) {
 	_, _, w, _ := q.table.GetRect()
 	q.lastRenderedWidth = w
 
-	showYear, showGenre, showComposer, showType := queueOptionalColumns(w, lyricsActive, metadataActive)
-	cols := newQueueColumns(lyricsActive, metadataActive, showYear, showGenre, showComposer, showType)
+	cols := newQueueColumns(lyricsActive, metadataActive)
 	q.cols = cols
+	q.table.SetFixed(queueHeaderRows, cols.frozen)
 	setQueueHeader(q.table, cols)
 	// lrcDirs/txtDirs cache internal/lyrics.LRCCandidates/Candidates per
 	// directory for the duration of this one render pass only (no
@@ -491,7 +486,7 @@ func (q *queuePanel) render(curID int) {
 	lrcDirs := map[string]map[string]string{}
 	txtDirs := map[string]map[string]string{}
 
-	titleMaxLen, albumMaxLen, artistMaxLen := queueColumnTruncation(w, lyricsActive, metadataActive, showYear, showGenre, showComposer, showType)
+	titleMaxLen, albumMaxLen, artistMaxLen := queueColumnTruncation(w)
 
 	for i, s := range q.songs {
 		row := i + queueHeaderRows
@@ -505,6 +500,8 @@ func (q *queuePanel) render(curID int) {
 		q.table.SetCell(row, cols.title, tview.NewTableCell(titleText+queueColumnGap).
 			SetAttributes(tcell.AttrBold).
 			SetTextColor(queueTitleColor))
+		q.table.SetCell(row, cols.album, tview.NewTableCell(cellText(s.Album, albumMaxLen)+queueColumnGap))
+		q.table.SetCell(row, cols.artist, tview.NewTableCell(cellText(s.Artist, artistMaxLen)+queueColumnGap))
 		if cols.lyr >= 0 {
 			// lyrCell carries no queueColumnGap padding, unlike every
 			// other column here -- its content never exceeds the header's
@@ -513,24 +510,6 @@ func (q *queuePanel) render(curID int) {
 			// wide as it needs to be (the explicit ask: "the column width
 			// should only take to contain the icon").
 			q.table.SetCell(row, cols.lyr, tview.NewTableCell(lyricsCellText(q.lyricsPresence(s.File, lrcDirs, txtDirs))))
-		}
-		q.table.SetCell(row, cols.album, tview.NewTableCell(cellText(s.Album, albumMaxLen)+queueColumnGap))
-
-		artistCell := tview.NewTableCell(cellText(s.Artist, artistMaxLen) + queueColumnGap)
-		if cols.composer < 0 {
-			artistCell.SetExpansion(1)
-		}
-		q.table.SetCell(row, cols.artist, artistCell)
-
-		if cols.year >= 0 {
-			q.table.SetCell(row, cols.year, tview.NewTableCell(yearFromDate(s.Date)+queueColumnGap))
-		}
-		if cols.genre >= 0 {
-			q.table.SetCell(row, cols.genre, tview.NewTableCell(cellText(s.Genre, queueGenreMaxLen)+queueColumnGap))
-		}
-		if cols.composer >= 0 {
-			q.table.SetCell(row, cols.composer, tview.NewTableCell(cellText(s.Composer, queueComposerMaxLen)+queueColumnGap).
-				SetExpansion(1))
 		}
 		if cols.playcount >= 0 || cols.mark >= 0 || cols.rating >= 0 {
 			// Whatever's cached so far (possibly the zero-value Track, if
@@ -547,9 +526,11 @@ func (q *queuePanel) render(curID int) {
 				q.table.SetCell(row, cols.rating, ratingCell(meta.Rating))
 			}
 		}
-		if cols.typ >= 0 {
-			q.table.SetCell(row, cols.typ, formatTagCell(s.File))
-		}
+		q.table.SetCell(row, cols.year, tview.NewTableCell(yearFromDate(s.Date)+queueColumnGap))
+		q.table.SetCell(row, cols.genre, tview.NewTableCell(cellText(s.Genre, queueGenreMaxLen)+queueColumnGap))
+		q.table.SetCell(row, cols.composer, tview.NewTableCell(cellText(s.Composer, queueComposerMaxLen)+queueColumnGap).
+			SetExpansion(1))
+		q.table.SetCell(row, cols.typ, formatTagCell(s.File))
 		q.table.SetCell(row, cols.duration, tview.NewTableCell(FormatDuration(s.Duration)).SetAlign(tview.AlignRight))
 	}
 	q.table.SetTitle(fmt.Sprintf(" Queue (%d) ", len(q.songs)))
