@@ -123,23 +123,63 @@ func TestTrackInfoCardClearsPlaylistsWhenNothingPlaying(t *testing.T) {
 // section without growing to fit it, which would silently clip the
 // bottom of the list.
 func TestTrackInfoCardHeightMatchesItsSections(t *testing.T) {
-	withoutMeta := newTestApp().trackInfo
-	if withoutMeta.meta != nil {
-		t.Fatal("setup: test app unexpectedly has a metadata database")
-	}
-	want := trackInfoCardBorderLines + trackInfoIdentityLines + trackInfoPlaylistSectionLines
-	if got := withoutMeta.height(); got != want {
-		t.Errorf("height without the metadata table = %d, want %d", got, want)
-	}
+	for _, tc := range []struct {
+		name     string
+		app      func(*testing.T) *App
+		wantMeta bool
+	}{
+		{"without metadata", func(*testing.T) *App { return newTestApp() }, false},
+		{"with metadata", newTestAppWithMetaDB, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := tc.app(t)
+			if (a.trackInfo.meta != nil) != tc.wantMeta {
+				t.Fatalf("setup: metadata table present = %v, want %v", a.trackInfo.meta != nil, tc.wantMeta)
+			}
+			a.trackInfo.render(testSong(), mpdclient.Status{})
 
-	withMeta := newTestAppWithMetaDB(t).trackInfo
-	if withMeta.meta == nil {
-		t.Fatal("setup: metadata-enabled test app has no metadata table")
+			if got, want := a.trackInfo.height(), trackInfoCardBorderLines+a.trackInfo.contentHeight(); got != want {
+				t.Errorf("height = %d, want %d (border plus the rows the sections filled)", got, want)
+			}
+		})
 	}
-	// The metadata table brings the marks, tags, and bookmarks sections with it --
-	// all three live on the same local database.
-	if wantMeta := want + trackInfoMetaLines + trackInfoMarkSectionLines + trackInfoTagSectionLines + trackInfoBookmarkSectionLines; withMeta.height() != wantMeta {
-		t.Errorf("height with the metadata table = %d, want %d", withMeta.height(), wantMeta)
+}
+
+// TestTrackInfoCardShrinksToEmptySections is the regression test for the
+// card reserving every section's maximum: a track with no marks, tags or
+// bookmarks fills two rows in each of those sections, and the card used
+// to reserve six apiece and sit with the difference blank below the
+// content.
+func TestTrackInfoCardShrinksToEmptySections(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.trackInfo.render(testSong(), mpdclient.Status{})
+
+	reserved := trackInfoCardBorderLines + trackInfoIdentityLines + trackInfoPlaylistSectionLines +
+		trackInfoMetaLines + trackInfoMarkSectionLines + trackInfoTagSectionLines + trackInfoBookmarkSectionLines
+	if got := a.trackInfo.height(); got >= reserved {
+		t.Errorf("card with no marks, tags, bookmarks or playlists is %d rows, no shorter than the %d it used to reserve", got, reserved)
+	}
+}
+
+// TestTrackInfoCardKeepsItsHeightWhenExpanded is the other side of that:
+// Tab must not resize the card. It overflows and scrolls instead (j/k),
+// so the card never jumps around under the cursor.
+func TestTrackInfoCardKeepsItsHeightWhenExpanded(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.playlistMembership = map[string][]string{testSong().File: {
+		"One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight",
+	}}
+	a.trackInfo.render(testSong(), mpdclient.Status{})
+	collapsed := a.trackInfo.height()
+
+	a.trackInfo.expanded = true
+	a.trackInfo.render(testSong(), mpdclient.Status{})
+
+	if got := a.trackInfo.height(); got != collapsed {
+		t.Errorf("expanded card is %d rows, want the collapsed %d -- expanding scrolls, it does not resize", got, collapsed)
+	}
+	if a.trackInfo.contentHeight() <= a.trackInfo.height()-trackInfoCardBorderLines {
+		t.Fatal("setup: the expanded content does not overflow the card, so there is nothing to scroll")
 	}
 }
 

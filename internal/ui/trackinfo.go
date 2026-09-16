@@ -60,13 +60,23 @@ type trackInfoCard struct {
 	// "here's how to enable it" call to action needed here.
 	meta *tview.Table
 
-	// markRows/tagRows/bookmarkRows/playlistRows are how many card rows each list
-	// section currently occupies, kept so height() can report the card's
-	// real size after a section has grown or shrunk.
+	// identityRows/markRows/tagRows/bookmarkRows/playlistRows are how many
+	// card rows each section currently occupies, kept so contentHeight()
+	// can report the card's real size after a section has grown or
+	// shrunk. Every one of them is the section's *actual* size, not the
+	// maximum it is allowed to reach.
+	identityRows int
 	markRows     int
 	tagRows      int
 	bookmarkRows int
 	playlistRows int
+
+	// collapsedRows is contentHeight() as of the last render done while
+	// collapsed, and is what height() sizes the card to. Recorded rather
+	// than recomputed because expanding must not resize the card (see
+	// height), so once expanded the live contentHeight is the wrong
+	// answer -- it is the thing being scrolled through.
+	collapsedRows int
 
 	// inspectSong is the track currently being inspected while the card is
 	// open, navigated via j/k. When nil, renderTrackInfo falls back to
@@ -107,6 +117,7 @@ func newTrackInfoCard(app *App) *trackInfoCard {
 	// the card's height is the sum of what it actually shows, which is
 	// what height() reports for positioning.
 	flex.AddItem(identity, trackInfoIdentityLines, 0, false)
+	c.identityRows = trackInfoIdentityLines
 	if app.metaDB != nil {
 		meta := tview.NewTable()
 		meta.SetSelectable(false, false)
@@ -125,19 +136,28 @@ func newTrackInfoCard(app *App) *trackInfoCard {
 	return c
 }
 
-// height is the card's on-screen height: its border plus every section
-// at its *collapsed* size. Deliberately constant for a given
-// configuration -- expanding with Tab does not resize the card, it
-// overflows inside it and scrolls (see contentHeight and Draw), so the
-// card never jumps around under the cursor as sections grow.
+// height is the card's on-screen height: its border plus the rows its
+// sections actually filled the last time it was drawn collapsed.
 //
-// Still computed rather than a literal because the metadata table (and
-// the marks/tags/bookmarks sections that come with it) only exists when
-// track_metadata is active: a card sized for it regardless would sit
-// with a hole in the middle for everyone who has not turned that on.
+// Sized to real content rather than to the sections' maxima. Those
+// maxima are what each section may grow to, not what it typically
+// needs: a track with no marks, tags or bookmarks fills two rows in
+// each of those sections and the card used to reserve six apiece, so
+// most of its lower half was blank.
 //
-// Only a Queue panel too short to hold this clamps it (see cardRect).
+// Still constant while the card is open, though -- expanding with Tab
+// does not resize it, the content overflows inside and scrolls (see
+// contentHeight and Draw), so the card never jumps around under the
+// cursor as sections grow. That is why this reads collapsedRows instead
+// of calling contentHeight directly.
+//
+// Falls back to the old fixed sum before the first render, when there
+// are no real row counts to go on yet. Only a Queue panel too short to
+// hold the result clamps it (see cardRect).
 func (c *trackInfoCard) height() int {
+	if c.collapsedRows > 0 {
+		return trackInfoCardBorderLines + c.collapsedRows
+	}
 	h := trackInfoCardBorderLines + trackInfoIdentityLines + trackInfoPlaylistSectionLines
 	if c.meta != nil {
 		h += trackInfoMetaLines + trackInfoMarkSectionLines + trackInfoTagSectionLines + trackInfoBookmarkSectionLines
@@ -163,7 +183,7 @@ func (c *trackInfoCard) toggleExpanded() {
 // actually given. Collapsed the two roughly agree; expanded this grows
 // past the card and the difference is exactly what Draw scrolls through.
 func (c *trackInfoCard) contentHeight() int {
-	h := trackInfoIdentityLines + c.playlistRows
+	h := c.identityRows + c.playlistRows
 	if c.meta != nil {
 		h += trackInfoMetaLines + c.markRows + c.tagRows + c.bookmarkRows
 	}
@@ -403,20 +423,25 @@ func (a *App) renderTrackInfo() {
 // passed zeroed when song isn't the one actually playing (see
 // App.renderTrackInfo).
 func (c *trackInfoCard) render(song mpdclient.Song, st mpdclient.Status) {
+	// Deferred so both exits record it -- the "nothing playing" card is
+	// a real, much shorter layout, not a case to leave the previous
+	// track's height standing for.
+	defer c.noteCollapsedHeight()
+
 	if song.DisplayName() == "" {
-		c.identity.SetText("[::d]Nothing playing[-:-:-]")
-		c.setPlaylistSection("", trackInfoPlaylistSectionLines)
+		c.setIdentitySection("[::d]Nothing playing[-:-:-]", 1)
+		c.setPlaylistSection("", 0)
 		if c.meta != nil {
 			c.meta.Clear()
-			c.markRows = trackInfoMarkSectionLines
+			c.markRows = 0
 			c.marks.SetText("")
-			c.flex.ResizeItem(c.marks, trackInfoMarkSectionLines, 0)
-			c.tagRows = trackInfoTagSectionLines
+			c.flex.ResizeItem(c.marks, 0, 0)
+			c.tagRows = 0
 			c.tags.SetText("")
-			c.flex.ResizeItem(c.tags, trackInfoTagSectionLines, 0)
-			c.bookmarkRows = trackInfoBookmarkSectionLines
+			c.flex.ResizeItem(c.tags, 0, 0)
+			c.bookmarkRows = 0
 			c.bookmarks.SetText("")
-			c.flex.ResizeItem(c.bookmarks, trackInfoBookmarkSectionLines, 0)
+			c.flex.ResizeItem(c.bookmarks, 0, 0)
 		}
 		return
 	}
@@ -438,7 +463,7 @@ func (c *trackInfoCard) render(song mpdclient.Song, st mpdclient.Status) {
 		lines = append(lines, fmt.Sprintf("📝 %s", lyricsFormatBadges(c.app.musicDir, song.File)))
 	}
 	lines = append(lines, fmt.Sprintf("🎚️ %s", FormatAudioQuality(st.Bitrate, st.AudioFormat)))
-	c.identity.SetText(strings.Join(lines, "\n"))
+	c.setIdentitySection(strings.Join(lines, "\n"), len(lines))
 
 	// One database read for both the metadata table and the marks
 	// section, rather than each fetching the same row on every tick.
@@ -488,6 +513,28 @@ func (c *trackInfoCard) renderSections(file string, track metadata.Track) {
 	}
 	text, rows := playlistsSection(c.app.playlistMembership, file, playlistMax)
 	c.setPlaylistSection(text, rows)
+}
+
+// noteCollapsedHeight remembers the card's content height while it is
+// the collapsed one on show, for height() to size the card by. Skipped
+// while expanded: contentHeight is then the full, overflowing list,
+// which is what Draw scrolls through rather than what the card is.
+func (c *trackInfoCard) noteCollapsedHeight() {
+	if !c.expanded {
+		c.collapsedRows = c.contentHeight()
+	}
+}
+
+// setIdentitySection applies the identity block's text and resizes it to
+// the lines actually written, the section's own top padding row
+// included -- the same contract setPlaylistSection has below. Without
+// the resize the block holds trackInfoIdentityLines whatever it
+// contains, which is a blank row on any setup without a lyrics line.
+func (c *trackInfoCard) setIdentitySection(text string, lines int) {
+	const padding = 1 // the section's own top padding row
+	c.identityRows = padding + lines
+	c.identity.SetText(text)
+	c.flex.ResizeItem(c.identity, c.identityRows, 0)
 }
 
 // setPlaylistSection applies the section's text and its row count in one
