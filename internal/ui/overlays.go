@@ -311,6 +311,11 @@ const helpText = `[::b]Global[-:-:-]
                  is already in it
   d              remove selected track
   J / K          move selected track down / up
+  h / l          scroll the columns left / right. Title, Lyr, Album,
+                 Artist and Rating are pinned and never move; everything
+                 after them (Plays, Mark, Year, Genre, Composer, Type,
+                 Duration) pans, so a narrow terminal hides no column
+                 permanently
   /              search: jump to first match (Esc cancels)
   1-5            rate the selected track (needs track_metadata set in
                  ~/.config/mpdtui/config); as a result, 1/2 no longer

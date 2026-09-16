@@ -936,7 +936,7 @@ func (a *App) updateHintBar() {
 			panelHints = append(panelHints, hint{"Esc", "clear"})
 		}
 	case a.queue.table:
-		panelHints = []hint{{"Enter", "play"}, {"d", "remove"}, {"J/K", "move"}}
+		panelHints = []hint{{"Enter", "play"}, {"d", "remove"}, {"J/K", "move"}, {"h/l", "columns"}}
 		if a.metaDB != nil {
 			panelHints = append(panelHints, hint{"1-5", "rate"}, hint{"m", "mark"})
 		}
