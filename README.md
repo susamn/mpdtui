@@ -67,16 +67,16 @@ single-line inline player for a shell or tmux pane.
   track to an existing playlist (`a`, fuzzy-search by name in a popup --
   writes directly into that playlist's own file, rejecting a track
   already in it rather than writing a duplicate); a pinned header
-  row (Title/Album/Artist/Rating/Plays/Mark/Year/Genre/Composer/Type/
-  Duration -- plus Lyr, see below) stays visible while scrolling.
-  Title, Lyr, Album, Artist and Rating are also pinned *horizontally*:
-  they stay on screen at any terminal width, while `h`/`l` scroll the
-  columns after them into view, so a narrow terminal hides no column
-  permanently. Title is bold and colored
+  row (Title/Album/Artist/Rating/Lyr/Plays/Mark/Year/Genre/Composer/
+  Type/Duration) stays visible while scrolling. Title, Album and Artist
+  are also pinned *horizontally*: they stay on screen at any terminal
+  width, while `h`/`l` scroll everything from Rating rightward into
+  view, so a narrow terminal hides no column permanently. Title is bold
+  and colored
   WhatsApp green; Title/Album/Artist/Genre/Composer are truncated
   (30/20/40/9/14 characters) with "..." if longer; Type shows a
   color-coded format badge (MP3/FLAC/M4A/...); Type and Duration are
-  right-aligned. A narrow Lyr column, right after Title, shows a colored
+  right-aligned. A narrow Lyr column, right after Rating, shows a colored
   tick per lyrics format found for the track -- green for synced (`.lrc`),
   orange for plain (`.txt`), both adjacent (no gap) if both exist -- only
   present at all when `music_dir` is configured and actually exists;
