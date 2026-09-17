@@ -1,11 +1,17 @@
 package ui
 
 import (
+	"bytes"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	"image/png"
+	"os"
 	"strings"
 
 	"github.com/rivo/tview"
 
+	"mpdtui/internal/termimage"
 	"mpdtui/internal/trackwiki"
 )
 
@@ -20,6 +26,14 @@ const trackWikiPageName = "track-wiki"
 // screen.
 const (
 	trackWikiWidth = 78
+
+	// trackWikiImageCols/Rows are the picture's half of the card. Fixed
+	// rather than proportional: a terminal cell is roughly twice as tall
+	// as it is wide, so 24x12 is about square on screen, and a cover
+	// that changes shape with the length of the prose beside it would
+	// look like a bug.
+	trackWikiImageCols = 24
+	trackWikiImageRows = 12
 
 	// trackWikiMaxHeight caps the modal; trackWikiMinHeight stops a
 	// one-line story from rendering as a sliver. Between the two the
@@ -54,13 +68,33 @@ func (a *App) openTrackWiki() {
 		return
 	}
 
+	card, view, height := a.newTrackWikiCard(w, song.DisplayName())
+	a.trackWiki = view
+	a.showOverlay(trackWikiPageName, centered(card, trackWikiWidth, height), view)
+}
+
+// newTrackWikiCard lays the card out: the picture down the left, the
+// prose scrolling on the right. Returns the card, the view that takes
+// focus, and how tall the whole thing should be.
+//
+// Split out of openTrackWiki so the layout can be exercised without an
+// overlay, a page stack, or a focused application -- the card's title,
+// its columns and its height are all decided here.
+func (a *App) newTrackWikiCard(w trackwiki.Wiki, fallbackTitle string) (*tview.Flex, *tview.TextView, int) {
 	text := renderTrackWiki(w)
 	view := tview.NewTextView().SetDynamicColors(true).SetWordWrap(true)
 	view.SetText(text)
-	view.SetBorder(true).SetTitle(" " + trackWikiTitle(w, song.DisplayName()) + " ")
-	a.trackWiki = view
-	a.showOverlay(trackWikiPageName,
-		centered(view, trackWikiWidth, trackWikiModalHeight(text)), view)
+
+	card := tview.NewFlex().SetDirection(tview.FlexColumn)
+	card.SetBorder(true).SetTitle(" " + trackWikiTitle(w, fallbackTitle) + " ")
+
+	img := a.trackWikiImage(w)
+	if img != nil {
+		card.AddItem(img, trackWikiImageCols, 0, false)
+	}
+	card.AddItem(view, 0, 1, true)
+
+	return card, view, trackWikiCardHeight(text, img != nil)
 }
 
 // trackWikiTitle prefers what the story says it is about over what MPD's
@@ -137,20 +171,29 @@ func renderTrackWiki(w trackwiki.Wiki) string {
 	return b.String()
 }
 
-// trackWikiModalHeight is how tall the modal needs to be for text, up to
+// trackWikiCardHeight is how tall the card needs to be for text, up to
 // the cap. Measured with tview's own WordWrap at the width the view will
 // actually use, so the count matches what gets drawn rather than
 // approximating it -- an approximation that runs short clips the last
 // line, and one that runs long reintroduces the empty box.
-func trackWikiModalHeight(text string) int {
+func trackWikiCardHeight(text string, withImage bool) int {
 	const border = 2
+	width := trackWikiWidth - border
+	if withImage {
+		width -= trackWikiImageCols
+	}
 	lines := 0
 	for _, para := range strings.Split(text, "\n") {
-		if wrapped := tview.WordWrap(para, trackWikiWidth-border); len(wrapped) > 0 {
+		if wrapped := tview.WordWrap(para, width); len(wrapped) > 0 {
 			lines += len(wrapped)
 		} else {
 			lines++ // a blank line still occupies one
 		}
+	}
+	// A card must not be shorter than the picture in it, or the image is
+	// clipped by the border it sits inside.
+	if withImage && lines < trackWikiImageRows+1 {
+		lines = trackWikiImageRows + 1
 	}
 	switch h := lines + border; {
 	case h > trackWikiMaxHeight:
@@ -228,4 +271,114 @@ func wikiFooter(w trackwiki.Wiki) string {
 		footer += "fetched " + date
 	}
 	return footer
+}
+
+// wikiImage is the card's left-hand picture, and the bookkeeping the
+// Kitty path needs.
+//
+// On a Kitty terminal the picture is not drawn by tview at all: view is
+// an empty box holding the space, and the pixels are composited over it
+// by the terminal from drawTrackWikiImage. png is nil on every other
+// terminal, where the half-blocks are ordinary text inside view and
+// none of the rest applies.
+type wikiImage struct {
+	view    *tview.TextView
+	png     []byte
+	lastID  int
+	sentSig string
+}
+
+// trackWikiImage builds the card's picture column, or nil when there is
+// nothing to show -- no images listed, the file missing, or the bytes
+// not decodable. A card with no picture is just the prose at full
+// width, which is the right answer for most tracks.
+func (a *App) trackWikiImage(w trackwiki.Wiki) *tview.TextView {
+	img, ok := pickWikiImage(w)
+	if !ok {
+		return nil
+	}
+	path := w.Path(img)
+	if path == "" {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	decoded, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil
+	}
+
+	view := tview.NewTextView().SetDynamicColors(true)
+	view.SetBorderPadding(0, 0, 1, 1)
+
+	if !termimage.Supported() {
+		// Ordinary terminal: the picture *is* text, so tview draws it
+		// like any other content and there is nothing to composite.
+		fmt.Fprint(tview.ANSIWriter(view), termimage.HalfBlocks(decoded, trackWikiImageCols-2, trackWikiImageRows))
+		a.trackWikiImg = &wikiImage{view: view}
+		return view
+	}
+
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, decoded); err != nil {
+		return nil
+	}
+	a.trackWikiImg = &wikiImage{view: view, png: buf.Bytes()}
+	return view
+}
+
+// pickWikiImage chooses the one picture the card shows: the cover if
+// there is one, else whatever comes first. One rather than a gallery --
+// the card is a card, and a strip of thumbnails at 24 columns would be
+// unreadable. The rest are listed by name in the prose column.
+func pickWikiImage(w trackwiki.Wiki) (trackwiki.Image, bool) {
+	if covers := w.ImagesWithRole("cover"); len(covers) > 0 {
+		return covers[0], true
+	}
+	if len(w.Images) > 0 {
+		return w.Images[0], true
+	}
+	return trackwiki.Image{}, false
+}
+
+// drawTrackWikiImage composites the card's picture for this frame, on
+// terminals that can show one. Called from the App's SetAfterDrawFunc
+// alongside the album art panel's own Draw, which is the only place raw
+// escape sequences can be written without racing tcell's output.
+//
+// Retransmits only when the picture's position or size actually changed.
+// Unlike the album art panel there is no periodic resend: this card is
+// open for seconds at a time, not for the length of a listening session,
+// so the display-scale drift that resend exists to self-heal has no time
+// to happen.
+func (a *App) drawTrackWikiImage() {
+	im := a.trackWikiImg
+	if im == nil || len(im.png) == 0 {
+		return
+	}
+	// Closed since the last frame: the terminal composites the image
+	// over tview's output and knows nothing about pages, so a placement
+	// left behind would sit on top of the Queue forever.
+	if !a.pages.HasPage(trackWikiPageName) {
+		termimage.Delete(im.lastID)
+		a.trackWikiImg = nil
+		return
+	}
+
+	x, y, w, h := im.view.GetInnerRect()
+	if w <= 0 || h <= 0 {
+		return
+	}
+	sig := fmt.Sprintf("%d:%d:%d:%d:%d", len(im.png), x, y, w, h)
+	if im.sentSig == sig {
+		return
+	}
+
+	id := termimage.NextID(im.lastID)
+	termimage.Place(im.png, x, y, w, h, id)
+	termimage.Delete(im.lastID)
+	im.lastID = id
+	im.sentSig = sig
 }

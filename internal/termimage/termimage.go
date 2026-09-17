@@ -22,11 +22,31 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"io"
 	"os"
 	"strings"
 
 	"github.com/nfnt/resize"
 )
+
+// out overrides where the escape sequences go, for tests that want to
+// read back what the protocol actually emitted -- these byte sequences
+// are the whole contract with the terminal, and nothing used to assert
+// one of them.
+//
+// nil rather than os.Stdout, resolved per call by sink(): binding the
+// package variable at init captures whatever os.Stdout was *then*, and
+// internal/albumart's own tests work by swapping os.Stdout afterwards.
+// A captured reference would leave those writing to the real terminal
+// and their assertions reading an empty buffer.
+var out io.Writer
+
+func sink() io.Writer {
+	if out != nil {
+		return out
+	}
+	return os.Stdout
+}
 
 // Supported reports whether the terminal is likely to understand the
 // Kitty graphics protocol. TERM containing "kitty" catches the common
@@ -55,7 +75,7 @@ func Place(png []byte, x, y, cols, rows, id int) {
 		return
 	}
 	// Cursor position is 1-based in the terminal's own coordinates.
-	fmt.Printf("\033[%d;%dH", y+1, x+1)
+	fmt.Fprintf(sink(), "\033[%d;%dH", y+1, x+1)
 
 	b64 := base64.StdEncoding.EncodeToString(png)
 	const chunkSize = 4096
@@ -67,10 +87,10 @@ func Place(png []byte, x, y, cols, rows, id int) {
 			more = 0
 		}
 		if i == 0 {
-			fmt.Printf("\033_Ga=T,i=%d,f=100,q=2,c=%d,r=%d,m=%d;%s\033\\", id, cols, rows, more, b64[i:end])
+			fmt.Fprintf(sink(), "\033_Ga=T,i=%d,f=100,q=2,c=%d,r=%d,m=%d;%s\033\\", id, cols, rows, more, b64[i:end])
 			continue
 		}
-		fmt.Printf("\033_Gm=%d;%s\033\\", more, b64[i:end])
+		fmt.Fprintf(sink(), "\033_Gm=%d;%s\033\\", more, b64[i:end])
 	}
 }
 
@@ -79,7 +99,7 @@ func Delete(id int) {
 	if id == 0 {
 		return
 	}
-	fmt.Printf("\033_Ga=d,d=i,i=%d\033\\", id)
+	fmt.Fprintf(sink(), "\033_Ga=d,d=i,i=%d\033\\", id)
 }
 
 // NextID alternates between two ids so a retransmit never reuses the id
@@ -129,4 +149,15 @@ func HalfBlocks(img image.Image, cols, rows int) string {
 		b = append(b, "\033[0m\n"...)
 	}
 	return string(b)
+}
+
+// SetOutputForTest redirects the escape sequences and returns a function
+// restoring the previous sink. For tests in other packages, which cannot
+// reach the unexported variable -- the story card's drawing lives in
+// internal/ui, and whether it transmits at all is worth asserting there
+// rather than only here.
+func SetOutputForTest(w io.Writer) func() {
+	prev := out
+	out = w
+	return func() { out = prev }
 }

@@ -1,14 +1,20 @@
 package ui
 
 import (
+	"bytes"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/termimage"
 	"mpdtui/internal/trackwiki"
 )
 
@@ -104,8 +110,12 @@ func TestWOpensTheStoryForTheSelectedTrack(t *testing.T) {
 func TestStoryModalTitlePrefersTheFile(t *testing.T) {
 	music := seedWiki(t, "sade/best/01-smooth.m4a", testWikiJSON)
 	a, _ := wikiTestApp(t, music)
-	pressGlobal(a, 'w')
-	if got := a.trackWiki.GetTitle(); !strings.Contains(got, "Sade - Smooth Operator") {
+	w, ok := trackwiki.Load(music, "sade/best/01-smooth.m4a")
+	if !ok {
+		t.Fatal("setup: no story")
+	}
+	card, _, _ := a.newTrackWikiCard(w, "whatever MPD says")
+	if got := card.GetTitle(); !strings.Contains(got, "Sade - Smooth Operator") {
 		t.Errorf("title = %q, want the story's own artist and title", got)
 	}
 }
@@ -236,18 +246,18 @@ func TestBootlegLineJoinsOnlyWhatIsThere(t *testing.T) {
 // applied here before it could become a complaint: a short story must
 // not open a tall box with a field of empty under it.
 func TestModalHeightFollowsItsContent(t *testing.T) {
-	short := trackWikiModalHeight("one line")
+	short := trackWikiCardHeight("one line", false)
 	if short != trackWikiMinHeight {
 		t.Errorf("a one-line story sized the modal to %d, want the floor %d", short, trackWikiMinHeight)
 	}
 
-	medium := trackWikiModalHeight(strings.Repeat("a line\n", 12))
+	medium := trackWikiCardHeight(strings.Repeat("a line\n", 12), false)
 	if medium <= short || medium >= trackWikiMaxHeight {
 		t.Errorf("a 12-line story sized the modal to %d, want between %d and %d",
 			medium, short, trackWikiMaxHeight)
 	}
 
-	long := trackWikiModalHeight(strings.Repeat("a line\n", 500))
+	long := trackWikiCardHeight(strings.Repeat("a line\n", 500), false)
 	if long != trackWikiMaxHeight {
 		t.Errorf("a 500-line story sized the modal to %d, want the cap %d", long, trackWikiMaxHeight)
 	}
@@ -261,11 +271,11 @@ func TestModalHeightCountsWrappedLines(t *testing.T) {
 	// single line, and the modal would open three rows tall with the
 	// rest of the story hidden below the fold.
 	para := strings.Repeat("word ", 200)
-	got := trackWikiModalHeight(para)
+	got := trackWikiCardHeight(para, false)
 	if got <= trackWikiMinHeight {
 		t.Fatalf("a long single paragraph sized the modal to %d -- measured as if it were one line", got)
 	}
-	if bigger := trackWikiModalHeight(strings.Repeat("word ", 2000)); bigger != trackWikiMaxHeight {
+	if bigger := trackWikiCardHeight(strings.Repeat("word ", 2000), false); bigger != trackWikiMaxHeight {
 		t.Errorf("a paragraph ten times longer sized the modal to %d, want the cap %d",
 			bigger, trackWikiMaxHeight)
 	}
@@ -284,5 +294,240 @@ func TestFooterShowsTheDateNotTheTimestamp(t *testing.T) {
 	}
 	if !strings.Contains(got, "Wikipedia (CC BY-SA 4.0)") {
 		t.Errorf("footer = %q, want the licence attributed", got)
+	}
+}
+
+// writePNG puts a real decodable image next to a story, the way the
+// fetch + push pipeline would.
+func writePNG(t *testing.T, music, file, name string) {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 40, 40))
+	for y := 0; y < 40; y++ {
+		for x := 0; x < 40; x++ {
+			img.Set(x, y, color.RGBA{R: 180, G: 90, B: 40, A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(trackwiki.Dir(music, file), name), buf.Bytes(), 0o644); err != nil {
+		t.Fatalf("write image: %v", err)
+	}
+}
+
+func loadStory(t *testing.T, music, file string) trackwiki.Wiki {
+	t.Helper()
+	w, ok := trackwiki.Load(music, file)
+	if !ok {
+		t.Fatal("setup: no story loaded")
+	}
+	return w
+}
+
+// TestCardPutsThePictureLeftOfTheProse is the layout itself: two
+// columns, picture first at a fixed width, prose taking the rest.
+func TestCardPutsThePictureLeftOfTheProse(t *testing.T) {
+	const file = "sade/best/01-smooth.m4a"
+	music := seedWiki(t, file, testWikiJSON)
+	writePNG(t, music, file, "cover.jpg") // name per the manifest; content is PNG, which image.Decode handles
+	a, _ := wikiTestApp(t, music)
+
+	card, view, _ := a.newTrackWikiCard(loadStory(t, music, file), "x")
+	if a.trackWikiImg == nil {
+		t.Fatal("no picture column was built for a story with a readable image")
+	}
+	if got := card.GetItemCount(); got != 2 {
+		t.Fatalf("card has %d columns, want 2 (picture, prose)", got)
+	}
+	if card.GetItem(0) != tview.Primitive(a.trackWikiImg.view) {
+		t.Error("the first column is not the picture")
+	}
+	if card.GetItem(1) != tview.Primitive(view) {
+		t.Error("the second column is not the prose")
+	}
+}
+
+// TestCardWithoutAPictureIsProseAtFullWidth: most tracks have no image,
+// and an empty column reserved for one would waste a quarter of a small
+// card.
+func TestCardWithoutAPictureIsProseAtFullWidth(t *testing.T) {
+	const file = "sade/best/01-smooth.m4a"
+	// The manifest names cover.jpg, but nothing was ever written there.
+	music := seedWiki(t, file, testWikiJSON)
+	a, _ := wikiTestApp(t, music)
+
+	card, _, _ := a.newTrackWikiCard(loadStory(t, music, file), "x")
+	if a.trackWikiImg != nil {
+		t.Error("a picture column was built for an image file that does not exist")
+	}
+	if got := card.GetItemCount(); got != 1 {
+		t.Errorf("card has %d columns, want 1 (prose only)", got)
+	}
+}
+
+// TestCardIsAtLeastAsTallAsItsPicture: the image occupies a fixed number
+// of rows, so a two-line story must still leave room for it rather than
+// clipping it against the border.
+func TestCardIsAtLeastAsTallAsItsPicture(t *testing.T) {
+	withImage := trackWikiCardHeight("one line", true)
+	if withImage < trackWikiImageRows+2 {
+		t.Errorf("a card with a picture is %d rows, too short for a %d-row image plus its border",
+			withImage, trackWikiImageRows)
+	}
+	if withoutImage := trackWikiCardHeight("one line", false); withoutImage >= withImage {
+		t.Errorf("a card with no picture (%d) is not shorter than one with (%d)", withoutImage, withImage)
+	}
+}
+
+// TestCardHeightAccountsForTheNarrowerProseColumn: the picture takes
+// columns away from the text, so the same story wraps to more lines and
+// needs a taller card.
+func TestCardHeightAccountsForTheNarrowerProseColumn(t *testing.T) {
+	long := strings.Repeat("word ", 120)
+	wide := trackWikiCardHeight(long, false)
+	narrow := trackWikiCardHeight(long, true)
+	if narrow <= wide {
+		t.Errorf("with the picture %d rows, without it %d -- the narrower column must wrap to more lines",
+			narrow, wide)
+	}
+}
+
+// TestPickWikiImagePrefersTheCover covers the choice of which single
+// picture the card shows.
+func TestPickWikiImagePrefersTheCover(t *testing.T) {
+	got, ok := pickWikiImage(trackwiki.Wiki{Images: []trackwiki.Image{
+		{File: "scene-01.jpg", Role: "scene"},
+		{File: "cover.jpg", Role: "cover"},
+	}})
+	if !ok || got.File != "cover.jpg" {
+		t.Errorf("picked %+v, want the cover", got)
+	}
+
+	got, ok = pickWikiImage(trackwiki.Wiki{Images: []trackwiki.Image{{File: "scene-01.jpg", Role: "scene"}}})
+	if !ok || got.File != "scene-01.jpg" {
+		t.Errorf("with no cover, picked %+v, want the first image", got)
+	}
+
+	if _, ok := pickWikiImage(trackwiki.Wiki{}); ok {
+		t.Error("picked an image from a story that has none")
+	}
+}
+
+// TestClosingTheCardRemovesThePlacement: on a Kitty terminal the picture
+// is composited by the terminal over tview's output, so a placement left
+// behind after the card closes sits on top of the Queue forever.
+func TestClosingTheCardRemovesThePlacement(t *testing.T) {
+	a := newTestApp()
+	// lastID 0 so the cleanup's termimage.Delete is a no-op: it would
+	// otherwise write Kitty escape bytes straight into the test log.
+	// That the delete names the right id is termimage's own test.
+	a.trackWikiImg = &wikiImage{view: tview.NewTextView(), png: []byte("not really a png")}
+
+	// The page is not open, which is what the hook checks.
+	a.drawTrackWikiImage()
+
+	if a.trackWikiImg != nil {
+		t.Error("the picture outlived the card that held it")
+	}
+}
+
+// TestCardDrawsThePictureAsTextWithoutKitty is the layout as it actually
+// reaches an ordinary terminal: half-blocks down the left, prose to
+// their right, on the same rows. Column indices and item counts can all
+// be right while the screen shows something else.
+func TestCardDrawsThePictureAsTextWithoutKitty(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("KITTY_WINDOW_ID", "")
+
+	const file = "sade/best/01-smooth.m4a"
+	music := seedWiki(t, file, testWikiJSON)
+	writePNG(t, music, file, "cover.jpg")
+	a, _ := wikiTestApp(t, music)
+
+	card, _, height := a.newTrackWikiCard(loadStory(t, music, file), "x")
+	card.SetRect(0, 0, trackWikiWidth, height)
+
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatalf("init screen: %v", err)
+	}
+	defer screen.Fini()
+	screen.SetSize(trackWikiWidth, height)
+	card.Draw(screen)
+	screen.Show()
+
+	cells, w, _ := screen.GetContents()
+	var blockRows, proseRows int
+	for row := 1; row < height-1; row++ { // inside the border
+		var left, right strings.Builder
+		for col := 1; col < trackWikiWidth-1; col++ {
+			r := cells[row*w+col].Runes
+			if len(r) == 0 {
+				continue
+			}
+			if col < trackWikiImageCols {
+				left.WriteRune(r[0])
+			} else {
+				right.WriteRune(r[0])
+			}
+		}
+		if strings.Contains(left.String(), "▀") {
+			blockRows++
+		}
+		if strings.TrimSpace(right.String()) != "" {
+			proseRows++
+		}
+	}
+	if blockRows == 0 {
+		t.Error("no half-blocks in the picture column -- the image did not render as text")
+	}
+	if proseRows == 0 {
+		t.Error("no prose in the right column")
+	}
+	if blockRows < 4 || proseRows < 4 {
+		t.Errorf("picture rows %d, prose rows %d -- want both columns filled side by side", blockRows, proseRows)
+	}
+}
+
+// TestCardTransmitsThePictureOnKitty covers the other path, where the
+// terminal composites the image and tview draws nothing: the only
+// evidence is the escape sequence, so that is what gets asserted.
+func TestCardTransmitsThePictureOnKitty(t *testing.T) {
+	t.Setenv("KITTY_WINDOW_ID", "1")
+
+	const file = "sade/best/01-smooth.m4a"
+	music := seedWiki(t, file, testWikiJSON)
+	writePNG(t, music, file, "cover.jpg")
+	a, _ := wikiTestApp(t, music)
+
+	var buf bytes.Buffer
+	restore := termimage.SetOutputForTest(&buf)
+	defer restore()
+
+	if got := pressGlobal(a, 'w'); got != nil {
+		t.Fatal("'w' was not claimed")
+	}
+	if a.trackWikiImg == nil || len(a.trackWikiImg.png) == 0 {
+		t.Fatal("no PNG was prepared for the Kitty path")
+	}
+	// The view has no rect until something lays it out.
+	a.trackWikiImg.view.SetRect(2, 3, trackWikiImageCols, trackWikiImageRows)
+	a.drawTrackWikiImage()
+
+	if got := buf.String(); !strings.Contains(got, "\033_Ga=T,") {
+		t.Errorf("no transmit escape was written; got %q", got)
+	}
+
+	// Closing it must take the placement down, or the picture sits over
+	// the Queue for the rest of the session.
+	buf.Reset()
+	pressGlobal(a, 'w')
+	a.drawTrackWikiImage()
+	if got := buf.String(); !strings.Contains(got, "\033_Ga=d,d=i,") {
+		t.Errorf("closing the card did not delete the placement; got %q", got)
+	}
+	if a.trackWikiImg != nil {
+		t.Error("the picture outlived the card")
 	}
 }

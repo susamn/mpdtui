@@ -115,7 +115,13 @@ type App struct {
 	// prose, it does not follow the playing track the way the Track
 	// Info card does, and nothing outside openTrackWiki needs it except
 	// the key router's "is this what's focused" check.
-	trackWiki      *tview.TextView
+	trackWiki *tview.TextView
+
+	// trackWikiImg is the story card's picture while the card is open,
+	// and nil otherwise. Held on the App rather than inside the card so
+	// the after-draw hook can find it -- and so it can clean up its own
+	// placement the frame after the card closes.
+	trackWikiImg   *wikiImage
 	markPicker     *catalogPicker
 	tagPicker      *catalogPicker
 	bookmarkPicker *bookmarkPicker
@@ -388,6 +394,7 @@ func (a *App) build() {
 
 	a.tv.SetAfterDrawFunc(func(tcell.Screen) {
 		a.albumArt.Draw()
+		a.drawTrackWikiImage()
 	})
 }
 
