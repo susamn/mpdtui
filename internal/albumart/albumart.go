@@ -2,19 +2,16 @@ package albumart
 
 import (
 	"bytes"
-	"encoding/base64"
 	"fmt"
 	"image"
-	"image/color"
 	_ "image/jpeg"
 	"image/png"
-	"os"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/nfnt/resize"
 	"github.com/rivo/tview"
+
+	"mpdtui/internal/termimage"
 )
 
 // resendInterval bounds how long a stale Kitty placement can
@@ -68,7 +65,7 @@ type Panel struct {
 
 	mu       sync.Mutex
 	seq      int    // bumped on every track change; a fetch checks this before applying its result
-	kittyPNG []byte // set only when supportsKittyGraphics() and decode+encode succeeded
+	kittyPNG []byte // set only when termimage.Supported() and decode+encode succeeded
 
 	currentURI string    // main-goroutine-only (set from OnTrackChanged, read from Draw)
 	sentSig    string    // main-goroutine-only: signature of the last frame actually transmitted
@@ -89,36 +86,11 @@ type Panel struct {
 	lastImageID int
 }
 
-// nextImageID returns the Kitty image id Draw should transmit under
-// next -- alternates 1/2 so it's never the same as lastImageID, which is
-// what makes a delete-after-transmit of lastImageID safe (see its own
-// doc comment): the two placements are always distinct objects to the
-// terminal, never the same id being deleted out from under itself.
-func nextImageID(last int) int {
-	if last == 1 {
-		return 2
-	}
-	return 1
-}
-
 func New(client Fetcher, tv *tview.Application) *Panel {
 	v := tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter)
 	v.SetBorder(true).SetTitle(" Album Art ")
 	v.SetText("\n\n[::d]Album Art Loading...[-:-:-]")
 	return &Panel{client: client, view: v, applyToUI: func(f func()) { tv.QueueUpdateDraw(f) }}
-}
-
-// supportsKittyGraphics reports whether the terminal is likely to
-// understand the Kitty graphics protocol. TERM containing "kitty" catches
-// the common case; KITTY_WINDOW_ID is set by kitty itself and stays set
-// even when TERM is overridden to something like xterm-256color (a common
-// workaround for remote hosts lacking kitty's terminfo entry), which TERM
-// alone would miss. Terminals that implement the protocol without either
-// signal (e.g. some WezTerm/Konsole configurations) still fall back to
-// ASCII -- there's no reliable capability-query path without risking a
-// hang against terminals that don't answer it.
-func supportsKittyGraphics() bool {
-	return strings.Contains(os.Getenv("TERM"), "kitty") || os.Getenv("KITTY_WINDOW_ID") != ""
 }
 
 // OnTrackChanged kicks off a background fetch for uri's album art, unless
@@ -200,7 +172,7 @@ func (p *Panel) fetch(uri string, seq int) {
 		return
 	}
 
-	if supportsKittyGraphics() {
+	if termimage.Supported() {
 		var buf bytes.Buffer
 		if err := png.Encode(&buf, img); err != nil {
 			p.setKittyPNGIfCurrent(seq, nil)
@@ -226,7 +198,7 @@ func (p *Panel) fetch(uri string, seq int) {
 	p.setKittyPNGIfCurrent(seq, nil)
 
 	// Fallback to high-resolution ASCII using Unicode half-blocks and true color
-	asciiStr := imageToHalfBlocks(img, 30, 15)
+	asciiStr := termimage.HalfBlocks(img, 30, 15)
 
 	p.applyToUI(func() {
 		if !p.isCurrent(seq) {
@@ -264,7 +236,7 @@ func (p *Panel) fetch(uri string, seq int) {
 // something rendered at that location throughout, old until new lands
 // on top of it, old removed harmlessly afterward.
 func (p *Panel) Draw() {
-	if !supportsKittyGraphics() {
+	if !termimage.Supported() {
 		return
 	}
 
@@ -274,7 +246,7 @@ func (p *Panel) Draw() {
 
 	if len(data) == 0 {
 		if p.lastImageID != 0 {
-			fmt.Printf("\033_Ga=d,d=i,i=%d\033\\", p.lastImageID)
+			termimage.Delete(p.lastImageID)
 			p.lastImageID = 0
 			p.sentSig = ""
 		}
@@ -291,65 +263,12 @@ func (p *Panel) Draw() {
 		return
 	}
 
-	id := nextImageID(p.lastImageID)
-	fmt.Printf("\033[%d;%dH", y+1, x+1)
-	b64 := base64.StdEncoding.EncodeToString(data)
-	const chunkSize = 4096
-	for i := 0; i < len(b64); i += chunkSize {
-		end := i + chunkSize
-		m := 1
-		if end >= len(b64) {
-			end = len(b64)
-			m = 0
-		}
-		if i == 0 {
-			fmt.Printf("\033_Ga=T,i=%d,f=100,q=2,c=%d,r=%d,m=%d;%s\033\\", id, w, h, m, b64[i:end])
-		} else {
-			fmt.Printf("\033_Gm=%d;%s\033\\", m, b64[i:end])
-		}
-	}
-
-	if p.lastImageID != 0 {
-		fmt.Printf("\033_Ga=d,d=i,i=%d\033\\", p.lastImageID)
-	}
+	id := termimage.NextID(p.lastImageID)
+	termimage.Place(data, x, y, w, h, id)
+	termimage.Delete(p.lastImageID)
 	p.lastImageID = id
 	p.sentSig = sig
 	p.lastSentAt = time.Now()
-}
-
-// imageToHalfBlocks converts an image to a high-resolution terminal string
-// using Unicode half-blocks (▀) and ANSI true color sequences.
-// Each character represents 2 vertical pixels (foreground for top, background for bottom).
-func imageToHalfBlocks(img image.Image, width, height int) string {
-	// resize to width, height*2 (since each character represents 2 vertical pixels)
-	img = resize.Resize(uint(width), uint(height*2), img, resize.Lanczos3)
-
-	bounds := img.Bounds()
-	var b []byte
-
-	for y := bounds.Min.Y; y < bounds.Max.Y; y += 2 {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			cTop := img.At(x, y)
-			var cBot color.Color = color.RGBA{0, 0, 0, 0}
-			if y+1 < bounds.Max.Y {
-				cBot = img.At(x, y+1)
-			}
-
-			r1, g1, b1, a1 := cTop.RGBA()
-			r2, g2, b2, a2 := cBot.RGBA()
-
-			r1, g1, b1 = r1>>8, g1>>8, b1>>8
-			r2, g2, b2 = r2>>8, g2>>8, b2>>8
-
-			if a1 < 128 && a2 < 128 {
-				b = append(b, []byte(" ")...)
-			} else {
-				b = append(b, []byte(fmt.Sprintf("\033[38;2;%d;%d;%dm\033[48;2;%d;%d;%dm▀", r1, g1, b1, r2, g2, b2))...)
-			}
-		}
-		b = append(b, []byte("\033[0m\n")...)
-	}
-	return string(b)
 }
 
 func (p *Panel) View() *tview.TextView {
