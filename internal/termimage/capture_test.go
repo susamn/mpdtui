@@ -101,13 +101,49 @@ func TestDeleteNamesTheImage(t *testing.T) {
 	}
 }
 
-func TestNextIDAlternates(t *testing.T) {
-	if got := NextID(1); got != 2 {
-		t.Errorf("NextID(1) = %d, want 2", got)
+func TestIDPairAlternatesWithinItself(t *testing.T) {
+	p := IDPair{3, 4}
+	if got := p.Next(3); got != 4 {
+		t.Errorf("Next(3) = %d, want 4", got)
 	}
-	for _, last := range []int{0, 2} {
-		if got := NextID(last); got != 1 {
-			t.Errorf("NextID(%d) = %d, want 1", last, got)
+	// Anything that is not the first id -- including 0 before anything
+	// has been placed, and an id belonging to somebody else -- yields
+	// the first.
+	for _, last := range []int{0, 4, 1} {
+		if got := p.Next(last); got != 3 {
+			t.Errorf("Next(%d) = %d, want 3", last, got)
+		}
+	}
+}
+
+// TestIDPairsDoNotOverlap is the regression test for two pictures
+// deleting each other. The album art panel and the story card can be on
+// screen together, and an id is terminal-wide: a shared pair made the
+// card flicker in and out while the album art vanished.
+func TestIDPairsDoNotOverlap(t *testing.T) {
+	art, card := IDPair{1, 2}, IDPair{3, 4}
+
+	seen := map[int]string{}
+	for name, p := range map[string]IDPair{"album art": art, "story card": card} {
+		for _, id := range p {
+			if id == 0 {
+				t.Errorf("%s uses id 0, which Delete treats as 'nothing placed'", name)
+			}
+			if other, dup := seen[id]; dup {
+				t.Errorf("%s and %s both use id %d", name, other, id)
+			}
+			seen[id] = name
+		}
+	}
+
+	// And neither can ever hand out one of the other's, whatever it is
+	// told was placed last.
+	for _, last := range []int{0, 1, 2, 3, 4} {
+		if got := art.Next(last); got != 1 && got != 2 {
+			t.Errorf("album art produced %d, outside its own pair", got)
+		}
+		if got := card.Next(last); got != 3 && got != 4 {
+			t.Errorf("story card produced %d, outside its own pair", got)
 		}
 	}
 }

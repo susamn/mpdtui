@@ -531,3 +531,47 @@ func TestCardTransmitsThePictureOnKitty(t *testing.T) {
 		t.Error("the picture outlived the card")
 	}
 }
+
+// TestCardNeverTouchesTheAlbumArtsImageIDs is the regression test for
+// the card flickering in and out while the album art disappeared. Both
+// pictures are on screen together and a Kitty image id is terminal-wide,
+// so the two sharing a pair meant every retransmit deleted the other's
+// placement.
+func TestCardNeverTouchesTheAlbumArtsImageIDs(t *testing.T) {
+	t.Setenv("KITTY_WINDOW_ID", "1")
+
+	const file = "sade/best/01-smooth.m4a"
+	music := seedWiki(t, file, testWikiJSON)
+	writePNG(t, music, file, "cover.jpg")
+	a, _ := wikiTestApp(t, music)
+
+	var buf bytes.Buffer
+	restore := termimage.SetOutputForTest(&buf)
+	defer restore()
+
+	pressGlobal(a, 'w')
+	if a.trackWikiImg == nil {
+		t.Fatal("setup: no picture was prepared")
+	}
+	// Several frames, including a move, so every transmit and delete the
+	// card can produce is in the buffer.
+	for i, rect := range [][4]int{{2, 3, 24, 12}, {5, 6, 24, 12}, {5, 6, 20, 10}} {
+		a.trackWikiImg.view.SetRect(rect[0], rect[1], rect[2], rect[3])
+		a.drawTrackWikiImage()
+		if buf.Len() == 0 && i == 0 {
+			t.Fatal("the first frame transmitted nothing")
+		}
+	}
+	pressGlobal(a, 'w') // close
+	a.drawTrackWikiImage()
+
+	got := buf.String()
+	for _, forbidden := range []string{"i=1,", "i=1\033", "i=2,", "i=2\033"} {
+		if strings.Contains(got, forbidden) {
+			t.Errorf("the card used %q -- an album art id", strings.TrimSuffix(forbidden, "\033"))
+		}
+	}
+	if !strings.Contains(got, "i=3") && !strings.Contains(got, "i=4") {
+		t.Errorf("the card used neither of its own ids; output was %q", got)
+	}
+}

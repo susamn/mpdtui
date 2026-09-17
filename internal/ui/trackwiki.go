@@ -273,6 +273,11 @@ func wikiFooter(w trackwiki.Wiki) string {
 	return footer
 }
 
+// trackWikiIDs is the story card's own pair of Kitty image ids. It
+// shares the screen with the album art panel, which holds {1, 2} -- and
+// two pictures on one pair delete each other (see termimage.IDPair).
+var trackWikiIDs = termimage.IDPair{3, 4}
+
 // wikiImage is the card's left-hand picture, and the bookkeeping the
 // Kitty path needs.
 //
@@ -376,7 +381,7 @@ func (a *App) drawTrackWikiImage() {
 		return
 	}
 
-	id := termimage.NextID(im.lastID)
+	id := trackWikiIDs.Next(im.lastID)
 	termimage.Place(im.png, x, y, w, h, id)
 	termimage.Delete(im.lastID)
 	im.lastID = id

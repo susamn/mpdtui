@@ -102,15 +102,28 @@ func Delete(id int) {
 	fmt.Fprintf(sink(), "\033_Ga=d,d=i,i=%d\033\\", id)
 }
 
-// NextID alternates between two ids so a retransmit never reuses the id
-// of the placement it is about to delete -- the two are always distinct
-// objects to the terminal, never the same id being deleted out from
-// under itself.
-func NextID(last int) int {
-	if last == 1 {
-		return 2
+// IDPair is one caller's private pair of Kitty image ids.
+//
+// Ids are terminal-wide, not per-program and certainly not per-widget:
+// transmitting under an id replaces that image for the whole terminal,
+// and deleting an id removes whatever is placed under it no matter who
+// put it there. So every picture that can be on screen at the same time
+// as another needs a pair nobody else uses.
+//
+// Two callers sharing a pair is not a subtle failure. It looks like one
+// picture flickering in and out while the other disappears outright,
+// because that is exactly what happens: each one's retransmit deletes
+// the other's placement.
+type IDPair [2]int
+
+// Next returns whichever of the pair is not last, so a retransmit never
+// reuses the id it is about to delete -- the two placements are always
+// distinct objects to the terminal.
+func (p IDPair) Next(last int) int {
+	if last == p[0] {
+		return p[1]
 	}
-	return 1
+	return p[0]
 }
 
 // HalfBlocks renders img as text, at cols x rows character cells.

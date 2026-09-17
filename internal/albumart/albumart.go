@@ -86,6 +86,11 @@ type Panel struct {
 	lastImageID int
 }
 
+// albumArtIDs is this panel's own pair of Kitty image ids, distinct
+// from every other picture that can share the screen with it (see
+// termimage.IDPair). The story card holds the next pair.
+var albumArtIDs = termimage.IDPair{1, 2}
+
 func New(client Fetcher, tv *tview.Application) *Panel {
 	v := tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter)
 	v.SetBorder(true).SetTitle(" Album Art ")
@@ -263,7 +268,7 @@ func (p *Panel) Draw() {
 		return
 	}
 
-	id := termimage.NextID(p.lastImageID)
+	id := albumArtIDs.Next(p.lastImageID)
 	termimage.Place(data, x, y, w, h, id)
 	termimage.Delete(p.lastImageID)
 	p.lastImageID = id
