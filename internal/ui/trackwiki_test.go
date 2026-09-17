@@ -575,3 +575,186 @@ func TestCardNeverTouchesTheAlbumArtsImageIDs(t *testing.T) {
 		t.Errorf("the card used neither of its own ids; output was %q", got)
 	}
 }
+
+// TestWWithNothingToInspectSaysSo covers the empty-queue path: with no
+// playing track and no selection there is nothing to look a story up
+// for.
+func TestWWithNothingToInspectSaysSo(t *testing.T) {
+	f := &fakeMPD{}
+	a := newFakeApp(t, f)
+	a.musicDir = t.TempDir() // configured, but the queue is empty
+
+	if got := pressGlobal(a, 'w'); got != nil {
+		t.Fatal("'w' was not claimed")
+	}
+	if a.pages.HasPage(trackWikiPageName) {
+		t.Error("a card opened with nothing to inspect")
+	}
+	if got := a.hintBar.GetText(true); !strings.Contains(got, "nothing playing") {
+		t.Errorf("hint bar = %q, want it to say nothing is playing", got)
+	}
+}
+
+func TestTrackWikiTitleFallsBack(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   trackwiki.Track
+		want string
+	}{
+		{"artist and title", trackwiki.Track{Artist: "Sade", Title: "Smooth Operator"}, "Sade - Smooth Operator"},
+		{"title only", trackwiki.Track{Title: "Smooth Operator"}, "Smooth Operator"},
+		{"neither", trackwiki.Track{}, "what MPD said"},
+		{"artist but no title", trackwiki.Track{Artist: "Sade"}, "what MPD said"},
+	} {
+		if got := trackWikiTitle(trackwiki.Wiki{Track: tc.in}, "what MPD said"); got != tc.want {
+			t.Errorf("%s: = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestCardHeightCountsBlankLines: a blank line separates paragraphs and
+// occupies a row like any other, but WordWrap returns nothing for it.
+func TestCardHeightCountsBlankLines(t *testing.T) {
+	dense := trackWikiCardHeight("a\nb\nc\nd\ne\nf\ng\nh\ni\nj", false)
+	spaced := trackWikiCardHeight("a\n\nb\n\nc\n\nd\n\ne\n\nf\n\ng", false)
+	if spaced <= dense {
+		t.Errorf("with blank lines %d rows, without %d -- the blanks were not counted", spaced, dense)
+	}
+}
+
+func TestWriteWikiProseSkipsAnEmptyBody(t *testing.T) {
+	var b strings.Builder
+	writeWikiProse(&b, trackwiki.Prose{Heading: "Writing"})
+	if b.Len() != 0 {
+		t.Errorf("wrote %q for a section with no body, want a heading with nothing under it skipped", b.String())
+	}
+}
+
+func TestFooterHandlesSourcesWithoutNameOrLicence(t *testing.T) {
+	got := wikiFooter(trackwiki.Wiki{Sources: []trackwiki.Source{
+		{Name: ""},            // nothing to credit
+		{Name: "MusicBrainz"}, // credited, no licence to state
+		{Name: "Wikipedia", License: "CC BY-SA 4.0"},
+	}})
+	if strings.HasPrefix(got, " - ") || strings.Contains(got, " -  - ") {
+		t.Errorf("footer = %q, want the unnamed source left out cleanly", got)
+	}
+	if !strings.Contains(got, "MusicBrainz") || strings.Contains(got, "MusicBrainz (") {
+		t.Errorf("footer = %q, want MusicBrainz credited with no licence in brackets", got)
+	}
+	if !strings.Contains(got, "Wikipedia (CC BY-SA 4.0)") {
+		t.Errorf("footer = %q, want the licence stated where there is one", got)
+	}
+}
+
+// TestTrackWikiImageRefusesWhatItCannotDraw covers every way the picture
+// column is declined. Each one has to leave the card as prose at full
+// width rather than an empty quarter.
+func TestTrackWikiImageRefusesWhatItCannotDraw(t *testing.T) {
+	const file = "sade/best/01-smooth.m4a"
+	noImages := `{"schema":1,"track":{"title":"t","artist":"a"},"fetched_at":"x","story":{"summary":"s"}}`
+	badName := `{"schema":1,"track":{"title":"t","artist":"a"},"fetched_at":"x","story":{"summary":"s"},
+	             "images":[{"file":"../escape.jpg","role":"cover"}]}`
+
+	for _, tc := range []struct {
+		name  string
+		body  string
+		write func(t *testing.T, music string)
+	}{
+		{"no images listed", noImages, nil},
+		{"a name that escapes the directory", badName, nil},
+		{"the file is not there", testWikiJSON, nil},
+		{"the bytes are not an image", testWikiJSON, func(t *testing.T, music string) {
+			if err := os.WriteFile(filepath.Join(trackwiki.Dir(music, file), "cover.jpg"),
+				[]byte("this is not a picture"), 0o644); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			music := seedWiki(t, file, tc.body)
+			if tc.write != nil {
+				tc.write(t, music)
+			}
+			a, _ := wikiTestApp(t, music)
+			w, ok := trackwiki.Load(music, file)
+			if !ok {
+				t.Fatal("setup: story did not load")
+			}
+			if got := a.trackWikiImage(w); got != nil {
+				t.Error("built a picture column it cannot draw")
+			}
+			if a.trackWikiImg != nil {
+				t.Error("recorded a picture it cannot draw")
+			}
+		})
+	}
+}
+
+// TestDrawTrackWikiImageIsANoOpWithNothingToDraw covers the two guards
+// that run on every single frame, for every user, card open or not.
+func TestDrawTrackWikiImageIsANoOpWithNothingToDraw(t *testing.T) {
+	var buf bytes.Buffer
+	restore := termimage.SetOutputForTest(&buf)
+	defer restore()
+
+	a := newTestApp()
+	a.drawTrackWikiImage() // nothing has ever been opened
+	if buf.Len() != 0 {
+		t.Errorf("wrote %q with no card at all", buf.String())
+	}
+
+	// A card on a terminal with no graphics support: the half-blocks are
+	// already text, so there is nothing to composite.
+	a.trackWikiImg = &wikiImage{view: tview.NewTextView()}
+	a.drawTrackWikiImage()
+	if buf.Len() != 0 {
+		t.Errorf("wrote %q for a text-rendered picture", buf.String())
+	}
+
+	// A card whose view has not been laid out yet: a zero rect is not a
+	// position to place an image at.
+	a.pages.AddPage(trackWikiPageName, tview.NewBox(), true, true)
+	a.trackWikiImg = &wikiImage{view: tview.NewTextView(), png: []byte("png")}
+	a.trackWikiImg.view.SetRect(0, 0, 0, 0)
+	a.drawTrackWikiImage()
+	if buf.Len() != 0 {
+		t.Errorf("wrote %q for a view with no size", buf.String())
+	}
+}
+
+// TestDrawTrackWikiImageDoesNotRetransmitAnUnchangedPicture is the guard
+// against churn. The hook runs on every frame; without it the card would
+// retransmit its picture several times a second, which is the other half
+// of what "the image comes and goes" looks like.
+func TestDrawTrackWikiImageDoesNotRetransmitAnUnchangedPicture(t *testing.T) {
+	var buf bytes.Buffer
+	restore := termimage.SetOutputForTest(&buf)
+	defer restore()
+
+	a := newTestApp()
+	a.pages.AddPage(trackWikiPageName, tview.NewBox(), true, true)
+	a.trackWikiImg = &wikiImage{view: tview.NewTextView(), png: []byte("pretend-png")}
+	a.trackWikiImg.view.SetRect(2, 3, trackWikiImageCols, trackWikiImageRows)
+
+	a.drawTrackWikiImage()
+	first := buf.Len()
+	if first == 0 {
+		t.Fatal("the first frame transmitted nothing")
+	}
+
+	for i := 0; i < 5; i++ {
+		a.drawTrackWikiImage()
+	}
+	if buf.Len() != first {
+		t.Errorf("five more frames wrote another %d bytes -- the picture is being retransmitted", buf.Len()-first)
+	}
+
+	// Moving it must transmit again, or the picture is left behind when
+	// the terminal is resized.
+	a.trackWikiImg.view.SetRect(9, 9, trackWikiImageCols, trackWikiImageRows)
+	a.drawTrackWikiImage()
+	if buf.Len() == first {
+		t.Error("moving the card did not retransmit the picture")
+	}
+}

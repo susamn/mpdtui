@@ -2,6 +2,8 @@ package termimage
 
 import (
 	"bytes"
+	"image"
+	"os"
 	"strings"
 	"testing"
 )
@@ -144,6 +146,57 @@ func TestIDPairsDoNotOverlap(t *testing.T) {
 		}
 		if got := card.Next(last); got != 3 && got != 4 {
 			t.Errorf("story card produced %d, outside its own pair", got)
+		}
+	}
+}
+
+// TestSinkDefaultsToStdout covers the fallback that keeps the package
+// usable with nothing injected -- which is how it runs in the real
+// program.
+func TestSinkDefaultsToStdout(t *testing.T) {
+	prev := out
+	out = nil
+	t.Cleanup(func() { out = prev })
+	if sink() != os.Stdout {
+		t.Error("with no override, the escape sequences do not go to stdout")
+	}
+}
+
+// TestSetOutputForTestRestores: the hook other packages use has to put
+// the previous sink back, or one test redirects every later one.
+func TestSetOutputForTestRestores(t *testing.T) {
+	var a, b bytes.Buffer
+	restoreA := SetOutputForTest(&a)
+	restoreB := SetOutputForTest(&b)
+
+	Delete(7)
+	if b.Len() == 0 {
+		t.Error("the innermost override did not receive the write")
+	}
+	restoreB()
+
+	Delete(8)
+	if a.Len() == 0 {
+		t.Error("restoring did not fall back to the outer override")
+	}
+	restoreA()
+	if out != nil {
+		t.Error("the outermost restore left an override in place")
+	}
+}
+
+func TestHalfBlocksRefusesAnEmptyBox(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 8, 8))
+	for _, tc := range []struct {
+		name       string
+		cols, rows int
+	}{
+		{"no columns", 0, 4},
+		{"no rows", 4, 0},
+		{"negative", -1, -1},
+	} {
+		if got := HalfBlocks(img, tc.cols, tc.rows); got != "" {
+			t.Errorf("%s: rendered %q, want nothing", tc.name, got)
 		}
 	}
 }

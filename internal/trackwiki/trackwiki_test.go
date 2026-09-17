@@ -153,3 +153,23 @@ func TestImagesWithRoleKeepsManifestOrder(t *testing.T) {
 		t.Error("a role with no images returned something")
 	}
 }
+
+// TestDirRefusesAFileThatIsOnlyAnExtension: the directory is the base
+// name without its extension, so a name that is nothing but an extension
+// leaves nothing to call the directory -- and joining "" would point at
+// the album's own wiki folder, where another track's story may live.
+func TestDirRefusesAFileThatIsOnlyAnExtension(t *testing.T) {
+	for _, file := range []string{".mp3", "a/b/.flac"} {
+		if got := Dir("/music", file); got != "" {
+			t.Errorf("Dir(%q) = %q, want it refused", file, got)
+		}
+	}
+}
+
+// TestLoadWithoutAMusicDirFindsNothing covers the feature being off
+// entirely: with no music_dir configured there is no tree to look in.
+func TestLoadWithoutAMusicDirFindsNothing(t *testing.T) {
+	if _, ok := Load("", "a/b.mp3"); ok {
+		t.Error("Load found a story with no music dir configured")
+	}
+}

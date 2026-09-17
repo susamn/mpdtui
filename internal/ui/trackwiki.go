@@ -184,11 +184,10 @@ func trackWikiCardHeight(text string, withImage bool) int {
 	}
 	lines := 0
 	for _, para := range strings.Split(text, "\n") {
-		if wrapped := tview.WordWrap(para, width); len(wrapped) > 0 {
-			lines += len(wrapped)
-		} else {
-			lines++ // a blank line still occupies one
-		}
+		// WordWrap returns one empty line for an empty paragraph rather
+		// than nothing, so a blank line between paragraphs is counted
+		// like any other row without a special case.
+		lines += len(tview.WordWrap(para, width))
 	}
 	// A card must not be shorter than the picture in it, or the image is
 	// clipped by the border it sits inside.
