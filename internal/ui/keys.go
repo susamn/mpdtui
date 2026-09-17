@@ -98,6 +98,7 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			}{
 				{'i', a.trackInfo},
 				{'y', a.lyricsViewer},
+				{'w', a.trackWiki},
 				{0, a.markPicker},
 				{0, a.tagPicker},
 			}
@@ -137,8 +138,10 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			// own doc comment on why stealing focus out from under an open
 			// overlay is the specific thing to avoid. A
 			// search/filter/save-playlist input still needs 's'/Space to
-			// stay literal typed text, so this stays scoped to just these
-			// two rather than a blanket rule.
+			// stay literal typed text, so this stays scoped to these few
+			// rather than a blanket rule. The story modal ('w') is in the
+			// same category as the lyrics viewer: both are things you
+			// read while the music keeps playing.
 			//
 			// 't' is lyricsViewer-only (cycles txt/lrc/future-A2 lyrics
 			// format, see cycleFormat) -- checked first since it isn't one
@@ -148,7 +151,7 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 				a.lyricsViewer.cycleFormat()
 				return nil
 			}
-			if (focus == a.lyricsViewer || focus == a.markPicker || focus == a.tagPicker) && a.handleTransportKey(event.Rune()) {
+			if (focus == a.lyricsViewer || focus == a.trackWiki || focus == a.markPicker || focus == a.tagPicker) && a.handleTransportKey(event.Rune()) {
 				return nil
 			}
 		}
@@ -168,6 +171,9 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			return nil
 		case 'F':
 			a.clearAllSearches()
+			return nil
+		case 'w':
+			a.openTrackWiki()
 			return nil
 		case 'i':
 			a.openTrackInfo()
