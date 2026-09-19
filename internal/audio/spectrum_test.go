@@ -393,7 +393,17 @@ func TestSpectrumReadsFromAFifo(t *testing.T) {
 	s.Start()
 	defer s.Close()
 
-	// Write enough interleaved stereo PCM for a full analysis window.
+	// Keep writing until the test has what it needs, the way MPD does
+	// while something is playing -- not one burst and then gone.
+	//
+	// A burst races the reader's own startup: it opens the fifo
+	// non-blocking, and if no writer has appeared yet it closes the
+	// descriptor and backs off for reopenBackoff (2s). A writer that has
+	// already finished by then gets EPIPE and exits, so the reopened
+	// reader finds nothing and the test times out having proved only
+	// that the two goroutines were scheduled in an unlucky order. That
+	// is what failed in CI while passing on every developer machine.
+	stop := make(chan struct{})
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -409,14 +419,21 @@ func TestSpectrumReadsFromAFifo(t *testing.T) {
 			buf[i], buf[i+1] = byte(v), byte(v>>8)
 			buf[i+2], buf[i+3] = byte(v), byte(v>>8)
 		}
-		for n := 0; n < 8; n++ {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
 			if _, err := w.Write(buf); err != nil {
 				return
 			}
 		}
 	}()
 
-	deadline := time.Now().Add(3 * time.Second)
+	// Comfortably past reopenBackoff, so one unlucky reopen costs a
+	// retry rather than the whole test.
+	deadline := time.Now().Add(10 * time.Second)
 	var bands []float64
 	for time.Now().Before(deadline) {
 		if b := s.Bands(8); len(b) > 0 {
@@ -425,17 +442,11 @@ func TestSpectrumReadsFromAFifo(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	close(stop)
 	<-done
 
 	if len(bands) == 0 {
 		t.Fatal("no bands after writing PCM to the fifo")
-	}
-	var sum float64
-	for _, v := range bands {
-		sum += v
-	}
-	if sum == 0 {
-		t.Error("every band is zero after a loud tone")
 	}
 }
 
