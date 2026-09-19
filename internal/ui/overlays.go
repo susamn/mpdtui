@@ -316,6 +316,15 @@ const helpText = `[::b]Global[-:-:-]
                  Rating rightward (Rating, Lyr, Plays, Mark, Year,
                  Genre, Composer, Type, Duration) pans, so a narrow
                  terminal hides no column permanently
+  w              the story behind the track, as a card: the cover on the
+                 left, the story, credits, bootlegs and attribution on
+                 the right. Read from a wiki/ folder beside the audio --
+                 mpdtui never goes online; the stories are gathered
+                 ahead of time by music-tui's wiki-fetch and copied in
+                 by wiki-push. The picture is drawn as real pixels on a
+                 Kitty terminal and as colored half-blocks everywhere
+                 else. j/k scrolls, w or Esc closes, transport keys stay
+                 live
   /              search: jump to first match (Esc cancels)
   1-5            rate the selected track (needs track_metadata set in
                  ~/.config/mpdtui/config); as a result, 1/2 no longer

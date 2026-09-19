@@ -104,11 +104,24 @@ type App struct {
 	playlists *playlistsPanel
 	queue     *queuePanel
 
-	nowPlaying     *tview.TextView
-	hintBar        *tview.TextView
-	albumArt       *albumart.Panel
-	trackInfo      *trackInfoCard
-	lyricsViewer   *lyricsViewer
+	nowPlaying   *tview.TextView
+	hintBar      *tview.TextView
+	albumArt     *albumart.Panel
+	trackInfo    *trackInfoCard
+	lyricsViewer *lyricsViewer
+
+	// trackWiki is the story modal ('w'). Built fresh on each open
+	// rather than kept and refilled: its content is a whole track's
+	// prose, it does not follow the playing track the way the Track
+	// Info card does, and nothing outside openTrackWiki needs it except
+	// the key router's "is this what's focused" check.
+	trackWiki *tview.TextView
+
+	// trackWikiImg is the story card's picture while the card is open,
+	// and nil otherwise. Held on the App rather than inside the card so
+	// the after-draw hook can find it -- and so it can clean up its own
+	// placement the frame after the card closes.
+	trackWikiImg   *wikiImage
 	markPicker     *catalogPicker
 	tagPicker      *catalogPicker
 	bookmarkPicker *bookmarkPicker
@@ -381,6 +394,7 @@ func (a *App) build() {
 
 	a.tv.SetAfterDrawFunc(func(tcell.Screen) {
 		a.albumArt.Draw()
+		a.drawTrackWikiImage()
 	})
 }
 
@@ -936,10 +950,12 @@ func (a *App) updateHintBar() {
 			panelHints = append(panelHints, hint{"Esc", "clear"})
 		}
 	case a.queue.table:
-		panelHints = []hint{{"Enter", "play"}, {"d", "remove"}, {"J/K", "move"}, {"h/l", "columns"}}
+		panelHints = []hint{{"Enter", "play"}, {"d", "remove"}, {"J/K", "move"}, {"h/l", "columns"}, {"w", "story"}}
 		if a.metaDB != nil {
 			panelHints = append(panelHints, hint{"1-5", "rate"}, hint{"m", "mark"})
 		}
+	case a.trackWiki:
+		panelHints = []hint{{"j/k", "scroll"}, {"w/Esc", "close"}}
 	case a.trackInfo:
 		// j/k means two different things on this card depending on
 		// whether it is expanded (scroll the overflowing sections) or
