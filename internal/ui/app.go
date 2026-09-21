@@ -121,7 +121,23 @@ type App struct {
 	// and nil otherwise. Held on the App rather than inside the card so
 	// the after-draw hook can find it -- and so it can clean up its own
 	// placement the frame after the card closes.
-	trackWikiImg   *wikiImage
+	trackWikiImg *wikiImage
+
+	// libraryCard is the collection summary ('M'), and librarySnap the
+	// numbers behind it. The view is rebuilt on each open, like the
+	// story card; the snapshot outlives it deliberately, so reopening
+	// the card shows the last scan at once instead of an empty card
+	// and a second round of whole-library scans (see
+	// refreshLibrarySnapshot).
+	libraryCard *tview.TextView
+	librarySnap *librarySnapshot
+
+	// libraryCardFrame is the centering grid libraryCard sits in,
+	// kept so a section landing later can make the card taller
+	// without the page being replaced under the other section still
+	// in flight.
+	libraryCardFrame *tview.Grid
+
 	markPicker     *catalogPicker
 	tagPicker      *catalogPicker
 	bookmarkPicker *bookmarkPicker
@@ -956,6 +972,8 @@ func (a *App) updateHintBar() {
 		}
 	case a.trackWiki:
 		panelHints = []hint{{"j/k", "scroll"}, {"w/Esc", "close"}}
+	case a.libraryCard:
+		panelHints = []hint{{"j/k", "scroll"}, {"r", "rescan"}, {"M/Esc", "close"}}
 	case a.trackInfo:
 		// j/k means two different things on this card depending on
 		// whether it is expanded (scroll the overflowing sections) or

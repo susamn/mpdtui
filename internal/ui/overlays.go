@@ -10,6 +10,15 @@ import (
 // centered wraps p in a fixed-size box centered on the full screen, the
 // usual tview pattern for modal-style overlays on top of a Pages root.
 func centered(p tview.Primitive, width, height int) tview.Primitive {
+	return centeredGrid(p, width, height)
+}
+
+// centeredGrid is centered with the grid itself returned, for an
+// overlay that has to resize after it is already on the page stack (see
+// App.applyLibrarySnapshot). Resizing is SetRows on this, not removing
+// and re-adding the page: a page that briefly does not exist is a page
+// another update can arrive to find missing.
+func centeredGrid(p tview.Primitive, width, height int) *tview.Grid {
 	return tview.NewGrid().
 		SetColumns(0, width, 0).
 		SetRows(0, height, 0).
@@ -259,6 +268,22 @@ const helpText = `[::b]Global[-:-:-]
                  background scan of every track's .txt/.lrc sidecar, with
                  a progress overlay; Esc cancels a run. The "l" mode of
                  'f' reads only this index, never the filesystem
+  M              library card: a summary of the whole collection.
+                 Tracks/albums/artists/playlists, total playtime and
+                 when MPD last updated its database; how many tracks
+                 have lyrics (synced .lrc vs plain .txt, both, and
+                 sidecars matching no track), how many have a fetched
+                 story and how many story images sit beside them; the
+                 local database's totals (rated with its average,
+                 played, plays, bookmarks, marked, tagged) when
+                 track_metadata is on; playlist fallouts -- entries a
+                 stored playlist lists that the library has no track
+                 for, which MPD silently skips when loading and which
+                 are invisible everywhere else; and the most recently
+                 added tracks, by file modification time (MPD records
+                 no "added" date). Opens on the last scan and fills in
+                 behind itself; 'r' rescans, j/k scrolls, M or Esc
+                 closes, transport keys stay live
   v              cycle Now Playing visualizations
   L              locate the currently playing track in the Queue
   b              bookmark current playback position of the playing track

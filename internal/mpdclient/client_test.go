@@ -617,3 +617,127 @@ func TestArtistTracksForAnUnknownArtist(t *testing.T) {
 		t.Errorf("got %d tracks for an artist that does not exist, want none", len(tracks))
 	}
 }
+
+// TestLibraryStatsTotals checks the fields LibraryStats adds on top of
+// MPD's own stats line. Values beyond "not obviously broken" cannot be
+// asserted against whatever library the developer happens to have.
+func TestLibraryStatsTotals(t *testing.T) {
+	c := dialOrSkip(t)
+
+	stats, err := c.LibraryStats()
+	if err != nil {
+		t.Fatalf("LibraryStats: %v", err)
+	}
+	if stats.Albums < 0 {
+		t.Errorf("Albums = %d, want a non-negative count", stats.Albums)
+	}
+	if stats.Tracks > 0 && stats.Playtime <= 0 {
+		t.Errorf("Playtime = %v on a library of %d tracks, want a positive total", stats.Playtime, stats.Tracks)
+	}
+	if stats.Tracks > 0 && stats.Updated.IsZero() {
+		t.Error("Updated is the zero time on a non-empty library, want MPD's db_update")
+	}
+}
+
+func TestLibraryFilesMatchesTheTrackCount(t *testing.T) {
+	c := dialOrSkip(t)
+
+	files, err := c.LibraryFiles()
+	if err != nil {
+		t.Fatalf("LibraryFiles: %v", err)
+	}
+	stats, err := c.LibraryStats()
+	if err != nil {
+		t.Fatalf("LibraryStats: %v", err)
+	}
+	if len(files) != stats.Tracks {
+		t.Errorf("LibraryFiles() returned %d paths, want stats' %d tracks", len(files), stats.Tracks)
+	}
+	for _, f := range files {
+		if f == "" {
+			t.Fatal("LibraryFiles() returned an empty path")
+		}
+	}
+}
+
+func TestRecentTracksAreNewestFirstAndBounded(t *testing.T) {
+	c := dialOrSkip(t)
+
+	const want = 5
+	recent, err := c.RecentTracks(want)
+	if err != nil {
+		t.Fatalf("RecentTracks: %v", err)
+	}
+	if len(recent) > want {
+		t.Fatalf("RecentTracks(%d) returned %d", want, len(recent))
+	}
+	for i, tr := range recent {
+		if tr.LastModified.IsZero() {
+			t.Errorf("recent[%d] has no modification time, want those left out entirely", i)
+		}
+		if tr.File == "" {
+			t.Errorf("recent[%d] has no file path", i)
+		}
+		if i > 0 && tr.LastModified.After(recent[i-1].LastModified) {
+			t.Errorf("recent[%d] is newer than recent[%d], want newest first", i, i-1)
+		}
+	}
+
+	if got, err := c.RecentTracks(0); err != nil || got != nil {
+		t.Errorf("RecentTracks(0) = %v, %v, want nil, nil without asking MPD anything", got, err)
+	}
+}
+
+func TestPlaylistFalloutsAccountsForEveryEntry(t *testing.T) {
+	c := dialOrSkip(t)
+
+	report, err := c.PlaylistFallouts()
+	if err != nil {
+		t.Fatalf("PlaylistFallouts: %v", err)
+	}
+	pls, err := c.Playlists()
+	if err != nil {
+		t.Fatalf("Playlists: %v", err)
+	}
+	if report.Playlists != len(pls) {
+		t.Errorf("Playlists = %d, want %d", report.Playlists, len(pls))
+	}
+	if report.Missing > report.Entries {
+		t.Errorf("Missing (%d) exceeds Entries (%d)", report.Missing, report.Entries)
+	}
+
+	sum := 0
+	for i, f := range report.Affected {
+		if len(f.Missing) == 0 {
+			t.Errorf("Affected[%d] (%q) has no missing entries, want only affected playlists listed", i, f.Name)
+		}
+		if len(f.Missing) > f.Total {
+			t.Errorf("%q: %d missing of %d total", f.Name, len(f.Missing), f.Total)
+		}
+		if i > 0 && len(f.Missing) > len(report.Affected[i-1].Missing) {
+			t.Errorf("Affected[%d] has more missing than Affected[%d], want worst first", i, i-1)
+		}
+		sum += len(f.Missing)
+	}
+	if sum != report.Missing {
+		t.Errorf("Affected accounts for %d missing entries, want the reported %d", sum, report.Missing)
+	}
+
+	// The whole point of the report: a path MPD's own file list has is
+	// never counted as missing.
+	files, err := c.LibraryFiles()
+	if err != nil {
+		t.Fatalf("LibraryFiles: %v", err)
+	}
+	known := make(map[string]struct{}, len(files))
+	for _, f := range files {
+		known[f] = struct{}{}
+	}
+	for _, f := range report.Affected {
+		for _, uri := range f.Missing {
+			if _, ok := known[uri]; ok {
+				t.Fatalf("%q reported %q missing, but the library has it", f.Name, uri)
+			}
+		}
+	}
+}
