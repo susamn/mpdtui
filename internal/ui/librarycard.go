@@ -6,9 +6,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/libraryscan"
+	"mpdtui/internal/lyricsindex"
 	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
 )
@@ -20,8 +22,25 @@ const (
 	// libraryCardWidth fits the card's widest natural line -- a
 	// two-column label/value row plus a recently-added entry's
 	// "Artist - Title" -- without stretching short rows across the
-	// screen.
-	libraryCardWidth = 76
+	// screen. The card never gets wider than this however much room
+	// the Queue panel has; libraryCardMinWidth is how narrow it may be
+	// squeezed before it simply overflows the panel instead.
+	libraryCardWidth    = 76
+	libraryCardMinWidth = 44
+
+	// libraryCardPairWidth is the narrowest card that still puts two
+	// label/value pairs on one line. Below it they stack: a second
+	// column that does not fit runs the two pairs together into one
+	// unreadable string, which is worse than the extra rows.
+	libraryCardPairWidth = 72
+
+	// libraryCardMarginX/Y are how much of the Queue panel stays
+	// visible around the card. Without them the card's border lands
+	// against the panel's own and the two read as one thick seam.
+	// Narrower vertically because rows are the scarcer resource: two
+	// of them are a section of the card, two columns are nothing.
+	libraryCardMarginX = 2
+	libraryCardMarginY = 1
 
 	// libraryCardMaxHeight caps the card; libraryCardMinHeight keeps it
 	// from rendering as a sliver while the first numbers are still
@@ -70,6 +89,15 @@ type librarySnapshot struct {
 	totals   metadata.Totals
 	totalsOK bool
 
+	// index is the lyrics search index's own account of itself (see
+	// internal/lyricsindex.ReadInfo) -- whether one has been built at
+	// all, how many tracks are in it and when. Read here because it is
+	// the one thing 'f l' depends on that nothing in the app otherwise
+	// reports: an unbuilt or stale index just returns no matches,
+	// which is indistinguishable from a term that is genuinely absent.
+	index   lyricsindex.Info
+	indexOK bool
+
 	scan   libraryscan.Counts
 	scanOK bool
 
@@ -108,66 +136,139 @@ func (a *App) openLibraryCard() {
 	if a.librarySnap == nil {
 		a.librarySnap = &librarySnapshot{}
 	}
-	view := tview.NewTextView().SetDynamicColors(true).SetWordWrap(false)
-	view.SetBorder(true).SetTitle(" Library ")
+	// Word wrap on: the numbers are laid out to fit the card (see
+	// writeLibraryPair), but the sentences between them -- "music_dir
+	// is not configured", "track_metadata is off" -- are prose, and on
+	// a narrow card prose has to wrap rather than be cut off mid-word.
+	// libraryCardHeight measures with tview's own WordWrap for the
+	// same reason, so the height already accounts for it.
+	view := tview.NewTextView().SetDynamicColors(true).SetWordWrap(true)
+	view.SetBorder(true)
 	a.libraryCard = view
+	a.renderLibraryCard()
 
 	// Page first, scan second. applyLibrarySnapshot only redraws a card
 	// that is actually on the page stack, so starting the scans before
 	// the page exists would drop any section that answered instantly.
-	height := a.renderLibraryCard()
-	a.libraryCardFrame = centeredGrid(view, libraryCardWidth, height)
-	a.showOverlay(libraryCardPageName, a.libraryCardFrame, view)
+	a.showOverlay(libraryCardPageName, newQueueCenteredFrame(a, view, a.libraryCardSize), view)
 	a.refreshLibrarySnapshot(false)
+}
+
+// queueCenteredFrame centers one primitive on the Queue panel, every
+// frame.
+//
+// The page it sits on is given the whole screen, so centering on that
+// puts the card's left border exactly on the Library panel's right one
+// at common terminal widths -- two borders in adjacent columns, which
+// reads as one thick seam rather than as a card floating over the
+// player. Centering on the Queue instead puts it over the panel it is
+// about.
+//
+// Reading the Queue table's rect at draw time rather than once at open
+// time is the same trick trackInfoCard and albumart.Panel use, and is
+// what makes the card follow a terminal resize with no extra wiring.
+type queueCenteredFrame struct {
+	*tview.Box
+	app   *App
+	child tview.Primitive
+	// size reports the card's wanted width and height for this frame.
+	// A function rather than two numbers because the card re-sizes
+	// itself as its background sections land.
+	size func() (int, int)
+}
+
+func newQueueCenteredFrame(a *App, child tview.Primitive, size func() (int, int)) *queueCenteredFrame {
+	return &queueCenteredFrame{Box: tview.NewBox(), app: a, child: child, size: size}
+}
+
+func (f *queueCenteredFrame) Draw(screen tcell.Screen) {
+	x, y, w, h := f.app.queue.table.GetInnerRect()
+	if w <= 0 || h <= 0 {
+		// Nothing drawn yet, so there is no Queue rect to centre on.
+		// The page's own (full-screen) rect is a worse position but a
+		// far better one than not drawing the card at all.
+		x, y, w, h = f.GetRect()
+	}
+	cw, ch := f.size()
+	cw = min(cw, w)
+	ch = min(ch, h)
+	f.child.SetRect(x+(w-cw)/2, y+(h-ch)/2, cw, ch)
+	f.child.Draw(screen)
+}
+
+// HasFocus and InputHandler forward to the child, which is what
+// showOverlay actually focuses -- without them tview would treat the
+// frame as an unfocusable box sitting between the application and the
+// card.
+func (f *queueCenteredFrame) HasFocus() bool { return f.child.HasFocus() }
+
+func (f *queueCenteredFrame) InputHandler() func(*tcell.EventKey, func(tview.Primitive)) {
+	return f.child.InputHandler()
+}
+
+// libraryCardSize is the card's wanted width and height right now,
+// re-rendering first if the Queue panel has changed width since the
+// last render -- the text is laid out for a specific width (see
+// writeLibraryPair), so a resize changes the content, not just the box
+// around it.
+func (a *App) libraryCardSize() (int, int) {
+	if w := a.libraryCardWidth(); w != a.libraryCardW {
+		a.renderLibraryCard()
+	}
+	return a.libraryCardW, a.libraryCardH
+}
+
+// libraryCardWidth is how wide the card may be inside the Queue panel:
+// its preferred width, or as much of the panel as leaves a margin of
+// it visible either side. A panel too narrow even for
+// libraryCardMinWidth gets that anyway and the card overflows it,
+// which is still more readable than a column of one-word lines.
+func (a *App) libraryCardWidth() int {
+	_, _, w, _ := a.queue.table.GetInnerRect()
+	if w <= 0 {
+		return libraryCardWidth
+	}
+	return max(min(libraryCardWidth, w-2*libraryCardMarginX), libraryCardMinWidth)
+}
+
+// libraryCardCap is the tallest the card may be: the Queue panel, less
+// the same margin, and never more than the static cap. A zero rect
+// (nothing drawn yet, as in a test) leaves the static cap in charge.
+func (a *App) libraryCardCap() int {
+	_, _, _, h := a.queue.table.GetInnerRect()
+	if h <= 0 {
+		return libraryCardMaxHeight
+	}
+	return max(min(libraryCardMaxHeight, h-2*libraryCardMarginY), libraryCardMinHeight)
 }
 
 // renderLibraryCard redraws the card from the current snapshot and
 // returns the height it wants. Called both when the card opens and
 // whenever a background section lands, which is why it tolerates the
 // card being closed.
-func (a *App) renderLibraryCard() int {
+func (a *App) renderLibraryCard() {
 	if a.libraryCard == nil {
-		return libraryCardMinHeight
+		return
 	}
-	text := renderLibrarySnapshot(a.librarySnap, a.musicDir, a.metaDB != nil)
+	width := a.libraryCardWidth()
+	text := renderLibrarySnapshot(a.librarySnap, a.musicDir, a.metaDB != nil, width)
 	a.libraryCard.SetText(text)
-	return libraryCardHeight(text, a.libraryCardCap())
-}
-
-// libraryCardCap is the tallest this card may be on the terminal as it
-// currently is: two rows short of the screen, so the card still reads
-// as something opened over the player rather than as a new screen, and
-// so its footer is not the line that falls off the bottom.
-//
-// Read off the root layout's live rect rather than from a stored size,
-// the same way the Track Info card reads the Queue's -- it is the only
-// number that is right after a resize. A zero rect (nothing drawn yet,
-// as in a test) leaves the static cap in charge.
-func (a *App) libraryCardCap() int {
-	_, _, _, height := a.root.GetRect()
-	if height <= 0 {
-		return libraryCardMaxHeight
-	}
-	if height-2 < libraryCardMaxHeight {
-		return max(height-2, libraryCardMinHeight)
-	}
-	return libraryCardMaxHeight
+	a.libraryCard.SetTitle(libraryCardTitle(a.librarySnap))
+	a.libraryCardW = width
+	a.libraryCardH = libraryCardHeight(text, width, a.libraryCardCap())
 }
 
 // applyLibrarySnapshot re-renders the open card after a background
-// section arrives, resizing the overlay to match -- the card grows as
-// the slow sections fill in, and a grid laid out at one height does not
-// change on its own.
-//
-// Resizes the existing frame rather than replacing the page. The two
-// scans finish independently, and taking the page down to put a
-// taller one up means the other one can arrive while there is no page
-// there, see a closed card, and drop its own section's redraw.
+// section arrives. The card grows as the slow sections fill in; the
+// frame reads the new height on the next draw, so nothing here has to
+// touch the page stack -- which matters because the two scans finish
+// independently, and taking the page down to put a taller one up lets
+// the other one arrive to find no page and drop its own redraw.
 func (a *App) applyLibrarySnapshot() {
-	if a.libraryCard == nil || a.libraryCardFrame == nil || !a.pages.HasPage(libraryCardPageName) {
+	if a.libraryCard == nil || !a.pages.HasPage(libraryCardPageName) {
 		return
 	}
-	a.libraryCardFrame.SetRows(0, a.renderLibraryCard(), 0)
+	a.renderLibraryCard()
 }
 
 // refreshLibrarySnapshot starts a background rescan. force is 'r'
@@ -193,6 +294,7 @@ func (a *App) refreshLibrarySnapshot(force bool) {
 	client := a.client
 	musicDir := a.musicDir
 	metaDB := a.metaDB
+	indexPath := a.cfg.LyricsIndexPath
 
 	go func() {
 		stats, statsErr := client.LibraryStats()
@@ -201,6 +303,12 @@ func (a *App) refreshLibrarySnapshot(force bool) {
 		if metaDB != nil {
 			totals, totalsErr = metaDB.Totals()
 		}
+		// A missing index file is not an error (ReadInfo reports it as
+		// Exists false), so only a corrupt or unreadable one lands
+		// here -- and that is worth saying, because the symptom
+		// otherwise is 'f l' quietly matching nothing.
+		index, indexErr := lyricsindex.ReadInfo(indexPath)
+
 		a.applyToUI(func() {
 			if statsErr == nil {
 				snap.stats, snap.statsOK = stats, true
@@ -213,6 +321,11 @@ func (a *App) refreshLibrarySnapshot(force bool) {
 				} else {
 					snap.failure = totalsErr.Error()
 				}
+			}
+			if indexErr == nil {
+				snap.index, snap.indexOK = index, true
+			} else {
+				snap.failure = indexErr.Error()
 			}
 			a.applyLibrarySnapshot()
 		})
@@ -269,14 +382,14 @@ func (a *App) handleLibraryCardRefresh() {
 // different lengths (nought to six playlists, nought to eight tracks),
 // so any fixed division of the card is wrong most of the time, and one
 // wrapped column scrolls with j/k for free.
-func renderLibrarySnapshot(s *librarySnapshot, musicDir string, metaActive bool) string {
+func renderLibrarySnapshot(s *librarySnapshot, musicDir string, metaActive bool, width int) string {
 	var b strings.Builder
 
 	writeLibrarySection(&b, "Collection")
 	if s.statsOK {
-		writeLibraryPair(&b, "Tracks", comma(s.stats.Tracks), "Albums", comma(s.stats.Albums))
-		writeLibraryPair(&b, "Artists", comma(s.stats.Artists), "Playlists", comma(s.stats.Playlists))
-		writeLibraryPair(&b, "Playtime", longDuration(s.stats.Playtime), "DB updated", stamp(s.stats.Updated))
+		writeLibraryPair(&b, width, "Tracks", comma(s.stats.Tracks), "Albums", comma(s.stats.Albums))
+		writeLibraryPair(&b, width, "Artists", comma(s.stats.Artists), "Playlists", comma(s.stats.Playlists))
+		writeLibraryPair(&b, width, "Playtime", longDuration(s.stats.Playtime), "DB updated", stamp(s.stats.Updated))
 	} else {
 		writeLibraryRow(&b, "Tracks", pending(s))
 	}
@@ -291,13 +404,14 @@ func renderLibrarySnapshot(s *librarySnapshot, musicDir string, metaActive bool)
 		sc := s.scan
 		writeLibraryRow(&b, "With lyrics", fmt.Sprintf("%s of %s  %s",
 			comma(sc.WithAny), comma(sc.Tracks), percent(sc.WithAny, sc.Tracks)))
-		writeLibraryPair(&b, "Synced .lrc", comma(sc.Synced), "Plain .txt", comma(sc.Plain))
-		writeLibraryPair(&b, "Both formats", comma(sc.Both), "Orphan files", comma(sc.Orphans))
-		writeLibraryPair(&b, "Stories", comma(sc.Stories), "Story images", comma(sc.Images))
+		writeLibraryPair(&b, width, "Synced .lrc", comma(sc.Synced), "Plain .txt", comma(sc.Plain))
+		writeLibraryPair(&b, width, "Both formats", comma(sc.Both), "Orphan files", comma(sc.Orphans))
+		writeLibraryPair(&b, width, "Stories", comma(sc.Stories), "Story images", comma(sc.Images))
 		if sc.Unreadable > 0 {
 			writeLibraryRow(&b, "Unreadable", comma(sc.Unreadable)+" story file(s) this version will not open")
 		}
 	}
+	writeLibraryIndex(&b, s, musicDir, width)
 
 	writeLibrarySection(&b, "Local metadata")
 	switch {
@@ -307,26 +421,53 @@ func renderLibrarySnapshot(s *librarySnapshot, musicDir string, metaActive bool)
 		writeLibraryRow(&b, "Rated", pending(s))
 	default:
 		t := s.totals
-		writeLibraryPair(&b, "Rated", comma(t.Rated)+average(t.Stars, t.Rated), "Played", comma(t.Played))
-		writeLibraryPair(&b, "Plays", comma(t.Plays), "Bookmarks", bookmarkCount(t))
-		writeLibraryPair(&b, "Marked", catalogCount(t.Marked, t.MarkReasons, "reason"),
+		writeLibraryPair(&b, width, "Rated", comma(t.Rated)+average(t.Stars, t.Rated), "Played", comma(t.Played))
+		writeLibraryPair(&b, width, "Plays", comma(t.Plays), "Bookmarks", bookmarkCount(t))
+		writeLibraryPair(&b, width, "Marked", catalogCount(t.Marked, t.MarkReasons, "reason"),
 			"Tagged", catalogCount(t.Tagged, t.Tags, "tag"))
 		writeLibraryRow(&b, "Tracks known", comma(t.Tracks)+" have anything recorded against them")
 	}
 
 	writeLibrarySection(&b, "Playlist fallouts")
-	writeLibraryFallouts(&b, s)
+	writeLibraryFallouts(&b, s, width)
 
 	writeLibrarySection(&b, "Recently added")
-	writeLibraryRecent(&b, s)
+	writeLibraryRecent(&b, s, width)
 
-	b.WriteString("\n" + libraryCardFooter(s))
 	return b.String()
+}
+
+// writeLibraryIndex reports the lyrics search index: whether one has
+// been built, how many tracks are in it and when it was built.
+//
+// Part of this section rather than a section of its own because it is
+// the same subject from the other side -- the sidecar counts are what
+// is on disk, this is how much of it 'f l' can actually search. An
+// index built against a different music_dir is called out rather than
+// reported as a count, because its rows are for tracks that are not
+// the ones in front of you.
+func writeLibraryIndex(b *strings.Builder, s *librarySnapshot, musicDir string, width int) {
+	switch {
+	case !s.indexOK:
+		writeLibraryRow(b, "Lyrics index", pending(s))
+	case !s.index.Exists:
+		writeLibraryRow(b, "Lyrics index", fmt.Sprintf("[::d]not built -- press[-:-:-] [%s]I[-]", hintKeyColor))
+	default:
+		when := "date unknown"
+		if !s.index.IndexedAt.IsZero() {
+			when = s.index.IndexedAt.Local().Format("2006-01-02 15:04")
+		}
+		writeLibraryPair(b, width, "Lyrics index", comma(s.index.Count)+" tracks", "Indexed", when)
+		if musicDir != "" && s.index.MusicDir != "" && s.index.MusicDir != musicDir {
+			writeLibraryRow(b, "", fmt.Sprintf("[%s]built for %s[-]",
+				flagOffColor, clip(tview.Escape(s.index.MusicDir), width-libraryCardLabel-14)))
+		}
+	}
 }
 
 // writeLibraryFallouts reports the playlist entries the library cannot
 // resolve: the totals, then the worst offenders by name.
-func writeLibraryFallouts(b *strings.Builder, s *librarySnapshot) {
+func writeLibraryFallouts(b *strings.Builder, s *librarySnapshot, width int) {
 	if !s.falloutsOK {
 		writeLibraryRow(b, "Unresolved", pending(s))
 		return
@@ -343,9 +484,13 @@ func writeLibraryFallouts(b *strings.Builder, s *librarySnapshot) {
 	if len(shown) > libraryCardFallouts {
 		shown = shown[:libraryCardFallouts]
 	}
+	// The name column is whatever is left after "N of M" -- a playlist
+	// name is the one field here with no natural width.
+	nameCol := max(width-22, 12)
 	for _, f := range shown {
-		b.WriteString(fmt.Sprintf("  %-*s [%s]%s[-] of %s\n",
-			libraryCardLabel+18, clip(tview.Escape(f.Name), libraryCardLabel+17),
+		name := clip(tview.Escape(f.Name), nameCol)
+		b.WriteString(fmt.Sprintf("  %s%s [%s]%s[-] of %s\n",
+			name, strings.Repeat(" ", max(nameCol-tview.TaggedStringWidth(name), 0)),
 			flagOffColor, comma(len(f.Missing)), comma(f.Total)))
 	}
 	if rest := len(r.Affected) - len(shown); rest > 0 {
@@ -355,7 +500,7 @@ func writeLibraryFallouts(b *strings.Builder, s *librarySnapshot) {
 
 // writeLibraryRecent lists the newest tracks by file modification time
 // (see mpdclient.RecentTracks for why that is what "added" means here).
-func writeLibraryRecent(b *strings.Builder, s *librarySnapshot) {
+func writeLibraryRecent(b *strings.Builder, s *librarySnapshot, width int) {
 	if !s.recentOK {
 		writeLibraryNote(b, pending(s))
 		return
@@ -367,26 +512,27 @@ func writeLibraryRecent(b *strings.Builder, s *librarySnapshot) {
 	for _, t := range s.recent {
 		b.WriteString(fmt.Sprintf("  [::d]%s[-:-:-]  %s\n",
 			t.LastModified.Local().Format("2006-01-02"),
-			clip(tview.Escape(t.DisplayName()), libraryCardWidth-18)))
+			clip(tview.Escape(t.DisplayName()), width-18)))
 	}
 }
 
-// libraryCardFooter says how old the numbers are and which key
-// refreshes them -- the card is a snapshot, and a snapshot with no
+// libraryCardTitle says how old the numbers are, in the border rather
+// than in a footer row: the card is a snapshot, and a snapshot with no
 // timestamp is indistinguishable from a live reading.
-func libraryCardFooter(s *librarySnapshot) string {
-	var parts []string
-	if s.inFlight {
-		parts = append(parts, "counting...")
-	} else if !s.takenAt.IsZero() {
-		parts = append(parts, "as of "+s.takenAt.Local().Format("15:04:05"))
+//
+// In the border because the two rows a footer costs are two rows of
+// content on a 45-line terminal, and because the keys a footer would
+// also have listed are already on the hint bar while the card is open
+// (see App.updateHintBar).
+func libraryCardTitle(s *librarySnapshot) string {
+	switch {
+	case s.inFlight:
+		return " Library -- counting... "
+	case s.takenAt.IsZero():
+		return " Library "
+	default:
+		return " Library -- as of " + s.takenAt.Local().Format("15:04:05") + " "
 	}
-	parts = append(parts, fmt.Sprintf("[%s]r[-] refresh  [%s]Esc[-] close", hintKeyColor, hintKeyColor))
-	line := "[::d]" + strings.Join(parts[:len(parts)-1], "  ")
-	if len(parts) > 1 {
-		line += "  "
-	}
-	return line + "[-:-:-]" + parts[len(parts)-1] + "\n"
 }
 
 // pending is what a section shows before its scan lands, or instead of
@@ -415,10 +561,16 @@ func writeLibraryRow(b *strings.Builder, label, value string) {
 	fmt.Fprintf(b, "  [::b]%-*s[-:-:-]%s\n", libraryCardLabel, label, value)
 }
 
-// writeLibraryPair puts two label/value pairs on one line. The card has
-// far more numbers than lines to spare, and the pairs on each line are
-// chosen to be the ones worth reading against each other.
-func writeLibraryPair(b *strings.Builder, l1, v1, l2, v2 string) {
+// writeLibraryPair puts two label/value pairs on one line, or stacks
+// them on a card too narrow for that. The card has far more numbers
+// than lines to spare, and the pairs on each line are chosen to be the
+// ones worth reading against each other.
+func writeLibraryPair(b *strings.Builder, width int, l1, v1, l2, v2 string) {
+	if width < libraryCardPairWidth {
+		writeLibraryRow(b, l1, v1)
+		writeLibraryRow(b, l2, v2)
+		return
+	}
 	const col = 36
 	left := fmt.Sprintf("[::b]%-*s[-:-:-]%s", libraryCardLabel, l1, v1)
 	pad := col - libraryCardLabel - tview.TaggedStringWidth(v1)
@@ -429,17 +581,17 @@ func writeLibraryPair(b *strings.Builder, l1, v1, l2, v2 string) {
 }
 
 // libraryCardHeight sizes the card to its content, up to cap, measured
-// against the width the text will actually be drawn at -- the story
+// against width, which is what the text will actually be drawn at -- the story
 // card's rule, and for the same reason: a fixed height leaves a short
 // card sitting above a field of empty box.
-func libraryCardHeight(text string, cap int) int {
+func libraryCardHeight(text string, width, cap int) int {
 	const border = 2
 	lines := 0
 	for _, para := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
 		// WordWrap returns one empty line for an empty paragraph rather
 		// than nothing, so a blank line between sections counts like
 		// any other row.
-		lines += len(tview.WordWrap(para, libraryCardWidth-border))
+		lines += len(tview.WordWrap(para, width-border))
 	}
 	switch h := lines + border; {
 	case h > cap:

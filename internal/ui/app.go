@@ -132,11 +132,13 @@ type App struct {
 	libraryCard *tview.TextView
 	librarySnap *librarySnapshot
 
-	// libraryCardFrame is the centering grid libraryCard sits in,
-	// kept so a section landing later can make the card taller
-	// without the page being replaced under the other section still
-	// in flight.
-	libraryCardFrame *tview.Grid
+	// libraryCardW/libraryCardH are the size the card was last
+	// rendered for. The frame around it reads them every draw (see
+	// App.libraryCardSize), which is how a section landing later can
+	// make the card taller, and how a terminal resize re-lays the
+	// text out, without either touching the page stack.
+	libraryCardW int
+	libraryCardH int
 
 	markPicker     *catalogPicker
 	tagPicker      *catalogPicker
