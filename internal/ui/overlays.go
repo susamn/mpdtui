@@ -259,6 +259,27 @@ const helpText = `[::b]Global[-:-:-]
                  background scan of every track's .txt/.lrc sidecar, with
                  a progress overlay; Esc cancels a run. The "l" mode of
                  'f' reads only this index, never the filesystem
+  M              library card, centered on the Queue panel: a summary
+                 of the whole collection. Tracks/albums/artists/
+                 playlists, total playtime and when MPD last updated
+                 its database; how many tracks have lyrics (synced
+                 .lrc vs plain .txt, both, and sidecars matching no
+                 track), how many have a fetched story and how many
+                 story images sit beside them, plus whether the lyrics
+                 search index has been built, how many tracks are in
+                 it and when (see 'I'); the local database's totals
+                 (rated with its average, played, plays, bookmarks,
+                 marked, tagged) when track_metadata is on; playlist
+                 fallouts -- entries a stored playlist lists that the
+                 library has no track for, which MPD silently skips
+                 when loading and which are invisible everywhere else;
+                 and the most recently added tracks, by file
+                 modification time (MPD records no "added" date). The
+                 border says how old the numbers are. Opens on the
+                 last scan and fills in behind itself; 'r' rescans,
+                 j/k scrolls, M or Esc closes, transport keys stay
+                 live. Narrows and re-lays itself out to fit the Queue
+                 panel on a small terminal
   v              cycle Now Playing visualizations
   L              locate the currently playing track in the Queue
   b              bookmark current playback position of the playing track

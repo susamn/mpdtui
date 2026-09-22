@@ -147,11 +147,23 @@ func Dir(musicDir, file string) string {
 // there is nothing they could usefully do about a bad file from inside
 // the player.
 func Load(musicDir, file string) (Wiki, bool) {
-	dir := Dir(musicDir, file)
+	return LoadDir(Dir(musicDir, file))
+}
+
+// FileName is the manifest inside a story directory. Exported because
+// a caller counting stories across the whole collection (see
+// internal/libraryscan) has to recognise the manifest among the images
+// sitting beside it.
+const FileName = "wiki.json"
+
+// LoadDir is Load addressed by story directory rather than by track --
+// the same read, the same refusals, for a caller that already walked to
+// the directory and has no MPD path to hand.
+func LoadDir(dir string) (Wiki, bool) {
 	if dir == "" {
 		return Wiki{}, false
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "wiki.json"))
+	data, err := os.ReadFile(filepath.Join(dir, FileName))
 	if err != nil {
 		return Wiki{}, false
 	}

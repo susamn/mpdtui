@@ -22,13 +22,14 @@ done
 cmd/mpdtui  -> config lyricsline metadata mini mpdclient picker trackinfo ui version
 
   ENTRY POINTS (one per mode, siblings, none imports another)
-    ui         -> albumart lyrics lyricsindex metadata mpdclient
-                  settingsview textutil uitheme version visualizer
+    ui         -> albumart libraryscan lyrics lyricsindex metadata
+                  mpdclient settingsview termimage textutil trackwiki
+                  uitheme version visualizer
     mini       -> metadata mpdclient theme
     picker     -> mpdclient theme
 
   UI COMPONENTS (own a panel or overlay, used only by ui)
-    albumart     -> mpdclient
+    albumart     -> termimage
     visualizer   -> audio mpdclient
     settingsview -> metadata uitheme
 
@@ -36,6 +37,7 @@ cmd/mpdtui  -> config lyricsline metadata mini mpdclient picker trackinfo ui ver
     uitheme    -> theme        (palette -> tcell colors, for tview front ends)
 
   DOMAIN
+    libraryscan -> lyrics trackwiki
     lyricsindex -> lyrics textutil
     lyricsline  -> lyrics mpdclient
     trackinfo   -> lyrics metadata mpdclient
@@ -46,7 +48,7 @@ cmd/mpdtui  -> config lyricsline metadata mini mpdclient picker trackinfo ui ver
     theme       -> kvparser
 
   LEAVES (no internal dependencies at all)
-    audio  kvparser  textutil  version
+    audio  kvparser  termimage  textutil  trackwiki  version
 ```
 
 No cycles. Nothing above imports anything below it back.

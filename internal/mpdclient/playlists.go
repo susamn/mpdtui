@@ -188,3 +188,126 @@ func (c *Client) PlaylistTrackCounts() (map[string]int, error) {
 	}
 	return idx.Counts, nil
 }
+
+// PlaylistFallout is one stored playlist's unresolvable entries -- the
+// paths it lists that MPD's database has no track for.
+//
+// This is what a playlist imported from somewhere else leaves behind: a
+// .m3u written against another machine's layout, or against files that
+// were since renamed, moved or never copied across. MPD loads such a
+// playlist without complaint and simply skips those lines, so a
+// playlist that is half missing looks identical to a short one from
+// inside the app. Counting the gap is the only way to see it.
+type PlaylistFallout struct {
+	Name string
+	// Total is how many entries the playlist file lists, including the
+	// missing ones.
+	Total int
+	// Missing is every listed path the library does not have, in the
+	// order the playlist lists them.
+	Missing []string
+}
+
+// PlaylistFalloutReport is PlaylistFallouts' whole answer: the totals
+// across every stored playlist, and the affected playlists themselves.
+type PlaylistFalloutReport struct {
+	// Playlists is how many stored playlists were scanned, Entries the
+	// total number of lines across all of them, and Missing how many of
+	// those the library could not resolve.
+	Playlists int
+	Entries   int
+	Missing   int
+
+	// Affected holds only the playlists with at least one missing
+	// entry, worst first, ties broken by name. A report on 200
+	// playlists of which 3 have holes is a report about those 3.
+	Affected []PlaylistFallout
+}
+
+// PlaylistFallouts reads every stored playlist and reports which of
+// their entries the library cannot resolve (see PlaylistFallout).
+//
+// Costs one "list file" for the whole library plus one "listplaylist"
+// per stored playlist -- the same per-playlist scan PlaylistIndex makes,
+// which see for why that is a background operation and not something to
+// run inline on a UI refresh. Deliberately a separate scan rather than
+// another field on PlaylistIndex: that one runs every ten minutes to
+// keep the Playlists panel's counts fresh, and it should not start
+// failing, or paying for a full library listing, because of a summary
+// the user opens occasionally.
+func (c *Client) PlaylistFallouts() (PlaylistFalloutReport, error) {
+	return call(c, func(conn *mpd.Client) (PlaylistFalloutReport, error) {
+		// "list file" rather than listallinfo: only the paths are being
+		// compared, and this is the cheap way to ask for exactly those.
+		files, err := conn.GetFiles()
+		if err != nil {
+			return PlaylistFalloutReport{}, err
+		}
+		known := make(map[string]struct{}, len(files))
+		for _, f := range files {
+			known[f] = struct{}{}
+		}
+
+		lists, err := conn.ListPlaylists()
+		if err != nil {
+			return PlaylistFalloutReport{}, err
+		}
+
+		contents := make([]playlistEntries, 0, len(lists))
+		for _, a := range lists {
+			name := a["playlist"]
+			entries, err := conn.Command("listplaylist %s", name).AttrsList("file")
+			if err != nil {
+				return PlaylistFalloutReport{}, err
+			}
+			uris := make([]string, 0, len(entries))
+			for _, e := range entries {
+				uris = append(uris, e["file"])
+			}
+			contents = append(contents, playlistEntries{Name: name, URIs: uris})
+		}
+		return falloutReport(known, contents), nil
+	})
+}
+
+// playlistEntries is one stored playlist as read off the wire: its name
+// and the paths it lists, verbatim.
+type playlistEntries struct {
+	Name string
+	URIs []string
+}
+
+// falloutReport assembles the report from playlists already read.
+//
+// Split from PlaylistFallouts so the counting and ordering can be
+// tested against a library with holes in it. The integration test can
+// only assert the shape of whatever the developer's own collection
+// happens to be, and a collection whose playlists all resolve -- the
+// good case -- exercises none of this.
+func falloutReport(known map[string]struct{}, playlists []playlistEntries) PlaylistFalloutReport {
+	report := PlaylistFalloutReport{Playlists: len(playlists)}
+	for _, pl := range playlists {
+		fallout := PlaylistFallout{Name: pl.Name, Total: len(pl.URIs)}
+		for _, uri := range pl.URIs {
+			if uri == "" {
+				continue
+			}
+			if _, ok := known[uri]; ok {
+				continue
+			}
+			fallout.Missing = append(fallout.Missing, uri)
+		}
+		report.Entries += fallout.Total
+		report.Missing += len(fallout.Missing)
+		if len(fallout.Missing) > 0 {
+			report.Affected = append(report.Affected, fallout)
+		}
+	}
+	sort.Slice(report.Affected, func(i, j int) bool {
+		if a, b := len(report.Affected[i].Missing), len(report.Affected[j].Missing); a != b {
+			return a > b
+		}
+		return report.Affected[i].Name < report.Affected[j].Name
+	})
+	return report
+}

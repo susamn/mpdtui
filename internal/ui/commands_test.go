@@ -4,6 +4,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,7 +33,7 @@ func newFakeAppWith(t *testing.T, f mpdConn) *App {
 	// Apply background results on the calling goroutine: nothing drains
 	// a tview application's update queue unless Run() is going. Set
 	// before build(), which otherwise wires the real QueueUpdateDraw.
-	a.applyToUI = func(fn func()) { fn() }
+	a.applyToUI = serialApply()
 	a.build()
 	a.queue.table.SetRect(0, 0, 150, 40)
 	a.runAsync = func(work func() error, onSuccess func()) {
@@ -43,6 +44,24 @@ func newFakeAppWith(t *testing.T, f mpdConn) *App {
 		onSuccess()
 	}
 	return a
+}
+
+// serialApply is the test stand-in for App.applyToUI.
+//
+// The real one is tview's QueueUpdateDraw, which hands the closure to
+// the single UI goroutine, so two background results can never be
+// applied at the same time. Running them inline on whichever goroutine
+// produced them drops that guarantee, and a feature whose sections
+// arrive on separate goroutines (see refreshLibrarySnapshot) then
+// interleaves a stale redraw over a fresh one -- a failure that exists
+// only in the harness. The mutex puts the guarantee back.
+func serialApply() func(func()) {
+	var mu sync.Mutex
+	return func(fn func()) {
+		mu.Lock()
+		defer mu.Unlock()
+		fn()
+	}
 }
 
 // errTest is a stand-in failure for the error arms.
@@ -440,7 +459,7 @@ func newFakeAppWithMetaDB(t *testing.T, f *fakeMPD) *App {
 	t.Cleanup(func() { db.Close() })
 
 	a := &App{tv: tview.NewApplication(), client: f, metaDB: db, playCountedSongID: -1}
-	a.applyToUI = func(fn func()) { fn() }
+	a.applyToUI = serialApply()
 	a.build()
 	a.queue.table.SetRect(0, 0, 150, 40)
 	a.runAsync = func(work func() error, onSuccess func()) {

@@ -64,6 +64,13 @@ type mpdConn interface {
 	ListDirectory(path string) ([]mpdclient.DirEntry, error)
 	LibraryStats() (mpdclient.LibraryStats, error)
 
+	// The Library card ('M') only. All three are whole-library scans
+	// -- see each one's own cost note -- and are called from a
+	// background goroutine, never from a refresh.
+	LibraryFiles() ([]string, error)
+	RecentTracks(n int) ([]mpdclient.RecentTrack, error)
+	PlaylistFallouts() (mpdclient.PlaylistFalloutReport, error)
+
 	// Album art, for internal/albumart (which declares its own
 	// one-method Fetcher; this satisfies it).
 	FetchAlbumArt(uri string) ([]byte, error)

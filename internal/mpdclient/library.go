@@ -87,3 +87,14 @@ func (c *Client) AllSongs() ([]Song, error) {
 	}
 	return parseSongs(list), nil
 }
+
+// LibraryFiles returns every track's path, and nothing else.
+//
+// MPD's "list file" rather than AllSongs' listallinfo: a caller that
+// only needs to know which files exist (see internal/libraryscan)
+// should not pay for every tag of every track, which on a library of a
+// few thousand is the difference between a line of paths and megabytes
+// of attributes.
+func (c *Client) LibraryFiles() ([]string, error) {
+	return call(c, func(conn *mpd.Client) ([]string, error) { return conn.GetFiles() })
+}

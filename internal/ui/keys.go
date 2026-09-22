@@ -99,6 +99,7 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 				{'i', a.trackInfo},
 				{'y', a.lyricsViewer},
 				{'w', a.trackWiki},
+				{'M', a.libraryCard},
 				{0, a.markPicker},
 				{0, a.tagPicker},
 			}
@@ -151,7 +152,14 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 				a.lyricsViewer.cycleFormat()
 				return nil
 			}
-			if (focus == a.lyricsViewer || focus == a.trackWiki || focus == a.markPicker || focus == a.tagPicker) && a.handleTransportKey(event.Rune()) {
+			// 'r' rescans the Library card. Card-only, like 't' above:
+			// it is not one of handleTransportKey's runes, and outside
+			// the card 'r' means nothing at all.
+			if focus == a.libraryCard && a.libraryCard != nil && event.Rune() == 'r' {
+				a.handleLibraryCardRefresh()
+				return nil
+			}
+			if (focus == a.lyricsViewer || focus == a.trackWiki || focus == a.libraryCard || focus == a.markPicker || focus == a.tagPicker) && a.handleTransportKey(event.Rune()) {
 				return nil
 			}
 		}
@@ -174,6 +182,9 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			return nil
 		case 'w':
 			a.openTrackWiki()
+			return nil
+		case 'M':
+			a.openLibraryCard()
 			return nil
 		case 'i':
 			a.openTrackInfo()

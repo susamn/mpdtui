@@ -34,6 +34,9 @@ type fakeMPD struct {
 	songs        []mpdclient.Song
 	dirs         map[string][]mpdclient.DirEntry
 	stats        mpdclient.LibraryStats
+	files        []string
+	recent       []mpdclient.RecentTrack
+	fallouts     mpdclient.PlaylistFalloutReport
 	art          []byte
 
 	// err, when set, is returned by every command that can fail, for
@@ -141,6 +144,23 @@ func (f *fakeMPD) ListDirectory(path string) ([]mpdclient.DirEntry, error) {
 }
 
 func (f *fakeMPD) LibraryStats() (mpdclient.LibraryStats, error) { return f.stats, f.err }
+
+func (f *fakeMPD) LibraryFiles() ([]string, error) { return f.files, f.err }
+
+func (f *fakeMPD) RecentTracks(n int) ([]mpdclient.RecentTrack, error) {
+	f.record("RecentTracks(%d)", n)
+	if f.err != nil {
+		return nil, f.err
+	}
+	if n < len(f.recent) {
+		return f.recent[:n], nil
+	}
+	return f.recent, nil
+}
+
+func (f *fakeMPD) PlaylistFallouts() (mpdclient.PlaylistFalloutReport, error) {
+	return f.fallouts, f.err
+}
 
 func (f *fakeMPD) Watch(subsystems ...string) (*mpdclient.Watcher, error) { return nil, f.err }
 
