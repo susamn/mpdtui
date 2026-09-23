@@ -440,6 +440,18 @@ func (a *App) reapplyTheme() {
 
 	a.nowPlaying.SetBorderColor(nowPlayingBorderColor).SetTitleColor(nowPlayingBorderColor)
 	a.lyricsViewer.SetBorderColor(lyricsColor).SetTitleColor(lyricsColor)
+	if a.trackInfo != nil && focused == a.trackInfo {
+		activateOverlayBorder(a.trackInfo)
+	}
+	if a.libraryCard != nil && focused == a.libraryCard {
+		activateOverlayBorder(a.libraryCard)
+	}
+	if a.bookmarkPicker.focused() {
+		activateOverlayBorder(a.bookmarkPicker)
+	}
+	if a.settings.Focused() {
+		activateOverlayBorder(a.settings)
+	}
 
 	// Same "baked in at construction, not read live" problem as the
 	// table cells below, but for the selected-row highlight specifically:
@@ -1079,6 +1091,7 @@ func (a *App) openBookmarkManager(song mpdclient.Song) {
 		return
 	}
 	a.bookmarkPicker.render(song)
+	activateOverlayBorder(a.bookmarkPicker)
 	a.showOverlay("bookmark-picker", centered(a.bookmarkPicker.Flex, 64, 14), a.bookmarkPicker.table)
 }
 

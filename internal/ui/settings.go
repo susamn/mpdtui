@@ -61,5 +61,6 @@ func orPlaceholder(s string) string {
 // whatever was focused before 'e' and can restore it on close.
 func (a *App) openSettings() {
 	a.settings.Reset()
+	activateOverlayBorder(a.settings)
 	a.showOverlay("settings", centered(a.settings.Root(), 76, 22), a.settings.InitialFocus())
 }

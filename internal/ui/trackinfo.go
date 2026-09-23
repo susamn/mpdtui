@@ -728,6 +728,7 @@ func (a *App) openTrackInfo() {
 	// and merely pressing 'i' does not drag the Queue cursor off
 	// whatever row the user was browsing.
 	a.trackInfo.inspectSong = nil
+	activateOverlayBorder(a.trackInfo)
 	a.showOverlay(trackInfoPageName, a.trackInfo, a.trackInfo)
 	a.renderTrackInfo()
 }

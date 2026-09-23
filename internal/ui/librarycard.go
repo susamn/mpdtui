@@ -144,6 +144,7 @@ func (a *App) openLibraryCard() {
 	// same reason, so the height already accounts for it.
 	view := tview.NewTextView().SetDynamicColors(true).SetWordWrap(true)
 	view.SetBorder(true)
+	activateOverlayBorder(view)
 	a.libraryCard = view
 	a.renderLibraryCard()
 
