@@ -43,11 +43,11 @@ var (
 )
 
 // lyricsViewer shows the currently playing track's lyrics. It's
-// positioned over the Queue table's own Year-through-Type column band
+// positioned over the Queue table's own Artist-through-Type column band
 // (just before Duration), not centered on the full screen -- so it reads
 // as replacing that slice of the Queue panel rather than floating
-// disconnected from it, while still leaving Title/Album/Artist visible to
-// its left. Vertical, per the request that named this ("a vertical
+// disconnected from it, while still leaving Title/Album visible to its
+// left. Vertical, per the request that named this ("a vertical
 // lyrics viewer"): lyrics can run to many lines and need real scrolling
 // room, not just a glanceable summary the way trackInfoCard's small
 // floating quadrant card is. Scrolling is entirely tview.TextView's own
@@ -222,9 +222,9 @@ const lyricsViewerBottomMargin = 2
 // lyricsViewerRect computes the viewer's rect from the Queue table's own
 // rect (queueY, queueHeight -- GetRect(), which includes the table's own
 // top and bottom border rows) and the actual last-drawn x positions of
-// its Year and Duration columns (yearX, durationX).
+// its left boundary and Duration columns (leftX, durationX).
 //
-// Horizontally: from yearX up to (not including) durationX.
+// Horizontally: from leftX up to (not including) durationX.
 //
 // Vertically: queueY itself is the table's own top border row, queueY+1
 // is the header row, so the first data row is queueY+1+queueHeaderRows --
@@ -240,16 +240,16 @@ const lyricsViewerBottomMargin = 2
 // positionOverQueue/Draw. Clamps height to 0 rather than negative for a
 // pathologically short Queue table (smaller than its own two border rows
 // plus the header row plus both margins).
-func lyricsViewerRect(queueY, queueHeight, yearX, durationX int) (x, y, width, height int) {
+func lyricsViewerRect(queueY, queueHeight, leftX, durationX int) (x, y, width, height int) {
 	top := queueY + 1 + queueHeaderRows + lyricsViewerTopMargin
 	height = queueHeight - queueHeaderRows - lyricsViewerTopMargin - lyricsViewerBottomMargin - 2
 	if height < 0 {
 		height = 0
 	}
-	return yearX, top, durationX - yearX, height
+	return leftX, top, durationX - leftX, height
 }
 
-// resolveLyricsViewerColumnBounds validates the Year and Duration columns'
+// resolveLyricsViewerColumnBounds validates the left and Duration columns'
 // actual last-drawn x positions (see positionOverQueueColumns) against the
 // Queue table's own current rect (qx, qw -- GetRect()), falling back to
 // the table's own left/right edges when a boundary looks like it wasn't
@@ -272,18 +272,19 @@ func lyricsViewerRect(queueY, queueHeight, yearX, durationX int) (x, y, width, h
 //
 // Split out as a pure function -- no tview.Table involved -- for the same
 // reason lyricsViewerRect is: testable without a real tcell.Screen.
-func resolveLyricsViewerColumnBounds(qx, qw, yearX, durationX int) (int, int) {
-	if yearX < qx || yearX > qx+qw {
-		yearX = qx
+func resolveLyricsViewerColumnBounds(qx, qw, leftX, durationX int) (int, int) {
+	rightInside := qx + qw - 1
+	if leftX < qx || leftX >= rightInside {
+		leftX = qx
 	}
-	if durationX < qx || durationX > qx+qw || durationX <= yearX {
-		durationX = qx + qw
+	if durationX < qx || durationX > rightInside || durationX <= leftX {
+		durationX = rightInside
 	}
-	return yearX, durationX
+	return leftX, durationX
 }
 
 // positionOverQueueColumns sets the viewer's rect to span horizontally
-// from the Queue table's Year column through the end of Type (i.e. up to
+// from the Queue table's Artist column through the end of Type (i.e. up to
 // but not including Duration), and vertically to match the Queue table's
 // own rect (see lyricsViewerRect). Reads each boundary column's *actual
 // last-drawn* x position (tview.TableCell.GetLastPosition()) rather than
@@ -296,11 +297,11 @@ func resolveLyricsViewerColumnBounds(qx, qw, yearX, durationX int) (int, int) {
 // resolveLyricsViewerColumnBounds) since a narrow enough terminal can
 // leave one of them stale or zero.
 //
-// Either boundary can also simply not be on screen, now that everything
+// The right boundary can also simply not be on screen, now that everything
 // past Rating scrolls: queuePanel.columnOnScreen is what decides whether
-// a column's last-drawn position can be trusted this frame. When Year
-// isn't there the viewer falls back to the Queue's right half, and when
-// Duration isn't, the band just runs to the Queue's right edge.
+// a column's last-drawn position can be trusted this frame. Artist is a
+// frozen column, so it normally stays visible; if it still is not drawn,
+// the viewer falls back to the Queue's own left edge.
 //
 // The column indices themselves come from queue.go's newQueueColumns,
 // the same function render() uses to lay out the table in the first
@@ -322,26 +323,20 @@ func (v *lyricsViewer) positionOverQueueColumns() {
 	q := v.app.queue
 	cols := q.cols
 
-	var yearX int
-	if q.columnOnScreen(cols.year) {
-		yearX, _, _ = q.table.GetCell(0, cols.year).GetLastPosition()
-	} else {
-		// Year is off screen -- either the column doesn't exist, or the
-		// Queue is scrolled somewhere that doesn't show it. Fall back to
-		// the right half of the Queue rather than to Year's stale
-		// coordinates.
-		yearX = qx + qw/2
+	leftX := qx
+	if q.columnOnScreen(cols.artist) {
+		leftX, _, _ = q.table.GetCell(0, cols.artist).GetLastPosition()
 	}
 
-	durationX := qx + qw
+	durationX := qx + qw - 1
 	if q.columnOnScreen(cols.duration) {
 		durationX, _, _ = q.table.GetCell(0, cols.duration).GetLastPosition()
 	}
-	yearX, durationX = resolveLyricsViewerColumnBounds(qx, qw, yearX, durationX)
-	v.SetRect(lyricsViewerRect(qy, qh, yearX, durationX))
+	leftX, durationX = resolveLyricsViewerColumnBounds(qx, qw, leftX, durationX)
+	v.SetRect(lyricsViewerRect(qy, qh, leftX, durationX))
 }
 
-// Draw repositions the viewer over the Queue table's Year-through-Type
+// Draw repositions the viewer over the Queue table's Artist-through-Type
 // column band (see positionOverQueueColumns) and recomputes the border
 // title (see updateTitle) on every frame, then delegates to the embedded
 // TextView to actually paint it -- mirrors trackInfoCard.Draw's own

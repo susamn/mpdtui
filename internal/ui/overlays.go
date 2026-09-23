@@ -201,7 +201,8 @@ func (a *App) openHelp() {
 const helpText = `[::b]Global[-:-:-]
   Space          play / pause
   s              stop
-  n / p          next / previous track
+  n              next track
+  p              back / previous track
   , / .          seek -5s / +5s
   - / =          volume down / up
   z              toggle shuffle (random)

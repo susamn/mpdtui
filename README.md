@@ -84,7 +84,7 @@ single-line inline player for a shell or tmux pane.
   feature -- see [Lyrics](#lyrics)
 - **Lyrics** (`y`) — a viewer (bordered the same green as a focused
   panel, muted-yellow text), positioned over the Queue's own
-  Year-through-Type columns, for the currently playing track's lyrics,
+  Artist-through-Type columns, for the currently playing track's lyrics,
   read from a `.txt` sidecar file next to the track on disk -- or, if a
   same-named `.lrc` (synced/timestamped) file exists instead, real
   karaoke-style highlighting: the currently-singing line is colored and
@@ -349,7 +349,8 @@ theme_file = ~/.cache/mpdtui/colors.toml
 |---|---|
 | `Space` | Toggle play/pause |
 | `s` | Stop |
-| `n` / `p` | Next / previous track |
+| `n` | Next track |
+| `p` | Back / previous track |
 | `,` / `.` | Seek -5s / +5s |
 | `-` / `=` | Volume down / up |
 | `z` | Toggle random (shuffle) |

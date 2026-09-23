@@ -187,5 +187,6 @@ func (a *App) openCatalogPicker(key, name string, picker *catalogPicker) {
 	if height < 8 {
 		height = 8
 	}
-	a.showOverlay(name, centered(picker, 50, height), picker)
+	activateOverlayBorder(picker)
+	a.showOverlay(name, newQueueCenteredFrame(a, picker, func() (int, int) { return 50, height }), picker)
 }

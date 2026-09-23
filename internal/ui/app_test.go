@@ -48,6 +48,12 @@ func TestUpdateHintBarShowsGlobalLabelAndBoldedKeys(t *testing.T) {
 	if !strings.Contains(text, "[skyblue::b]Space[-:-:-]:toggle") {
 		t.Errorf("hint bar text = %q, want the Space key bolded/colored", text)
 	}
+	if !strings.Contains(text, "[skyblue::b]n[-:-:-]:next") {
+		t.Errorf("hint bar text = %q, want the n key shown as next", text)
+	}
+	if !strings.Contains(text, "[skyblue::b]p[-:-:-]:back") {
+		t.Errorf("hint bar text = %q, want the p key shown as back", text)
+	}
 	if !strings.Contains(text, "[skyblue::b]Enter[-:-:-]:play") {
 		t.Errorf("hint bar text = %q, want the Queue panel's Enter hint bolded/colored", text)
 	}

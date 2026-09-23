@@ -440,6 +440,24 @@ func (a *App) reapplyTheme() {
 
 	a.nowPlaying.SetBorderColor(nowPlayingBorderColor).SetTitleColor(nowPlayingBorderColor)
 	a.lyricsViewer.SetBorderColor(lyricsColor).SetTitleColor(lyricsColor)
+	if a.trackInfo != nil && focused == a.trackInfo {
+		activateOverlayBorder(a.trackInfo)
+	}
+	if a.libraryCard != nil && focused == a.libraryCard {
+		activateOverlayBorder(a.libraryCard)
+	}
+	if a.bookmarkPicker.focused() {
+		activateOverlayBorder(a.bookmarkPicker)
+	}
+	if a.settings.Focused() {
+		activateOverlayBorder(a.settings)
+	}
+	if focused == a.markPicker {
+		activateOverlayBorder(a.markPicker)
+	}
+	if focused == a.tagPicker {
+		activateOverlayBorder(a.tagPicker)
+	}
 
 	// Same "baked in at construction, not read live" problem as the
 	// table cells below, but for the selected-row highlight specifically:
@@ -934,7 +952,8 @@ func formatHints(hints []hint) string {
 var globalHints = []hint{
 	{"Space", "toggle"},
 	{"s", "stop"},
-	{"n/p", "skip"},
+	{"n", "next"},
+	{"p", "back"},
 	{",/.", "seek"},
 	{"-/=", "volume"},
 	{"z", "shuffle"},
@@ -1078,7 +1097,8 @@ func (a *App) openBookmarkManager(song mpdclient.Song) {
 		return
 	}
 	a.bookmarkPicker.render(song)
-	a.showOverlay("bookmark-picker", centered(a.bookmarkPicker.Flex, 64, 14), a.bookmarkPicker.table)
+	activateOverlayBorder(a.bookmarkPicker)
+	a.showOverlay("bookmark-picker", newQueueCenteredFrame(a, a.bookmarkPicker.Flex, func() (int, int) { return 64, 14 }), a.bookmarkPicker.table)
 }
 
 // reloadTrackMeta re-reads the track's metadata from metaDB and updates

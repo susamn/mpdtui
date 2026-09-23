@@ -136,6 +136,21 @@ func TestBookmarkKeyClampingAtZero(t *testing.T) {
 	}
 }
 
+func TestBookmarkManagerEscapeRestoresOriginalFocus(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.focusPanel(queuePanelIdx)
+
+	a.openBookmarkManager(mpdclient.Song{File: "rock/anthem.mp3", Title: "Anthem"})
+	a.globalInputCapture(tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone))
+
+	if a.mode != modeNormal {
+		t.Fatalf("mode after Escape = %d, want normal", a.mode)
+	}
+	if a.tv.GetFocus() != a.queue.table {
+		t.Errorf("focus after closing bookmark overlay = %T, want Queue table", a.tv.GetFocus())
+	}
+}
+
 func TestBookmarkManagerListingAndCRUD(t *testing.T) {
 	a := newTestAppWithMetaDB(t)
 	song := mpdclient.Song{File: "rock/anthem.mp3", Title: "Anthem", ID: 10}
@@ -154,6 +169,12 @@ func TestBookmarkManagerListingAndCRUD(t *testing.T) {
 	}
 	if len(a.bookmarkPicker.bookmarks) != 0 {
 		t.Fatalf("expected 0 bookmarks initially, got %d", len(a.bookmarkPicker.bookmarks))
+	}
+	if strings.Contains(a.bookmarkPicker.GetTitle(), "Anthem") || strings.Contains(a.bookmarkPicker.table.GetTitle(), "Anthem") {
+		t.Errorf("bookmark overlay title still contains track name: outer=%q table=%q", a.bookmarkPicker.GetTitle(), a.bookmarkPicker.table.GetTitle())
+	}
+	if got := a.bookmarkPicker.trackName.GetText(true); !strings.Contains(got, "Anthem") {
+		t.Errorf("bookmark track label = %q, want track name inside the overlay", got)
 	}
 	if !a.bookmarkPicker.allowsGlobalKeys() {
 		t.Error("table mode should allow global keys")
