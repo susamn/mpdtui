@@ -62,5 +62,5 @@ func orPlaceholder(s string) string {
 func (a *App) openSettings() {
 	a.settings.Reset()
 	activateOverlayBorder(a.settings)
-	a.showOverlay("settings", centered(a.settings.Root(), 76, 22), a.settings.InitialFocus())
+	a.showOverlay("settings", newQueueCenteredFrame(a, a.settings.Root(), func() (int, int) { return 76, 22 }), a.settings.InitialFocus())
 }
