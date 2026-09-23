@@ -42,6 +42,7 @@ type bookmarkPicker struct {
 	app   *App
 	pages *tview.Pages
 
+	trackName   *tview.TextView
 	table       *tview.Table
 	input       *tview.TextArea
 	confirmView *tview.TextView
@@ -57,8 +58,9 @@ type bookmarkPicker struct {
 func newBookmarkPicker(app *App) *bookmarkPicker {
 	p := &bookmarkPicker{app: app, mode: bmModeList}
 
+	p.trackName = tview.NewTextView().SetDynamicColors(true)
+
 	p.table = tview.NewTable()
-	p.table.SetBorder(true)
 	p.table.SetSelectable(true, false)
 	p.table.SetSelectedStyle(uitheme.SelectedStyle())
 	p.table.SetSelectedFunc(func(row, _ int) {
@@ -100,8 +102,10 @@ func newBookmarkPicker(app *App) *bookmarkPicker {
 		AddPage("confirm", centered(p.confirmView, 50, 5), true, false)
 
 	p.Flex = tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(p.trackName, 1, 0, false).
 		AddItem(p.pages, 0, 1, true).
 		AddItem(p.hintBar, 1, 0, false)
+	p.Flex.SetBorder(true).SetTitle(" Bookmarks ")
 
 	return p
 }
@@ -131,7 +135,9 @@ func (p *bookmarkPicker) updateTitle() {
 	if name == "" {
 		name = baseName(p.song.File)
 	}
-	p.table.SetTitle(fmt.Sprintf(" Bookmarks: %q ", name))
+	p.Flex.SetTitle(" Bookmarks ")
+	p.table.SetTitle("")
+	p.trackName.SetText(fmt.Sprintf(" [::b]%s[-:-:-]", tview.Escape(name)))
 }
 
 func (p *bookmarkPicker) showTable() {

@@ -155,6 +155,12 @@ func TestBookmarkManagerListingAndCRUD(t *testing.T) {
 	if len(a.bookmarkPicker.bookmarks) != 0 {
 		t.Fatalf("expected 0 bookmarks initially, got %d", len(a.bookmarkPicker.bookmarks))
 	}
+	if strings.Contains(a.bookmarkPicker.GetTitle(), "Anthem") || strings.Contains(a.bookmarkPicker.table.GetTitle(), "Anthem") {
+		t.Errorf("bookmark overlay title still contains track name: outer=%q table=%q", a.bookmarkPicker.GetTitle(), a.bookmarkPicker.table.GetTitle())
+	}
+	if got := a.bookmarkPicker.trackName.GetText(true); !strings.Contains(got, "Anthem") {
+		t.Errorf("bookmark track label = %q, want track name inside the overlay", got)
+	}
 	if !a.bookmarkPicker.allowsGlobalKeys() {
 		t.Error("table mode should allow global keys")
 	}
