@@ -136,6 +136,21 @@ func TestBookmarkKeyClampingAtZero(t *testing.T) {
 	}
 }
 
+func TestBookmarkManagerEscapeRestoresOriginalFocus(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.focusPanel(queuePanelIdx)
+
+	a.openBookmarkManager(mpdclient.Song{File: "rock/anthem.mp3", Title: "Anthem"})
+	a.globalInputCapture(tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone))
+
+	if a.mode != modeNormal {
+		t.Fatalf("mode after Escape = %d, want normal", a.mode)
+	}
+	if a.tv.GetFocus() != a.queue.table {
+		t.Errorf("focus after closing bookmark overlay = %T, want Queue table", a.tv.GetFocus())
+	}
+}
+
 func TestBookmarkManagerListingAndCRUD(t *testing.T) {
 	a := newTestAppWithMetaDB(t)
 	song := mpdclient.Song{File: "rock/anthem.mp3", Title: "Anthem", ID: 10}

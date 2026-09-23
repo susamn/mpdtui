@@ -145,7 +145,9 @@ func (p *bookmarkPicker) showTable() {
 	p.pages.SwitchToPage("table")
 	p.updateTitle()
 	p.hintBar.SetText(bookmarkListHints)
-	p.app.tv.SetFocus(p.table)
+	if p.app.mode == modeOverlay {
+		p.app.tv.SetFocus(p.table)
+	}
 }
 
 func (p *bookmarkPicker) refreshTable() {
