@@ -349,7 +349,8 @@ theme_file = ~/.cache/mpdtui/colors.toml
 |---|---|
 | `Space` | Toggle play/pause |
 | `s` | Stop |
-| `n` / `p` | Next / previous track |
+| `n` | Next track |
+| `p` | Back / previous track |
 | `,` / `.` | Seek -5s / +5s |
 | `-` / `=` | Volume down / up |
 | `z` | Toggle random (shuffle) |

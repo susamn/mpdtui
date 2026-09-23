@@ -934,7 +934,8 @@ func formatHints(hints []hint) string {
 var globalHints = []hint{
 	{"Space", "toggle"},
 	{"s", "stop"},
-	{"n/p", "skip"},
+	{"n", "next"},
+	{"p", "back"},
 	{",/.", "seek"},
 	{"-/=", "volume"},
 	{"z", "shuffle"},
