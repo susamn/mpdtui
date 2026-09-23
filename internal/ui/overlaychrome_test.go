@@ -19,6 +19,11 @@ func TestOverlayCardsUseActiveBorderAndDefocusQueue(t *testing.T) {
 		{"settings", (*App).openSettings, func(a *App) borderTitler { return a.settings }},
 		{"library card", (*App).openLibraryCard, func(a *App) borderTitler { return a.libraryCard }},
 		{"bookmark manager", func(a *App) { a.openBookmarkManager(mpdclient.Song{File: "a.mp3"}) }, func(a *App) borderTitler { return a.bookmarkPicker }},
+		{"mark picker", func(a *App) {
+			a.currentSong = mpdclient.Song{File: "a.mp3"}
+			a.currentStatus = mpdclient.Status{State: mpdclient.StatePlay}
+			a.handleOpenMarkPicker()
+		}, func(a *App) borderTitler { return a.markPicker }},
 	}
 
 	for _, tc := range cases {

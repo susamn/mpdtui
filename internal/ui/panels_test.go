@@ -1,10 +1,12 @@
 package ui
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 
 	"mpdtui/internal/metadata"
 	"mpdtui/internal/mpdclient"
@@ -82,6 +84,82 @@ func TestLyricsViewerPositionsInCompactLayout(t *testing.T) {
 
 // TestTrackInfoCardDrawRepositions covers the same pattern on the Track
 // Info card, which reads the Queue's live rect on every frame too.
+func TestBookmarkOverlayCentersOnQueuePanel(t *testing.T) {
+	a := newFakeAppWithMetaDB(t, &fakeMPD{})
+	a.openBookmarkManager(mpdclient.Song{File: "artist/title.mp3", Title: "Title"})
+
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatalf("init simulation screen: %v", err)
+	}
+	defer screen.Fini()
+	screen.SetSize(150, 40)
+	a.pages.SetRect(0, 0, 150, 40)
+	a.pages.Draw(screen)
+
+	x, _, w, _ := a.bookmarkPicker.GetRect()
+	qx, _, qw, _ := a.queue.table.GetRect()
+	wantW := min(64, qw)
+	wantX := qx + (qw-wantW)/2
+	if x != wantX || w != wantW {
+		t.Errorf("bookmark overlay rect x=%d w=%d, want centered on Queue at x=%d w=%d", x, w, wantX, wantW)
+	}
+}
+
+func TestLyricsIndexOverlayCentersOnQueuePanel(t *testing.T) {
+	a := newFakeApp(t, &fakeMPD{})
+	a.musicDir = t.TempDir()
+	a.cfg.LyricsIndexPath = filepath.Join(t.TempDir(), "lyrics.db")
+	a.handleReindexLyrics()
+
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatalf("init simulation screen: %v", err)
+	}
+	defer screen.Fini()
+	screen.SetSize(150, 40)
+	a.pages.SetRect(0, 0, 150, 40)
+	a.pages.Draw(screen)
+
+	focus, ok := a.tv.GetFocus().(*tview.TextView)
+	if !ok {
+		t.Fatalf("focus = %T, want lyrics index status view", a.tv.GetFocus())
+	}
+	x, _, w, _ := focus.GetRect()
+	qx, _, qw, _ := a.queue.table.GetRect()
+	wantW := min(60, qw)
+	wantX := qx + (qw-wantW)/2
+	if x != wantX || w != wantW {
+		t.Errorf("lyrics index overlay rect x=%d w=%d, want centered on Queue at x=%d w=%d", x, w, wantX, wantW)
+	}
+}
+
+func TestMarkOverlayCentersOnQueuePanel(t *testing.T) {
+	f := &fakeMPD{}
+	a := newFakeAppWithMetaDB(t, f)
+	seedQueue(a, f, mpdclient.Song{ID: 1, Pos: 0, File: "artist/title.mp3", Title: "Title"})
+	a.tv.SetFocus(a.queue.table)
+	a.queue.table.Select(queueHeaderRows, 0)
+	a.handleOpenMarkPicker()
+
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatalf("init simulation screen: %v", err)
+	}
+	defer screen.Fini()
+	screen.SetSize(150, 40)
+	a.pages.SetRect(0, 0, 150, 40)
+	a.pages.Draw(screen)
+
+	x, _, w, _ := a.markPicker.GetRect()
+	qx, _, qw, _ := a.queue.table.GetRect()
+	wantW := min(50, qw)
+	wantX := qx + (qw-wantW)/2
+	if x != wantX || w != wantW {
+		t.Errorf("mark overlay rect x=%d w=%d, want centered on Queue at x=%d w=%d", x, w, wantX, wantW)
+	}
+}
+
 func TestTrackInfoCardDrawRepositions(t *testing.T) {
 	f := &fakeMPD{}
 	a := newFakeApp(t, f)

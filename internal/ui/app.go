@@ -452,6 +452,12 @@ func (a *App) reapplyTheme() {
 	if a.settings.Focused() {
 		activateOverlayBorder(a.settings)
 	}
+	if focused == a.markPicker {
+		activateOverlayBorder(a.markPicker)
+	}
+	if focused == a.tagPicker {
+		activateOverlayBorder(a.tagPicker)
+	}
 
 	// Same "baked in at construction, not read live" problem as the
 	// table cells below, but for the selected-row highlight specifically:
@@ -1092,7 +1098,7 @@ func (a *App) openBookmarkManager(song mpdclient.Song) {
 	}
 	a.bookmarkPicker.render(song)
 	activateOverlayBorder(a.bookmarkPicker)
-	a.showOverlay("bookmark-picker", centered(a.bookmarkPicker.Flex, 64, 14), a.bookmarkPicker.table)
+	a.showOverlay("bookmark-picker", newQueueCenteredFrame(a, a.bookmarkPicker.Flex, func() (int, int) { return 64, 14 }), a.bookmarkPicker.table)
 }
 
 // reloadTrackMeta re-reads the track's metadata from metaDB and updates

@@ -32,6 +32,7 @@ func (a *App) handleReindexLyrics() {
 
 	status := tview.NewTextView().SetDynamicColors(true)
 	status.SetBorder(true).SetTitle(" Lyrics index (Esc to close) ")
+	activateOverlayBorder(status)
 
 	prevInfo, _ := lyricsindex.ReadInfo(a.cfg.LyricsIndexPath)
 	if prevInfo.Exists {
@@ -42,7 +43,7 @@ func (a *App) handleReindexLyrics() {
 		status.SetText("Building lyrics index for the first time...")
 	}
 
-	a.showOverlay("lyrics-reindex", centered(status, 60, 8), status)
+	a.showOverlay("lyrics-reindex", newQueueCenteredFrame(a, status, func() (int, int) { return 60, 8 }), status)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	closed := false
