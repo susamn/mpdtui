@@ -16,9 +16,9 @@ import (
 	"mpdtui/internal/uitheme"
 )
 
-func TestLyricsViewerRectSpansYearThroughTypeColumns(t *testing.T) {
+func TestLyricsViewerRectSpansLeftBoundaryThroughTypeColumns(t *testing.T) {
 	cases := []struct {
-		queueY, queueHeight, yearX, durationX int
+		queueY, queueHeight, leftX, durationX int
 		wantX, wantY, wantW, wantH            int
 	}{
 		// y = queueY + 1 (the table's own top border row) + 1
@@ -34,62 +34,62 @@ func TestLyricsViewerRectSpansYearThroughTypeColumns(t *testing.T) {
 		{0, 0, 0, 0, 0, 3, 0, 0},
 	}
 	for _, tc := range cases {
-		gotX, gotY, gotW, gotH := lyricsViewerRect(tc.queueY, tc.queueHeight, tc.yearX, tc.durationX)
+		gotX, gotY, gotW, gotH := lyricsViewerRect(tc.queueY, tc.queueHeight, tc.leftX, tc.durationX)
 		if gotX != tc.wantX || gotY != tc.wantY || gotW != tc.wantW || gotH != tc.wantH {
 			t.Errorf("lyricsViewerRect(%d,%d,%d,%d) = (%d,%d,%d,%d), want (%d,%d,%d,%d)",
-				tc.queueY, tc.queueHeight, tc.yearX, tc.durationX, gotX, gotY, gotW, gotH, tc.wantX, tc.wantY, tc.wantW, tc.wantH)
+				tc.queueY, tc.queueHeight, tc.leftX, tc.durationX, gotX, gotY, gotW, gotH, tc.wantX, tc.wantY, tc.wantW, tc.wantH)
 		}
 	}
 }
 
 // TestResolveLyricsViewerColumnBoundsFallsBackWhenColumnsOffscreen covers
 // the narrow-terminal bug: when the Queue table's own columns overflow
-// and Duration (or even Year) isn't actually painted this frame,
-// GetLastPosition() returns a stale or zero x -- previously fed straight
-// into lyricsViewerRect, producing a zero/negative-width, invisible
-// viewer. resolveLyricsViewerColumnBounds must catch that and fall back
-// to the Queue table's own edges instead.
+// and Duration (or even the left boundary) isn't actually painted this
+// frame, GetLastPosition() returns a stale or zero x -- previously fed
+// straight into lyricsViewerRect, producing a zero/negative-width,
+// invisible viewer. resolveLyricsViewerColumnBounds must catch that and
+// fall back to the Queue table's own edges instead.
 func TestResolveLyricsViewerColumnBoundsFallsBackWhenColumnsOffscreen(t *testing.T) {
 	const qx, qw = 10, 100 // Queue table spans x in [10, 110]
 	cases := []struct {
 		name                string
-		yearX, durationX    int
-		wantYearX, wantDurX int
+		leftX, durationX    int
+		wantLeftX, wantDurX int
 	}{
 		{"both on screen, unchanged", 20, 90, 20, 90},
 		{
 			"durationX zero (never drawn, e.g. right after startup)",
 			20, 0,
-			20, qx + qw,
+			20, qx + qw - 1,
 		},
 		{
 			"durationX stale from a wider frame, now past the table's right edge",
 			20, 500,
-			20, qx + qw,
+			20, qx + qw - 1,
 		},
 		{
-			"durationX before yearX (nonsensical, however it happened)",
+			"durationX before leftX (nonsensical, however it happened)",
 			60, 30,
-			60, qx + qw,
+			60, qx + qw - 1,
 		},
 		{
-			"yearX itself offscreen too (even more extreme overflow)",
+			"leftX itself offscreen too (even more extreme overflow)",
 			0, 0,
-			qx, qx + qw,
+			qx, qx + qw - 1,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			gotYearX, gotDurX := resolveLyricsViewerColumnBounds(qx, qw, tc.yearX, tc.durationX)
-			if gotYearX != tc.wantYearX || gotDurX != tc.wantDurX {
+			gotLeftX, gotDurX := resolveLyricsViewerColumnBounds(qx, qw, tc.leftX, tc.durationX)
+			if gotLeftX != tc.wantLeftX || gotDurX != tc.wantDurX {
 				t.Errorf("resolveLyricsViewerColumnBounds(%d,%d,%d,%d) = (%d,%d), want (%d,%d)",
-					qx, qw, tc.yearX, tc.durationX, gotYearX, gotDurX, tc.wantYearX, tc.wantDurX)
+					qx, qw, tc.leftX, tc.durationX, gotLeftX, gotDurX, tc.wantLeftX, tc.wantDurX)
 			}
 			// Whatever comes out must always describe a non-negative-width
 			// band -- the entire point of the fallback.
-			if gotDurX < gotYearX {
-				t.Errorf("resolveLyricsViewerColumnBounds(%d,%d,%d,%d) = (%d,%d), durationX < yearX would give lyricsViewerRect a negative width",
-					qx, qw, tc.yearX, tc.durationX, gotYearX, gotDurX)
+			if gotDurX < gotLeftX {
+				t.Errorf("resolveLyricsViewerColumnBounds(%d,%d,%d,%d) = (%d,%d), durationX < leftX would give lyricsViewerRect a negative width",
+					qx, qw, tc.leftX, tc.durationX, gotLeftX, gotDurX)
 			}
 		})
 	}

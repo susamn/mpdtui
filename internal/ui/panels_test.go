@@ -12,7 +12,7 @@ import (
 
 // TestLyricsViewerPositionsOverTheQueueColumns covers Draw's
 // reposition-from-a-sibling pass: the viewer sits over the Queue's
-// Year-through-Type band, recomputed every frame so it follows a
+// Artist-through-Type band, recomputed every frame so it follows a
 // resize.
 func TestLyricsViewerPositionsOverTheQueueColumns(t *testing.T) {
 	f := &fakeMPD{}
@@ -31,21 +31,25 @@ func TestLyricsViewerPositionsOverTheQueueColumns(t *testing.T) {
 	defer screen.Fini()
 	screen.SetSize(150, 40)
 
+	a.queue.table.Draw(screen)
 	a.lyricsViewer.Draw(screen)
 
 	x, _, w, h := a.lyricsViewer.GetRect()
 	qx, _, qw, _ := a.queue.table.GetRect()
+	artistX, _, _ := a.queue.table.GetCell(0, a.queue.cols.artist).GetLastPosition()
 	if w <= 0 || h <= 0 {
 		t.Fatalf("viewer has no size after Draw: %dx%d", w, h)
+	}
+	if x != artistX {
+		t.Errorf("viewer starts at %d, want the Artist column at %d", x, artistX)
 	}
 	if x < qx || x+w > qx+qw {
 		t.Errorf("viewer spans %d..%d, want it inside the Queue's %d..%d", x, x+w, qx, qx+qw)
 	}
 }
 
-// TestLyricsViewerPositionsInCompactLayout covers the other branch: with
-// no Year column (a narrow terminal, or metadata off) the viewer takes
-// the right half of the Queue instead.
+// TestLyricsViewerPositionsInCompactLayout covers the same rule in a
+// narrower layout: the viewer still starts at the pinned Artist column.
 func TestLyricsViewerPositionsInCompactLayout(t *testing.T) {
 	f := &fakeMPD{}
 	a := newFakeApp(t, f) // no metaDB, so no Year/Plays/Mark/Rating columns
@@ -63,15 +67,16 @@ func TestLyricsViewerPositionsInCompactLayout(t *testing.T) {
 	defer screen.Fini()
 	screen.SetSize(60, 20)
 
+	a.queue.table.Draw(screen)
 	a.lyricsViewer.Draw(screen)
 
 	x, _, w, _ := a.lyricsViewer.GetRect()
-	qx, _, qw, _ := a.queue.table.GetRect()
+	artistX, _, _ := a.queue.table.GetCell(0, a.queue.cols.artist).GetLastPosition()
 	if w <= 0 {
 		t.Fatal("viewer has no width in the compact layout")
 	}
-	if x < qx+qw/2-2 {
-		t.Errorf("viewer starts at %d, want it over the right half of the Queue (from about %d)", x, qx+qw/2)
+	if x != artistX {
+		t.Errorf("viewer starts at %d, want the Artist column at %d", x, artistX)
 	}
 }
 
