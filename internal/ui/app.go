@@ -63,6 +63,7 @@ type App struct {
 	// distinct from a track being in no playlist: the card says so rather
 	// than claiming an empty answer it does not have. Main-goroutine-only.
 	playlistMembership map[string][]string
+	songCache          map[string]string
 
 	// metaDB is the local track-metadata database (play count, rating,
 	// mark, tags -- see internal/metadata), opened by cmd/mpdtui's main.go
@@ -967,6 +968,7 @@ var globalHints = []hint{
 	{"i", "info"},
 	{"y", "lyrics"},
 	{"b", "bookmark"},
+	{"u", "group"},
 	{"v", "visualizer"},
 	{"L", "locate"},
 	{"?", "help"},
@@ -1026,6 +1028,40 @@ func (a *App) addAndPlay(song mpdclient.Song) {
 	}
 	a.queue.refresh()
 	a.refreshNowPlaying()
+}
+
+// trackDisplayName returns the presentation name for file, looking first
+// at the currently playing song, then the Queue, then any cached songs,
+// falling back to the filename if uncataloged.
+func (a *App) trackDisplayName(file string) string {
+	if a.currentSong.File == file && a.currentSong.DisplayName() != "" {
+		return a.currentSong.DisplayName()
+	}
+	if a.queue != nil {
+		for _, s := range a.queue.songs {
+			if s.File == file && s.DisplayName() != "" {
+				return s.DisplayName()
+			}
+		}
+	}
+	if a.songCache != nil {
+		if name, ok := a.songCache[file]; ok && name != "" {
+			return name
+		}
+	}
+	return baseName(file)
+}
+
+// cacheSongs records display names for known tracks to avoid redundant fetches.
+func (a *App) cacheSongs(songs []mpdclient.Song) {
+	if a.songCache == nil {
+		a.songCache = make(map[string]string, len(songs))
+	}
+	for _, s := range songs {
+		if s.File != "" {
+			a.songCache[s.File] = s.DisplayName()
+		}
+	}
 }
 
 // queueAddPath adds path to the queue without playing it. path may be a

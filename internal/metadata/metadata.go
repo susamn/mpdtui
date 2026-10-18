@@ -78,6 +78,18 @@ CREATE TABLE IF NOT EXISTS bookmarks (
 	updated_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_bookmarks_track_id ON bookmarks(track_id);
+CREATE TABLE IF NOT EXISTS song_groups (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	title      TEXT NOT NULL DEFAULT '',
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS song_group_tracks (
+	group_id INTEGER NOT NULL REFERENCES song_groups(id) ON DELETE CASCADE,
+	track_id INTEGER NOT NULL UNIQUE REFERENCES tracks(id) ON DELETE CASCADE,
+	PRIMARY KEY (group_id, track_id)
+);
+CREATE INDEX IF NOT EXISTS idx_group_tracks_group_id ON song_group_tracks(group_id);
+CREATE INDEX IF NOT EXISTS idx_group_tracks_track_id ON song_group_tracks(track_id);
 `
 
 // migrateMarksToJoinTable moves a database created before marks became
@@ -284,6 +296,7 @@ type Track struct {
 	Marks          []MarkReason
 	Tags           []Tag
 	Bookmarks      []Bookmark
+	HasGroup       bool
 }
 
 // normalizePath folds file for use as the stable database key: each path
@@ -363,6 +376,13 @@ func (db *DB) Get(file string) (Track, error) {
 		return Track{}, err
 	}
 	t.Bookmarks = bookmarks
+
+	var dummy int
+	err = db.sql.QueryRow(`SELECT 1 FROM song_group_tracks WHERE track_id = ?`, id).Scan(&dummy)
+	if err == nil {
+		t.HasGroup = true
+	}
+
 	return t, nil
 }
 
@@ -890,4 +910,182 @@ func parseTimestamp(val any) (time.Time, error) {
 	default:
 		return time.Time{}, fmt.Errorf("unexpected timestamp type: %T", val)
 	}
+}
+
+// GroupTracks links fileA and fileB as similar recordings of the same song.
+// If neither is grouped, a new group is created.
+// If one is grouped, the other is added to that group.
+// If both are in different groups, the groups are merged.
+// If both are in the same group, it is a no-op.
+// Returns an error if fileA and fileB normalize to the same track.
+func (db *DB) GroupTracks(fileA, fileB string) error {
+	normA := normalizePath(fileA)
+	normB := normalizePath(fileB)
+	if normA == normB {
+		return errors.New("cannot group track with itself")
+	}
+
+	idA, err := db.upsertTrack(fileA)
+	if err != nil {
+		return err
+	}
+	idB, err := db.upsertTrack(fileB)
+	if err != nil {
+		return err
+	}
+
+	tx, err := db.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var groupA, groupB sql.NullInt64
+	err = tx.QueryRow(`SELECT group_id FROM song_group_tracks WHERE track_id = ?`, idA).Scan(&groupA)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	err = tx.QueryRow(`SELECT group_id FROM song_group_tracks WHERE track_id = ?`, idB).Scan(&groupB)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+
+	switch {
+	case !groupA.Valid && !groupB.Valid:
+		res, err := tx.Exec(`INSERT INTO song_groups (title) VALUES ('')`)
+		if err != nil {
+			return err
+		}
+		groupID, err := res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO song_group_tracks (group_id, track_id) VALUES (?, ?), (?, ?)`, groupID, idA, groupID, idB); err != nil {
+			return err
+		}
+
+	case groupA.Valid && !groupB.Valid:
+		if _, err := tx.Exec(`INSERT INTO song_group_tracks (group_id, track_id) VALUES (?, ?)`, groupA.Int64, idB); err != nil {
+			return err
+		}
+
+	case !groupA.Valid && groupB.Valid:
+		if _, err := tx.Exec(`INSERT INTO song_group_tracks (group_id, track_id) VALUES (?, ?)`, groupB.Int64, idA); err != nil {
+			return err
+		}
+
+	case groupA.Valid && groupB.Valid:
+		if groupA.Int64 == groupB.Int64 {
+			return tx.Commit()
+		}
+		// Merge: point all tracks in groupB to groupA, then remove groupB
+		if _, err := tx.Exec(`UPDATE song_group_tracks SET group_id = ? WHERE group_id = ?`, groupA.Int64, groupB.Int64); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM song_groups WHERE id = ?`, groupB.Int64); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// GetSimilarTracks returns all other tracks grouped with file.
+// If file is not in any group or the group only contains file, it returns nil, nil.
+func (db *DB) GetSimilarTracks(file string) ([]Track, error) {
+	norm := normalizePath(file)
+	rows, err := db.sql.Query(`
+		SELECT t.id, t.normalized_path, t.real_path, t.play_count, t.rating
+		FROM tracks cur
+		JOIN song_group_tracks cur_m ON cur_m.track_id = cur.id
+		JOIN song_group_tracks sib_m ON sib_m.group_id = cur_m.group_id
+		JOIN tracks t ON t.id = sib_m.track_id
+		WHERE cur.normalized_path = ? AND t.id != cur.id
+		ORDER BY t.real_path ASC
+	`, norm)
+	if err != nil {
+		return nil, err
+	}
+
+	type rowItem struct {
+		id int64
+		t  Track
+	}
+	var items []rowItem
+	for rows.Next() {
+		var item rowItem
+		if err := rows.Scan(&item.id, &item.t.NormalizedPath, &item.t.RealPath, &item.t.PlayCount, &item.t.Rating); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	out := make([]Track, len(items))
+	for i, item := range items {
+		out[i] = item.t
+		marks, err := db.marksForTrack(item.id)
+		if err != nil {
+			return nil, err
+		}
+		out[i].Marks = marks
+		tags, err := db.tagsForTrack(item.id)
+		if err != nil {
+			return nil, err
+		}
+		out[i].Tags = tags
+	}
+	return out, nil
+}
+
+// UnlinkFromGroup removes file from any song group it belongs to.
+// If the remaining group has fewer than 2 tracks, the group is cleaned up.
+func (db *DB) UnlinkFromGroup(file string) error {
+	norm := normalizePath(file)
+	var trackID int64
+	err := db.sql.QueryRow(`SELECT id FROM tracks WHERE normalized_path = ?`, norm).Scan(&trackID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	var groupID int64
+	err = db.sql.QueryRow(`SELECT group_id FROM song_group_tracks WHERE track_id = ?`, trackID).Scan(&groupID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	tx, err := db.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM song_group_tracks WHERE track_id = ?`, trackID); err != nil {
+		return err
+	}
+
+	var remaining int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM song_group_tracks WHERE group_id = ?`, groupID).Scan(&remaining); err != nil {
+		return err
+	}
+
+	if remaining <= 1 {
+		if _, err := tx.Exec(`DELETE FROM song_group_tracks WHERE group_id = ?`, groupID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM song_groups WHERE id = ?`, groupID); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
