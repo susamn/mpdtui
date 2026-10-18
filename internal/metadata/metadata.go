@@ -296,6 +296,7 @@ type Track struct {
 	Marks          []MarkReason
 	Tags           []Tag
 	Bookmarks      []Bookmark
+	HasGroup       bool
 }
 
 // normalizePath folds file for use as the stable database key: each path
@@ -375,6 +376,13 @@ func (db *DB) Get(file string) (Track, error) {
 		return Track{}, err
 	}
 	t.Bookmarks = bookmarks
+
+	var dummy int
+	err = db.sql.QueryRow(`SELECT 1 FROM song_group_tracks WHERE track_id = ?`, id).Scan(&dummy)
+	if err == nil {
+		t.HasGroup = true
+	}
+
 	return t, nil
 }
 

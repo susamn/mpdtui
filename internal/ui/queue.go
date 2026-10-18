@@ -495,6 +495,9 @@ func (q *queuePanel) render(curID int) {
 			title = baseName(s.File)
 		}
 		titleText := cellText(title, titleMaxLen)
+		if q.metaCache[s.File].HasGroup {
+			titleText += " 👥"
+		}
 		q.table.SetCell(row, 0, queueGutterCell(s.ID == curID, q.metaCache[s.File].Rating))
 		q.table.SetCell(row, 1, tview.NewTableCell(fmt.Sprintf("%3d", i+1)))
 		q.table.SetCell(row, cols.title, tview.NewTableCell(titleText+queueColumnGap).
@@ -589,11 +592,23 @@ func (q *queuePanel) refreshTrackMeta(seq int) {
 // once (same track added twice) updates every matching row.
 func (q *queuePanel) applyTrackMeta(file string, t metadata.Track) {
 	q.metaCache[file] = t
+	titleMaxLen, _, _ := queueColumnTruncation(q.lastRenderedWidth)
 	for i, s := range q.songs {
 		if s.File != file {
 			continue
 		}
 		row := i + queueHeaderRows
+		title := s.Title
+		if title == "" {
+			title = baseName(s.File)
+		}
+		titleText := cellText(title, titleMaxLen)
+		if t.HasGroup {
+			titleText += " 👥"
+		}
+		q.table.SetCell(row, q.cols.title, tview.NewTableCell(titleText+queueColumnGap).
+			SetAttributes(tcell.AttrBold).
+			SetTextColor(queueTitleColor))
 		// The gutter star is repainted unconditionally: unlike the
 		// metadata columns it survives every layout, so a narrow
 		// terminal that has dropped the Rating column still shows it.

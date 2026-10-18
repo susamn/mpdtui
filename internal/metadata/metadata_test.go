@@ -642,3 +642,45 @@ func TestUnlinkFromGroup(t *testing.T) {
 		t.Fatalf("GetSimilarTracks(A) after C unlinked = %d, want 0", len(similarA))
 	}
 }
+
+func TestTrackHasGroupFlag(t *testing.T) {
+	db := openTestDB(t)
+
+	tA, err := db.Get("artistA/song.mp3")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if tA.HasGroup {
+		t.Fatal("expected HasGroup to be false initially")
+	}
+
+	if err := db.GroupTracks("artistA/song.mp3", "artistB/song.mp3"); err != nil {
+		t.Fatalf("GroupTracks: %v", err)
+	}
+
+	tA, err = db.Get("artistA/song.mp3")
+	if err != nil {
+		t.Fatalf("Get(A): %v", err)
+	}
+	if !tA.HasGroup {
+		t.Fatal("expected HasGroup to be true after grouping")
+	}
+
+	tB, err := db.Get("artistB/song.mp3")
+	if err != nil {
+		t.Fatalf("Get(B): %v", err)
+	}
+	if !tB.HasGroup {
+		t.Fatal("expected HasGroup to be true for B after grouping")
+	}
+
+	if err := db.UnlinkFromGroup("artistB/song.mp3"); err != nil {
+		t.Fatalf("UnlinkFromGroup: %v", err)
+	}
+
+	tA, _ = db.Get("artistA/song.mp3")
+	tB, _ = db.Get("artistB/song.mp3")
+	if tA.HasGroup || tB.HasGroup {
+		t.Fatalf("expected HasGroup to be false after group dissolved, got A=%v, B=%v", tA.HasGroup, tB.HasGroup)
+	}
+}

@@ -189,6 +189,10 @@ func (a *App) openTrackGroupingPicker() {
 			a.showError(err)
 			return
 		}
+		if a.queue != nil {
+			a.queue.metaSeq++
+			a.queue.refreshTrackMeta(a.queue.metaSeq)
+		}
 		a.showMessage("grouped \"" + target.DisplayName() + "\" with \"" + a.currentSong.DisplayName() + "\"")
 	}
 
@@ -399,6 +403,10 @@ func (a *App) openSimilarTracksPicker() {
 					if err := a.metaDB.UnlinkFromGroup(target.File); err != nil {
 						a.showError(err)
 						return nil
+					}
+					if a.queue != nil {
+						a.queue.metaSeq++
+						a.queue.refreshTrackMeta(a.queue.metaSeq)
 					}
 					// Refresh list
 					similar, _ = a.metaDB.GetSimilarTracks(currentFile)

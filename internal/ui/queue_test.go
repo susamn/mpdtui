@@ -899,3 +899,40 @@ func TestQueueRefreshStatsShowsLibraryTotals(t *testing.T) {
 		}
 	}
 }
+
+func TestQueueTitleShowsGroupIcon(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	a.queue.table.SetRect(0, 0, 120, 44)
+	a.queue.songs = []mpdclient.Song{
+		{ID: 1, File: "songA.mp3", Title: "Song A"},
+		{ID: 2, File: "songB.mp3", Title: "Song B"},
+	}
+
+	// Before grouping:
+	a.queue.render(-1)
+	cellA := a.queue.table.GetCell(queueHeaderRows, a.queue.cols.title).Text
+	if strings.Contains(cellA, "👥") {
+		t.Fatalf("cell A before grouping = %q, should not contain 👥", cellA)
+	}
+
+	// Group songA and songB in DB
+	if err := a.metaDB.GroupTracks("songA.mp3", "songB.mp3"); err != nil {
+		t.Fatalf("GroupTracks: %v", err)
+	}
+
+	// Update metaCache and apply
+	tA, _ := a.metaDB.Get("songA.mp3")
+	tB, _ := a.metaDB.Get("songB.mp3")
+	a.queue.applyTrackMeta("songA.mp3", tA)
+	a.queue.applyTrackMeta("songB.mp3", tB)
+
+	cellA = a.queue.table.GetCell(queueHeaderRows, a.queue.cols.title).Text
+	cellB := a.queue.table.GetCell(queueHeaderRows+1, a.queue.cols.title).Text
+
+	if !strings.Contains(cellA, "Song A 👥") {
+		t.Fatalf("cell A after grouping = %q, want 'Song A 👥'", cellA)
+	}
+	if !strings.Contains(cellB, "Song B 👥") {
+		t.Fatalf("cell B after grouping = %q, want 'Song B 👥'", cellB)
+	}
+}
