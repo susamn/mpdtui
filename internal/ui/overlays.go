@@ -288,6 +288,8 @@ const helpText = `[::b]Global[-:-:-]
   B              bookmark manager for the playing or selected track --
                  browse bookmarks, Enter to jump/seek, 'a' to add,
                  'e' to edit note, 'd' to delete (y/n to confirm), Esc/B to close
+  u              group a similar track (fuzzy search) with the playing track
+  U              view and play similar recordings / versions of the playing track
   e              settings: Config tab (read-only: MPD host/port,
                  music_dir, track_metadata status) and Database tab --
                  browse the mark_reason/tags catalog tables (when

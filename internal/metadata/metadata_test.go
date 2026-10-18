@@ -518,3 +518,127 @@ func TestOpenIsIdempotentAcrossReopens(t *testing.T) {
 		t.Error("a row added before the reopen is gone afterwards")
 	}
 }
+
+func TestGroupTracksSelfError(t *testing.T) {
+	db := openTestDB(t)
+	if err := db.GroupTracks("artist/song.mp3", "artist/song.mp3"); err == nil {
+		t.Fatal("expected error grouping track with itself, got nil")
+	}
+}
+
+func TestGroupTracksAndGetSimilar(t *testing.T) {
+	db := openTestDB(t)
+
+	// Group A and B
+	if err := db.GroupTracks("artistA/song.mp3", "artistB/song.mp3"); err != nil {
+		t.Fatalf("GroupTracks: %v", err)
+	}
+
+	similarA, err := db.GetSimilarTracks("artistA/song.mp3")
+	if err != nil {
+		t.Fatalf("GetSimilarTracks(A): %v", err)
+	}
+	if len(similarA) != 1 || similarA[0].RealPath != "artistB/song.mp3" {
+		t.Fatalf("GetSimilarTracks(A) = %+v, want artistB/song.mp3", similarA)
+	}
+
+	similarB, err := db.GetSimilarTracks("artistB/song.mp3")
+	if err != nil {
+		t.Fatalf("GetSimilarTracks(B): %v", err)
+	}
+	if len(similarB) != 1 || similarB[0].RealPath != "artistA/song.mp3" {
+		t.Fatalf("GetSimilarTracks(B) = %+v, want artistA/song.mp3", similarB)
+	}
+
+	// Add C to the group via B
+	if err := db.GroupTracks("artistB/song.mp3", "artistC/song.mp3"); err != nil {
+		t.Fatalf("GroupTracks(B, C): %v", err)
+	}
+
+	similarA, err = db.GetSimilarTracks("artistA/song.mp3")
+	if err != nil {
+		t.Fatalf("GetSimilarTracks(A): %v", err)
+	}
+	if len(similarA) != 2 {
+		t.Fatalf("GetSimilarTracks(A) len = %d, want 2", len(similarA))
+	}
+
+	// Re-grouping A and B should be idempotent
+	if err := db.GroupTracks("artistA/song.mp3", "artistB/song.mp3"); err != nil {
+		t.Fatalf("GroupTracks re-run: %v", err)
+	}
+}
+
+func TestGroupTracksMerge(t *testing.T) {
+	db := openTestDB(t)
+
+	// Group 1: A and B
+	if err := db.GroupTracks("artistA/song.mp3", "artistB/song.mp3"); err != nil {
+		t.Fatalf("GroupTracks(A, B): %v", err)
+	}
+	// Group 2: C and D
+	if err := db.GroupTracks("artistC/song.mp3", "artistD/song.mp3"); err != nil {
+		t.Fatalf("GroupTracks(C, D): %v", err)
+	}
+
+	// Merge groups by grouping B and C
+	if err := db.GroupTracks("artistB/song.mp3", "artistC/song.mp3"); err != nil {
+		t.Fatalf("GroupTracks(B, C): %v", err)
+	}
+
+	// All 4 should now see the other 3
+	for _, track := range []string{"artistA/song.mp3", "artistB/song.mp3", "artistC/song.mp3", "artistD/song.mp3"} {
+		similar, err := db.GetSimilarTracks(track)
+		if err != nil {
+			t.Fatalf("GetSimilarTracks(%s): %v", track, err)
+		}
+		if len(similar) != 3 {
+			t.Fatalf("GetSimilarTracks(%s) count = %d, want 3", track, len(similar))
+		}
+	}
+}
+
+func TestUnlinkFromGroup(t *testing.T) {
+	db := openTestDB(t)
+
+	if err := db.GroupTracks("artistA/song.mp3", "artistB/song.mp3"); err != nil {
+		t.Fatalf("GroupTracks(A, B): %v", err)
+	}
+	if err := db.GroupTracks("artistA/song.mp3", "artistC/song.mp3"); err != nil {
+		t.Fatalf("GroupTracks(A, C): %v", err)
+	}
+
+	// Unlink B
+	if err := db.UnlinkFromGroup("artistB/song.mp3"); err != nil {
+		t.Fatalf("UnlinkFromGroup(B): %v", err)
+	}
+
+	similarB, err := db.GetSimilarTracks("artistB/song.mp3")
+	if err != nil {
+		t.Fatalf("GetSimilarTracks(B): %v", err)
+	}
+	if len(similarB) != 0 {
+		t.Fatalf("GetSimilarTracks(B) after unlink = %d, want 0", len(similarB))
+	}
+
+	similarA, err := db.GetSimilarTracks("artistA/song.mp3")
+	if err != nil {
+		t.Fatalf("GetSimilarTracks(A): %v", err)
+	}
+	if len(similarA) != 1 || similarA[0].RealPath != "artistC/song.mp3" {
+		t.Fatalf("GetSimilarTracks(A) = %+v, want only C", similarA)
+	}
+
+	// Unlink C: leaves only A (<= 1 track), so group should dissolve
+	if err := db.UnlinkFromGroup("artistC/song.mp3"); err != nil {
+		t.Fatalf("UnlinkFromGroup(C): %v", err)
+	}
+
+	similarA, err = db.GetSimilarTracks("artistA/song.mp3")
+	if err != nil {
+		t.Fatalf("GetSimilarTracks(A): %v", err)
+	}
+	if len(similarA) != 0 {
+		t.Fatalf("GetSimilarTracks(A) after C unlinked = %d, want 0", len(similarA))
+	}
+}

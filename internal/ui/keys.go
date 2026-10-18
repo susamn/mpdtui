@@ -219,6 +219,12 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 		case 'B':
 			a.handleOpenBookmarkManager()
 			return nil
+		case 'u':
+			a.handleGroupTrack()
+			return nil
+		case 'U':
+			a.handlePlaySimilarTrack()
+			return nil
 		case '?':
 			a.openHelp()
 			return nil

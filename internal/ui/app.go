@@ -967,6 +967,7 @@ var globalHints = []hint{
 	{"i", "info"},
 	{"y", "lyrics"},
 	{"b", "bookmark"},
+	{"u", "group"},
 	{"v", "visualizer"},
 	{"L", "locate"},
 	{"?", "help"},
