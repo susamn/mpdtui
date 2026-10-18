@@ -768,3 +768,74 @@ func TestQueueIndexOfPrefersID(t *testing.T) {
 		t.Errorf("indexOf(absent) = %d, want -1", got)
 	}
 }
+
+func TestTrackInfoCardSimilarTracks(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	song := mpdclient.Song{File: "queen/yesterday.mp3", Artist: "Queen", Title: "Yesterday"}
+	a.currentSong = song
+
+	a.cacheSongs([]mpdclient.Song{
+		{File: "beatles/yesterday.mp3", Artist: "Beatles", Title: "Yesterday"},
+		{File: "acoustic/yesterday.mp3", Artist: "Acoustic", Title: "Yesterday"},
+	})
+
+	// When empty:
+	a.trackInfo.render(song, mpdclient.Status{})
+	text := a.trackInfo.similarTracks.GetText(false)
+	if !strings.Contains(text, "none") {
+		t.Errorf("similar tracks when none = %q, want 'none'", text)
+	}
+
+	// Group with 2 other tracks
+	if err := a.metaDB.GroupTracks("queen/yesterday.mp3", "beatles/yesterday.mp3"); err != nil {
+		t.Fatalf("GroupTracks: %v", err)
+	}
+	if err := a.metaDB.GroupTracks("queen/yesterday.mp3", "acoustic/yesterday.mp3"); err != nil {
+		t.Fatalf("GroupTracks: %v", err)
+	}
+
+	a.trackInfo.render(song, mpdclient.Status{})
+	text = a.trackInfo.similarTracks.GetText(false)
+	if !strings.Contains(text, "Beatles - Yesterday") || !strings.Contains(text, "Acoustic - Yesterday") {
+		t.Errorf("similar tracks = %q, want Beatles - Yesterday and Acoustic - Yesterday", text)
+	}
+}
+
+func TestTrackInfoCardSimilarTracksExpandTab(t *testing.T) {
+	a := newTestAppWithMetaDB(t)
+	song := mpdclient.Song{File: "s0.mp3", Title: "Base"}
+	a.currentStatus = mpdclient.Status{State: mpdclient.StatePlay}
+	a.currentSong = song
+
+	// Group 4 tracks with s0 (more than the 3 collapsed line limit)
+	for _, f := range []string{"s1.mp3", "s2.mp3", "s3.mp3", "s4.mp3"} {
+		if err := a.metaDB.GroupTracks("s0.mp3", f); err != nil {
+			t.Fatalf("GroupTracks: %v", err)
+		}
+	}
+
+	a.trackInfo.render(song, mpdclient.Status{})
+	collapsedText := a.trackInfo.similarTracks.GetText(false)
+	if !strings.Contains(collapsedText, "+1 more (Tab)") {
+		t.Errorf("collapsed text = %q, want '+1 more (Tab)'", collapsedText)
+	}
+
+	// Expand with Tab
+	a.trackInfo.toggleExpanded()
+	expandedText := a.trackInfo.similarTracks.GetText(false)
+	if strings.Contains(expandedText, "+1 more") {
+		t.Errorf("expanded text = %q, should not contain '+1 more'", expandedText)
+	}
+	for _, f := range []string{"s1.mp3", "s2.mp3", "s3.mp3", "s4.mp3"} {
+		if !strings.Contains(expandedText, f) {
+			t.Errorf("expanded text missing %s", f)
+		}
+	}
+
+	// Collapse back
+	a.trackInfo.toggleExpanded()
+	recollapsedText := a.trackInfo.similarTracks.GetText(false)
+	if !strings.Contains(recollapsedText, "+1 more (Tab)") {
+		t.Errorf("recollapsed text = %q, want '+1 more (Tab)'", recollapsedText)
+	}
+}

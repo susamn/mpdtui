@@ -155,7 +155,7 @@ func TestTrackInfoCardShrinksToEmptySections(t *testing.T) {
 	a.trackInfo.render(testSong(), mpdclient.Status{})
 
 	reserved := trackInfoCardBorderLines + trackInfoIdentityLines + trackInfoPlaylistSectionLines +
-		trackInfoMetaLines + trackInfoMarkSectionLines + trackInfoTagSectionLines + trackInfoBookmarkSectionLines
+		trackInfoMetaLines + trackInfoMarkSectionLines + trackInfoTagSectionLines + trackInfoBookmarkSectionLines + trackInfoSimilarSectionLines
 	if got := a.trackInfo.height(); got >= reserved {
 		t.Errorf("card with no marks, tags, bookmarks or playlists is %d rows, no shorter than the %d it used to reserve", got, reserved)
 	}

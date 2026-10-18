@@ -2,11 +2,13 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"mpdtui/internal/mpdclient"
+	"mpdtui/internal/textutil"
 	"mpdtui/internal/uitheme"
 )
 
@@ -39,12 +41,40 @@ func (h *trackGroupHints) move(delta int) {
 	h.highlight = moveHintHighlight(h.highlight, len(h.order), delta)
 }
 
+func (h *trackGroupHints) jumpFirst() {
+	if len(h.order) > 0 {
+		h.highlight = 0
+	}
+}
+
+func (h *trackGroupHints) jumpLast() {
+	if len(h.order) > 0 {
+		h.highlight = len(h.order) - 1
+	}
+}
+
 func (h *trackGroupHints) current() (mpdclient.Song, int) {
 	if h.highlight < 0 || h.highlight >= len(h.order) {
 		return mpdclient.Song{}, -1
 	}
 	idx := h.order[h.highlight]
 	return h.songs[idx], idx
+}
+
+func normalizeTrackPath(file string) string {
+	segments := strings.Split(file, "/")
+	for i, seg := range segments {
+		segments[i] = textutil.NormalizeSegment(seg)
+	}
+	return strings.Join(segments, "/")
+}
+
+func trackGroupItemLabel(label string, inGroup bool) string {
+	const pad = "  "
+	if inGroup {
+		return pad + "[green]✓[-]  " + label
+	}
+	return pad + "   " + label
 }
 
 // handleGroupTrack handles 'u': fuzzy search library tracks to group with currently playing track.
@@ -66,12 +96,23 @@ func (a *App) openTrackGroupingPicker() {
 		a.showError(err)
 		return
 	}
+	a.cacheSongs(all)
 
 	currentFile := a.currentSong.File
+	currentNorm := normalizeTrackPath(currentFile)
+
+	alreadyGrouped, _ := a.metaDB.GetSimilarTracks(currentFile)
+	groupedSet := make(map[string]bool, len(alreadyGrouped)*2)
+	for _, t := range alreadyGrouped {
+		groupedSet[t.RealPath] = true
+		groupedSet[t.NormalizedPath] = true
+		groupedSet[normalizeTrackPath(t.RealPath)] = true
+	}
+
 	var candidateSongs []mpdclient.Song
 	var candidateLabels []string
 	for _, s := range all {
-		if s.File == currentFile {
+		if s.File == currentFile || normalizeTrackPath(s.File) == currentNorm {
 			continue
 		}
 		candidateSongs = append(candidateSongs, s)
@@ -82,7 +123,7 @@ func (a *App) openTrackGroupingPicker() {
 		candidateLabels = append(candidateLabels, label)
 	}
 
-	field := tview.NewInputField().SetLabel("Search track: ").SetFieldWidth(40)
+	field := tview.NewInputField().SetLabel(" Search track: ").SetFieldWidth(40)
 	field.SetBorder(true).SetTitle(" Group similar track with: \"" + a.currentSong.DisplayName() + "\" ")
 
 	list := tview.NewList()
@@ -95,7 +136,7 @@ func (a *App) openTrackGroupingPicker() {
 	hints := &trackGroupHints{}
 
 	syncHighlight := func() {
-		if hints.highlight >= 0 {
+		if hints.highlight >= 0 && hints.highlight < list.GetItemCount() {
 			list.SetCurrentItem(hints.highlight)
 		}
 	}
@@ -104,7 +145,9 @@ func (a *App) openTrackGroupingPicker() {
 		hints.rebuild(field.GetText(), candidateSongs, candidateLabels)
 		list.Clear()
 		for _, idx := range hints.order {
-			list.AddItem(hints.labels[idx], "", 0, nil)
+			s := candidateSongs[idx]
+			inGroup := groupedSet[s.File] || groupedSet[normalizeTrackPath(s.File)]
+			list.AddItem(trackGroupItemLabel(hints.labels[idx], inGroup), "", 0, nil)
 		}
 		syncHighlight()
 		switch {
@@ -113,7 +156,7 @@ func (a *App) openTrackGroupingPicker() {
 		case hints.total == 0:
 			list.SetTitle(" no matching tracks ")
 		default:
-			list.SetTitle(fmt.Sprintf(" %d matching track(s) ", hints.total))
+			list.SetTitle(fmt.Sprintf(" %d matching track(s) (Tab: switch focus, Enter: group, Esc: close) ", hints.total))
 		}
 	}
 	field.SetChangedFunc(func(string) { renderList() })
@@ -131,8 +174,16 @@ func (a *App) openTrackGroupingPicker() {
 		a.showMessage("grouped \"" + target.DisplayName() + "\" with \"" + a.currentSong.DisplayName() + "\"")
 	}
 
-	focusList := func() { a.tv.SetFocus(list) }
-	focusField := func() { a.tv.SetFocus(field) }
+	focusList := func() {
+		field.SetBorderColor(uitheme.InactiveBorder()).SetTitleColor(uitheme.InactiveBorder())
+		list.SetBorderColor(uitheme.ActiveBorder()).SetTitleColor(uitheme.ActiveBorder())
+		a.tv.SetFocus(list)
+	}
+	focusField := func() {
+		list.SetBorderColor(uitheme.InactiveBorder()).SetTitleColor(uitheme.InactiveBorder())
+		field.SetBorderColor(uitheme.ActiveBorder()).SetTitleColor(uitheme.ActiveBorder())
+		a.tv.SetFocus(field)
+	}
 
 	field.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
@@ -180,6 +231,14 @@ func (a *App) openTrackGroupingPicker() {
 				hints.move(-1)
 				syncHighlight()
 				return nil
+			case 'g':
+				hints.jumpFirst()
+				syncHighlight()
+				return nil
+			case 'G':
+				hints.jumpLast()
+				syncHighlight()
+				return nil
 			case 'f':
 				focusField()
 				return nil
@@ -193,7 +252,9 @@ func (a *App) openTrackGroupingPicker() {
 		AddItem(field, 3, 0, true).
 		AddItem(list, 0, 1, false)
 
-	a.showOverlay("group-track", centered(layout, 70, 3+maxTrackGroupHints+2), field)
+	// Focus field initially and apply active yellow border
+	focusField()
+	a.showOverlay("group-track", centered(layout, 72, 3+maxTrackGroupHints+2), field)
 }
 
 // handlePlaySimilarTrack handles 'U': view and play similar recordings of currently playing track.
@@ -224,6 +285,7 @@ func (a *App) openSimilarTracksPicker() {
 	}
 
 	all, _ := a.client.AllSongs()
+	a.cacheSongs(all)
 	songByFile := make(map[string]mpdclient.Song, len(all))
 	for _, s := range all {
 		songByFile[s.File] = s
@@ -250,6 +312,7 @@ func (a *App) openSimilarTracksPicker() {
 	list.SetSelectedBackgroundColor(uitheme.SelectedBg())
 	list.SetBorder(true)
 	list.SetTitle(" Similar recordings of: \"" + currentName + "\" (Enter: play, d: unlink, Esc/U: close) ")
+	activateOverlayBorder(list)
 
 	populateList := func() {
 		list.Clear()
@@ -258,7 +321,7 @@ func (a *App) openSimilarTracksPicker() {
 			if s.Album != "" {
 				label += " [" + s.Album + "]"
 			}
-			list.AddItem(label, "", 0, nil)
+			list.AddItem("  "+label, "", 0, nil)
 		}
 	}
 	populateList()
@@ -272,12 +335,34 @@ func (a *App) openSimilarTracksPicker() {
 	})
 
 	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Key() == tcell.KeyEscape {
+		switch event.Key() {
+		case tcell.KeyEscape:
 			a.closeOverlay()
 			return nil
-		}
-		if event.Key() == tcell.KeyRune {
+		case tcell.KeyDown, tcell.KeyCtrlN:
+			list.SetCurrentItem(moveHintHighlight(list.GetCurrentItem(), list.GetItemCount(), 1))
+			return nil
+		case tcell.KeyUp, tcell.KeyCtrlP:
+			list.SetCurrentItem(moveHintHighlight(list.GetCurrentItem(), list.GetItemCount(), -1))
+			return nil
+		case tcell.KeyRune:
 			switch event.Rune() {
+			case 'j':
+				list.SetCurrentItem(moveHintHighlight(list.GetCurrentItem(), list.GetItemCount(), 1))
+				return nil
+			case 'k':
+				list.SetCurrentItem(moveHintHighlight(list.GetCurrentItem(), list.GetItemCount(), -1))
+				return nil
+			case 'g':
+				if list.GetItemCount() > 0 {
+					list.SetCurrentItem(0)
+				}
+				return nil
+			case 'G':
+				if n := list.GetItemCount(); n > 0 {
+					list.SetCurrentItem(n - 1)
+				}
+				return nil
 			case 'U':
 				a.closeOverlay()
 				return nil
@@ -317,5 +402,5 @@ func (a *App) openSimilarTracksPicker() {
 		height = 16
 	}
 
-	a.showOverlay("similar-tracks", centered(list, 70, height), list)
+	a.showOverlay("similar-tracks", centered(list, 72, height), list)
 }

@@ -35,9 +35,10 @@ type trackInfoCard struct {
 	// carry several of each and comma-joining them into a single table
 	// cell ran them off the edge of the card. Present only when meta is
 	// -- all three read the same local database.
-	marks     *tview.TextView
-	tags      *tview.TextView
-	bookmarks *tview.TextView
+	marks         *tview.TextView
+	tags          *tview.TextView
+	bookmarks     *tview.TextView
+	similarTracks *tview.TextView
 
 	// playlists lists the stored playlists containing this track. Always
 	// present, unlike meta: it needs no local database, only the playlist
@@ -65,11 +66,12 @@ type trackInfoCard struct {
 	// can report the card's real size after a section has grown or
 	// shrunk. Every one of them is the section's *actual* size, not the
 	// maximum it is allowed to reach.
-	identityRows int
-	markRows     int
-	tagRows      int
-	bookmarkRows int
-	playlistRows int
+	identityRows      int
+	markRows          int
+	tagRows           int
+	bookmarkRows      int
+	similarTracksRows int
+	playlistRows      int
 
 	// collapsedRows is contentHeight() as of the last render done while
 	// collapsed, and is what height() sizes the card to. Recorded rather
@@ -109,7 +111,10 @@ func newTrackInfoCard(app *App) *trackInfoCard {
 	bookmarks := tview.NewTextView().SetDynamicColors(true)
 	bookmarks.SetBorderPadding(1, 0, 1, 0)
 
-	c := &trackInfoCard{Box: box, flex: flex, identity: identity, marks: marks, tags: tags, bookmarks: bookmarks, playlists: playlists, app: app}
+	similarTracks := tview.NewTextView().SetDynamicColors(true)
+	similarTracks.SetBorderPadding(1, 0, 1, 0)
+
+	c := &trackInfoCard{Box: box, flex: flex, identity: identity, marks: marks, tags: tags, bookmarks: bookmarks, similarTracks: similarTracks, playlists: playlists, app: app}
 
 	// Fixed row counts, not proportions: every section here has a known
 	// maximum number of lines, so stretching them to fill the card just
@@ -130,6 +135,8 @@ func newTrackInfoCard(app *App) *trackInfoCard {
 		c.tagRows = trackInfoTagSectionLines
 		flex.AddItem(bookmarks, trackInfoBookmarkSectionLines, 0, false)
 		c.bookmarkRows = trackInfoBookmarkSectionLines
+		flex.AddItem(similarTracks, trackInfoSimilarSectionLines, 0, false)
+		c.similarTracksRows = trackInfoSimilarSectionLines
 	}
 	flex.AddItem(playlists, trackInfoPlaylistSectionLines, 0, false)
 	c.playlistRows = trackInfoPlaylistSectionLines
@@ -160,7 +167,7 @@ func (c *trackInfoCard) height() int {
 	}
 	h := trackInfoCardBorderLines + trackInfoIdentityLines + trackInfoPlaylistSectionLines
 	if c.meta != nil {
-		h += trackInfoMetaLines + trackInfoMarkSectionLines + trackInfoTagSectionLines + trackInfoBookmarkSectionLines
+		h += trackInfoMetaLines + trackInfoMarkSectionLines + trackInfoTagSectionLines + trackInfoBookmarkSectionLines + trackInfoSimilarSectionLines
 	}
 	return h
 }
@@ -185,7 +192,7 @@ func (c *trackInfoCard) toggleExpanded() {
 func (c *trackInfoCard) contentHeight() int {
 	h := c.identityRows + c.playlistRows
 	if c.meta != nil {
-		h += trackInfoMetaLines + c.markRows + c.tagRows + c.bookmarkRows
+		h += trackInfoMetaLines + c.markRows + c.tagRows + c.bookmarkRows + c.similarTracksRows
 	}
 	return h
 }
@@ -248,6 +255,7 @@ const (
 	trackInfoMarkSectionLines     = trackInfoMarkLines + 3
 	trackInfoTagSectionLines      = trackInfoTagLines + 3
 	trackInfoBookmarkSectionLines = trackInfoBookmarkLines + 3
+	trackInfoSimilarSectionLines  = trackInfoSimilarLines + 3
 	trackInfoPlaylistSectionLines = trackInfoPlaylistLines + 3
 
 	// trackInfoPlaylistLines is how many playlist names the card lists
@@ -263,6 +271,7 @@ const (
 	trackInfoMarkLines     = 3
 	trackInfoTagLines      = 3
 	trackInfoBookmarkLines = 3
+	trackInfoSimilarLines  = 3
 )
 
 // cardRect returns where the floating card sits over the Queue panel
@@ -483,11 +492,16 @@ func (c *trackInfoCard) render(song mpdclient.Song, st mpdclient.Status) {
 // Queue panel, so a track with thirty playlists must not starve its own
 // marks of every spare row (see shareGrowth).
 func (c *trackInfoCard) renderSections(file string, track metadata.Track) {
-	markMax, tagMax, bookmarkMax, playlistMax := trackInfoMarkLines, trackInfoTagLines, trackInfoBookmarkLines, trackInfoPlaylistLines
+	markMax, tagMax, bookmarkMax, similarMax, playlistMax := trackInfoMarkLines, trackInfoTagLines, trackInfoBookmarkLines, trackInfoSimilarLines, trackInfoPlaylistLines
+	var similar []metadata.Track
+	if c.meta != nil {
+		similar, _ = c.app.metaDB.GetSimilarTracks(file)
+	}
 	if c.expanded {
 		markMax = len(track.Marks)
 		tagMax = len(track.Tags)
 		bookmarkMax = len(track.Bookmarks)
+		similarMax = len(similar)
 		if membership := c.app.playlistMembership[file]; membership != nil {
 			playlistMax = len(membership)
 		} else {
@@ -510,6 +524,11 @@ func (c *trackInfoCard) renderSections(file string, track metadata.Track) {
 		c.bookmarkRows = rows
 		c.bookmarks.SetText(text)
 		c.flex.ResizeItem(c.bookmarks, rows, 0)
+
+		text, rows = similarTracksSection(c.app, similar, similarMax)
+		c.similarTracksRows = rows
+		c.similarTracks.SetText(text)
+		c.flex.ResizeItem(c.similarTracks, rows, 0)
 	}
 	text, rows := playlistsSection(c.app.playlistMembership, file, playlistMax)
 	c.setPlaylistSection(text, rows)
@@ -626,6 +645,19 @@ func bookmarksSection(bookmarks []metadata.Bookmark, max int) (string, int) {
 		pos := FormatDuration(time.Duration(bm.PositionSeconds * float64(time.Second)))
 		items[i] = fmt.Sprintf("  • [%s] %s", pos,
 			splitConjuncts(truncateWithEllipsis(bm.Text, trackInfoPlaylistNameMaxLen)))
+	}
+	return listSectionText(heading, items, max)
+}
+
+func similarTracksSection(app *App, similar []metadata.Track, max int) (string, int) {
+	heading := "[::b]👥 Similar tracks[-:-:-]"
+	if len(similar) == 0 {
+		return heading + "\n[::d]  none[-:-:-]", 2
+	}
+	items := make([]string, len(similar))
+	for i, t := range similar {
+		name := app.trackDisplayName(t.RealPath)
+		items[i] = "  • " + splitConjuncts(truncateWithEllipsis(name, trackInfoPlaylistNameMaxLen))
 	}
 	return listSectionText(heading, items, max)
 }
