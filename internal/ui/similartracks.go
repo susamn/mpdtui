@@ -77,6 +77,24 @@ func trackGroupItemLabel(label string, inGroup bool) string {
 	return pad + "   " + label
 }
 
+func similarTrackStarPrefix(rating int) string {
+	const pad = "  "
+	if rating >= queueGutterStarMin {
+		color := queueStarColor(rating)
+		if color == 0 || color == tcell.ColorDefault {
+			if rating >= 5 {
+				color = tcell.GetColor("#ffd700")
+			} else {
+				color = tcell.GetColor("#8a7300")
+			}
+		}
+		r, g, b := color.RGB()
+		tag := fmt.Sprintf("#%02x%02x%02x", r, g, b)
+		return fmt.Sprintf("%s[%s]%s[-] ", pad, tag, ratingStarFilled)
+	}
+	return pad + "  "
+}
+
 // handleGroupTrack handles 'u': fuzzy search library tracks to group with currently playing track.
 func (a *App) handleGroupTrack() {
 	if a.currentSong.File == "" {
@@ -291,19 +309,26 @@ func (a *App) openSimilarTracksPicker() {
 		songByFile[s.File] = s
 	}
 
-	buildSongs := func() []mpdclient.Song {
-		items := make([]mpdclient.Song, len(similar))
+	type similarItem struct {
+		song   mpdclient.Song
+		rating int
+	}
+
+	buildItems := func() []similarItem {
+		items := make([]similarItem, len(similar))
 		for i, t := range similar {
-			if s, ok := songByFile[t.RealPath]; ok {
-				items[i] = s
+			var s mpdclient.Song
+			if found, ok := songByFile[t.RealPath]; ok {
+				s = found
 			} else {
-				items[i] = mpdclient.Song{File: t.RealPath}
+				s = mpdclient.Song{File: t.RealPath}
 			}
+			items[i] = similarItem{song: s, rating: t.Rating}
 		}
 		return items
 	}
 
-	similarSongs := buildSongs()
+	similarItems := buildItems()
 
 	list := tview.NewList()
 	list.ShowSecondaryText(false)
@@ -316,19 +341,20 @@ func (a *App) openSimilarTracksPicker() {
 
 	populateList := func() {
 		list.Clear()
-		for _, s := range similarSongs {
-			label := s.DisplayName()
-			if s.Album != "" {
-				label += " [" + s.Album + "]"
+		for _, it := range similarItems {
+			label := it.song.DisplayName()
+			if it.song.Album != "" {
+				label += " [" + it.song.Album + "]"
 			}
-			list.AddItem("  "+label, "", 0, nil)
+			prefix := similarTrackStarPrefix(it.rating)
+			list.AddItem(prefix+label, "", 0, nil)
 		}
 	}
 	populateList()
 
 	list.SetSelectedFunc(func(idx int, _, _ string, _ rune) {
-		if idx >= 0 && idx < len(similarSongs) {
-			picked := similarSongs[idx]
+		if idx >= 0 && idx < len(similarItems) {
+			picked := similarItems[idx].song
 			a.closeOverlay()
 			a.addAndPlay(picked)
 		}
@@ -368,8 +394,8 @@ func (a *App) openSimilarTracksPicker() {
 				return nil
 			case 'd':
 				idx := list.GetCurrentItem()
-				if idx >= 0 && idx < len(similarSongs) {
-					target := similarSongs[idx]
+				if idx >= 0 && idx < len(similarItems) {
+					target := similarItems[idx].song
 					if err := a.metaDB.UnlinkFromGroup(target.File); err != nil {
 						a.showError(err)
 						return nil
@@ -381,10 +407,10 @@ func (a *App) openSimilarTracksPicker() {
 						a.showMessage("unlinked \"" + target.DisplayName() + "\", no grouped tracks remaining")
 						return nil
 					}
-					similarSongs = buildSongs()
+					similarItems = buildItems()
 					populateList()
-					if idx >= len(similarSongs) {
-						list.SetCurrentItem(len(similarSongs) - 1)
+					if idx >= len(similarItems) {
+						list.SetCurrentItem(len(similarItems) - 1)
 					}
 					a.showMessage("unlinked \"" + target.DisplayName() + "\" from group")
 				}
@@ -394,7 +420,7 @@ func (a *App) openSimilarTracksPicker() {
 		return event
 	})
 
-	height := len(similarSongs) + 2
+	height := len(similarItems) + 2
 	if height < 5 {
 		height = 5
 	}

@@ -428,3 +428,84 @@ func TestSimilarTracksOverlayUnlink(t *testing.T) {
 		t.Fatalf("after unlinking all tracks, mode = %d, want modeNormal", a.mode)
 	}
 }
+
+func TestSimilarTracksViewStarRatings(t *testing.T) {
+	fake := &fakeMPD{
+		songs: []mpdclient.Song{
+			{File: "queen/yesterday.mp3", Artist: "Queen", Title: "Yesterday"},
+			{File: "beatles/yesterday.mp3", Artist: "Beatles", Title: "Yesterday"},
+			{File: "acoustic/yesterday.mp3", Artist: "Acoustic", Title: "Yesterday"},
+			{File: "unrated/yesterday.mp3", Artist: "Unrated", Title: "Yesterday"},
+		},
+	}
+	a := newFakeAppWithMetaDB(t, fake)
+	a.currentSong = fake.songs[0]
+
+	// Group all three with queen
+	for _, f := range []string{"beatles/yesterday.mp3", "acoustic/yesterday.mp3", "unrated/yesterday.mp3"} {
+		if err := a.metaDB.GroupTracks("queen/yesterday.mp3", f); err != nil {
+			t.Fatalf("GroupTracks: %v", err)
+		}
+	}
+
+	// Rate beatles 5 stars, acoustic 4 stars, unrated 0 stars
+	if err := a.metaDB.Rate("beatles/yesterday.mp3", 5); err != nil {
+		t.Fatalf("Rate: %v", err)
+	}
+	if err := a.metaDB.Rate("acoustic/yesterday.mp3", 4); err != nil {
+		t.Fatalf("Rate: %v", err)
+	}
+
+	// Press 'U'
+	capUKey := tcell.NewEventKey(tcell.KeyRune, 'U', tcell.ModNone)
+	a.globalInputCapture(capUKey)
+
+	list, ok := a.tv.GetFocus().(*tview.List)
+	if !ok {
+		t.Fatalf("focus = %T, want *tview.List", a.tv.GetFocus())
+	}
+	if list.GetItemCount() != 3 {
+		t.Fatalf("item count = %d, want 3", list.GetItemCount())
+	}
+
+	var text5, text4, text0 string
+	for i := 0; i < 3; i++ {
+		text, _ := list.GetItemText(i)
+		switch {
+		case strings.Contains(text, "Beatles"):
+			text5 = text
+		case strings.Contains(text, "Acoustic"):
+			text4 = text
+		case strings.Contains(text, "Unrated"):
+			text0 = text
+		}
+	}
+
+	// 5-star has star glyph
+	if !strings.Contains(text5, "★") {
+		t.Errorf("5-star item %q missing star glyph ★", text5)
+	}
+
+	// 4-star has star glyph
+	if !strings.Contains(text4, "★") {
+		t.Errorf("4-star item %q missing star glyph ★", text4)
+	}
+
+	// Unrated has no star
+	if strings.Contains(text0, "★") {
+		t.Errorf("unrated item %q should not have star glyph", text0)
+	}
+
+	// 5-star and 4-star should have different color tags (dimmed for 4-star)
+	tag5 := text5[strings.Index(text5, "[") : strings.Index(text5, "]")+1]
+	tag4 := text4[strings.Index(text4, "[") : strings.Index(text4, "]")+1]
+	if tag5 == tag4 {
+		t.Errorf("5-star and 4-star have identical color tags %q, want dimmed 4-star", tag5)
+	}
+
+	// All 3 rows have uniform prefix width before the title
+	// Leading padding is "  " (2 spaces)
+	if !strings.HasPrefix(text5, "  ") || !strings.HasPrefix(text4, "  ") || !strings.HasPrefix(text0, "    ") {
+		t.Errorf("rows lack uniform prefix padding: text5=%q, text4=%q, text0=%q", text5, text4, text0)
+	}
+}
